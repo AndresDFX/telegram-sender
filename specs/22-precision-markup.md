@@ -1,6 +1,11 @@
 # Precisión del markup (contexto de moneda)
 
-`Estado: propuesto · ROADMAP Fase 3.3`
+`Estado: ✅ IMPLEMENTADO · ROADMAP Fase 3.3`
+
+> Implementado en [`src/lambda/markup.py`](../src/lambda/markup.py): solo marca números con `$` en
+> formato colombiano (`$325.000`) y redondea al **mil hacia arriba** (`$325.000` +15% → `$374.000`),
+> sin tocar modelos ni specs. Tests en `tests/test_markup.py`. Esta versión se priorizó al confirmar
+> que el canal real (`@iproparts`) publica listas en COP. El texto abajo es el diseño original.
 
 ## Contexto y objetivo
 

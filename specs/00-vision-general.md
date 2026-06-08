@@ -39,27 +39,36 @@ pendiente sobre esta arquitectura.
 ## Arquitectura
 
 ```
-Telegram ──► API Gateway (HTTP) ──► Lambda receptor ──► SQS broadcast ──► Lambda worker ──► Telegram (DM)
-            POST /webhook/telegram   (handler.py)         │   ▲           (worker.py →           │
-                                     secret→dedup→ruteo   │   │ redrive    broadcaster.py)        ▼
-                                     markup→encola, 200    ▼   └────────── SQS DLQ (lotes agotados)
-                                                       (lotes de N chatIds)
+EventBridge cron ─► Lambda poller ─┐ (lee t.me/s/<canal>, HWM por message_id)
+                    (poller.py)     │
+                                    ▼
+Telegram (DM) ─► API Gateway ─► Lambda receptor ─► SQS broadcast ─► Lambda worker ─► Telegram (DM)
+ /start /stop    /webhook/...   (handler.py)          │   ▲         (worker.py →           │
+                                secret→dedup→ruteo    │   │ redrive  broadcaster.py)        ▼
+                                markup→encola, 200     ▼   └──────── SQS DLQ (lotes agotados)
+                                                  (lotes de N chatIds)
    Onboarding: /start·/stop (privado) ──► DynamoDB SubscriptoresTelegram (GSI StatusIndex)
-   Dedup:      update_id ───────────────► DynamoDB ProcessedUpdates (TTL en expiresAt)
+   Dedup / HWM: update_id · __hwm__<canal> ─► DynamoDB ProcessedUpdates (TTL en expiresAt)
 ```
+
+> **Ingesta (opción C):** el canal de precios es público y NO controlado por nosotros, así que el bot
+> no puede ser admin. En vez de recibir `channel_post` por webhook, el **poller** sondea el preview
+> público y difunde solo lo nuevo (high-water mark por `message_id`). El webhook queda para el
+> onboarding. (La ruta `channel_post` del receptor se conserva por si algún día el bot es admin.)
 
 ## Componentes
 
 | Componente | Archivo / recurso | Responsabilidad |
 |------------|-------------------|-----------------|
-| Receptor | `src/lambda/handler.py` | Valida `secret_token` (fail-closed), parsea seguro, deduplica `update_id`, rutea comandos/markup, encola en SQS y responde `200` rápido. |
+| Poller | `src/lambda/poller.py` | Sondea `t.me/s/<canal>` (EventBridge cron), detecta posts nuevos por HWM, aplica markup y encola en SQS. **Ingesta viva.** |
+| Receptor | `src/lambda/handler.py` | Valida `secret_token` (fail-closed), parsea seguro, deduplica `update_id`, rutea `/start`·`/stop`, encola en SQS y responde `200` rápido. |
 | Worker | `src/lambda/worker.py` | Consume SQS; respuesta parcial de lotes (`batchItemFailures`). |
 | Envío por lote | `src/lambda/broadcaster.py` | `procesar_lote`: envía a cada chat con delay; 403→inactivo, errores→`failed`. |
 | Cliente Telegram | `src/lambda/telegram_client.py` | `send_message` con 403, `429 retry_after` y backoff 5xx. |
 | Encolado | `src/lambda/sqs_client.py` | `encolar_lotes` (lotes de chatIds) + `PartialEnqueueError`. |
-| Acceso a datos | `src/lambda/dynamodb_client.py` | suscriptores (Query GSI, upsert, inactivar) y dedup (`marcar_/borrar_update_procesado`). |
-| Markup | `src/lambda/markup.py` | `aplicar_markup` (formatos US y europeo, `Decimal`). |
-| Infra | `infra/cloudformation/template.yaml` | DynamoDB ×2, SQS+DLQ, Lambda ×2, API Gateway, 2 roles IAM. |
+| Acceso a datos | `src/lambda/dynamodb_client.py` | suscriptores (Query GSI, upsert, inactivar), dedup (`marcar_/borrar_update_procesado`) y HWM del poller (`obtener_/guardar_hwm`). |
+| Markup | `src/lambda/markup.py` | `aplicar_markup`: solo precios con `$` en formato colombiano, redondeo al mil hacia arriba. |
+| Infra | `infra/cloudformation/template.yaml` | DynamoDB ×2, SQS+DLQ, Lambda ×3 (poller/receptor/worker), EventBridge, API Gateway, 3 roles IAM. |
 | Dev local | `docker/` | dynamodb-local + init + servidor Flask (modo inline). |
 
 ## Modelo de datos

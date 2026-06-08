@@ -12,6 +12,13 @@ Ambas fases pasaron revisión adversarial multi-lente (y un re-review de los fix
 > 📋 Los **specs detallados** de cada ítem pendiente están en [`specs/`](specs/README.md) (uno por
 > fase, con diseño, criterios de aceptación y plan de pruebas).
 
+> 🔀 **Pivote de ingesta (2026-06-08):** el canal fuente (`@iproparts`) es **público y ajeno**, así que
+> el bot no puede ser admin. La ingesta pasó de webhook `channel_post` a un **poller** que sondea
+> `t.me/s/iproparts` cada 5 min ([`src/lambda/poller.py`](src/lambda/poller.py), EventBridge). El
+> **markup** se reescribió para el formato colombiano (`$325.000` +15% → `$374.000`, redondeo al mil
+> hacia arriba), sin tocar modelos/specs. Stack `telegram-sync-dev` desplegado y poller verificado
+> (siembra HWM en message 3289). Pendiente: token de bot real para que los DMs se entreguen.
+
 ---
 
 ## 1. Estado actual

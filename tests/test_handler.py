@@ -39,14 +39,14 @@ class HandlerTests(unittest.TestCase):
             handler, "encolar_lotes", return_value=1
         ) as encolar:
             resp = handler.lambda_handler(
-                _event({"channel_post": {"chat": {"id": -100}, "text": "Zapatos $100.00"}}), None
+                _event({"channel_post": {"chat": {"id": -100}, "text": "Zapatos $100.000"}}), None
             )
 
         self.assertEqual(resp["statusCode"], 200)
         self.assertEqual(json.loads(resp["body"])["status"], "queued")
         encolar.assert_called_once()
         mensaje = encolar.call_args.args[0]
-        self.assertIn("115.00", mensaje)  # markup del 15% aplicado
+        self.assertIn("$115.000", mensaje)  # markup del 15% (formato colombiano)
         self.assertEqual(encolar.call_args.args[1], ["1", "2"])
 
     def test_caption_es_procesado(self):
@@ -54,11 +54,11 @@ class HandlerTests(unittest.TestCase):
             handler, "encolar_lotes", return_value=1
         ) as encolar:
             resp = handler.lambda_handler(
-                _event({"channel_post": {"chat": {"id": -100}, "caption": "Foto $50.00"}}), None
+                _event({"channel_post": {"chat": {"id": -100}, "caption": "Foto $50.000"}}), None
             )
         self.assertEqual(resp["statusCode"], 200)
         encolar.assert_called_once()
-        self.assertIn("57.50", encolar.call_args.args[0])
+        self.assertIn("$58.000", encolar.call_args.args[0])  # 57.500 → arriba al mil
 
     def test_edited_channel_post_es_procesado(self):
         with patch.object(handler, "obtener_usuarios_activos", return_value=["1"]), patch.object(

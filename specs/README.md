@@ -8,13 +8,13 @@ uno por ítem.
 
 | Spec | Título | ROADMAP | Estado |
 |------|--------|---------|--------|
-| [00](00-vision-general.md) | Visión general del sistema | — | vigente (Fases 0-1 hechas) |
+| [00](00-vision-general.md) | Visión general del sistema | — | vigente (incluye ingesta por poller) |
 | [10](10-gestion-de-secretos.md) | Gestión de secretos (SSM / Secrets Manager) | Fase 2.1 | propuesto |
 | [11](11-observabilidad.md) | Observabilidad y alarmas | Fase 2.2 | propuesto |
 | [12](12-cicd.md) | CI/CD con GitHub Actions | Fase 2.3 | propuesto |
 | [20](20-tests-integracion.md) | Tests de integración end-to-end | Fase 3.1 | propuesto |
 | [21](21-comandos-gestion.md) | Comandos de gestión y administración | Fase 3.2 | propuesto |
-| [22](22-precision-markup.md) | Precisión del markup (contexto de moneda) | Fase 3.3 | propuesto |
+| [22](22-precision-markup.md) | Precisión del markup (contexto de moneda) | Fase 3.3 | ✅ implementado |
 
 ## Orden de avance sugerido
 

@@ -148,3 +148,24 @@ def borrar_update_procesado(update_id: str) -> None:
     """Revierte la marca de dedup (compensación si el procesamiento falla)."""
     table = _processed_table()
     table.delete_item(Key={"updateId": str(update_id)})
+
+
+# --- High-water mark del poller (último message_id difundido por canal) -------
+# Se guarda en la misma tabla de dedup pero SIN expiresAt, para que el TTL no lo
+# purgue (el TTL solo borra ítems que tienen el atributo expiresAt).
+
+_HWM_PREFIX = "__hwm__"
+
+
+def obtener_hwm(channel: str) -> int | None:
+    """Último message_id difundido del canal, o None si nunca se ha sembrado."""
+    table = _processed_table()
+    item = table.get_item(Key={"updateId": _HWM_PREFIX + channel}).get("Item")
+    if not item or "value" not in item:
+        return None
+    return int(item["value"])
+
+
+def guardar_hwm(channel: str, message_id: int) -> None:
+    table = _processed_table()
+    table.put_item(Item={"updateId": _HWM_PREFIX + channel, "value": int(message_id)})

@@ -41,6 +41,17 @@ Parameters:
       ID del canal fuente (-100...). Vacío acepta cualquier channel_post; en prod,
       fíjalo para que solo tu canal pueda disparar broadcasts (autorización de contenido).
 
+  SourceChannelUsername:
+    Type: String
+    Default: iproparts
+    Description: >
+      Username del canal PÚBLICO a sondear (sin @). El poller lee https://t.me/s/<username>.
+
+  PollerScheduleExpression:
+    Type: String
+    Default: rate(5 minutes)
+    Description: Frecuencia del poller (EventBridge), p.ej. rate(5 minutes) o rate(1 minute).
+
   DedupTtlSeconds:
     Type: Number
     Default: 86400
@@ -335,6 +346,90 @@ Resources:
       FunctionResponseTypes:
         - ReportBatchItemFailures
 
+  # --- Poller del canal público (ingesta opción C) ----------------------------
+  PollerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${EnvironmentName}-poller-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: PollerAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query # suscriptores activos (GSI)
+                Resource:
+                  - !GetAtt SubscribersTable.Arn
+                  - !Sub "${SubscribersTable.Arn}/index/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem # leer high-water mark
+                  - dynamodb:PutItem # guardar high-water mark
+                Resource:
+                  - !GetAtt ProcessedUpdatesTable.Arn
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !GetAtt BroadcastQueue.Arn
+
+  PollerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${EnvironmentName}-poller"
+      Description: Sondea el canal público (t.me/s), detecta posts nuevos, aplica markup y encola.
+      Runtime: python3.12
+      Handler: poller.lambda_handler
+      Role: !GetAtt PollerExecutionRole.Arn
+      Timeout: 60
+      MemorySize: !Ref LambdaMemorySize
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          SOURCE_CHANNEL_USERNAME: !Ref SourceChannelUsername
+          SUBSCRIBERS_TABLE: !Ref SubscribersTable
+          SUBSCRIBERS_STATUS_INDEX: StatusIndex
+          PROCESSED_UPDATES_TABLE: !Ref ProcessedUpdatesTable
+          BROADCAST_QUEUE_URL: !Ref BroadcastQueue
+          BROADCAST_BATCH_SIZE: !Ref BroadcastBatchSize
+          MARKUP_PERCENTAGE: !Ref MarkupPercentage
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  PollerSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentName}-poller-schedule"
+      Description: Dispara el poller del canal público periódicamente.
+      ScheduleExpression: !Ref PollerScheduleExpression
+      State: ENABLED
+      Targets:
+        - Id: PollerTarget
+          Arn: !GetAtt PollerFunction.Arn
+
+  PollerSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PollerFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt PollerSchedule.Arn
+
   # --- API Gateway HTTP -------------------------------------------------------
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
@@ -393,6 +488,10 @@ Outputs:
   WorkerFunctionName:
     Description: Nombre de la función Lambda worker.
     Value: !Ref WorkerFunction
+
+  PollerFunctionName:
+    Description: Nombre de la función Lambda poller (canal público).
+    Value: !Ref PollerFunction
 
   BroadcastQueueUrl:
     Description: URL de la cola SQS de broadcast.

@@ -1,28 +1,41 @@
 # Telegram → Telegram Sync
 
-Sincronización serverless 1:1: cuando el canal fuente publica una lista, AWS la intercepta vía webhook, aplica markup del 15% y la distribuye por mensaje directo a cada suscriptor.
+Sincronización serverless 1:1: cuando el canal fuente publica una lista, AWS la detecta, aplica markup del 15% a los precios y la distribuye por mensaje directo a cada suscriptor.
 
 ## Arquitectura (desacoplada por SQS)
 
+La **ingesta** del canal fuente es por **sondeo del preview público** (`https://t.me/s/<canal>`): el
+canal de precios no es nuestro y el bot no puede ser admin, así que un Lambda en cron (EventBridge) lo
+lee, detecta publicaciones nuevas (por `message_id`, con high-water mark) y las encola. El **onboarding**
+(`/start`·`/stop`) sigue por el webhook del bot.
+
 ```
-Telegram ──► API Gateway ──► Lambda receptor ──► SQS broadcast ──► Lambda worker ──► Telegram (DM)
-                             (parsea, markup,        │              (envío con 403/429,
-                              consulta, encola)      ▼               concurrencia=1)
-                             responde 200 rápido   SQS DLQ (lotes que agotan reintentos)
+EventBridge (cron) ──► Lambda poller ──┐
+   (lee t.me/s/canal, HWM)             │
+                                       ▼
+Telegram (DM al bot) ─► API Gateway ─► Lambda receptor ──► SQS broadcast ─► Lambda worker ─► Telegram (DM)
+   /start /stop                        (secret, dedup,         │           (envío 403/429,
+                                        markup, encola)        ▼            concurrencia≤1)
+                                       responde 200 rápido   SQS DLQ (lotes que agotan reintentos)
 ```
 
-El receptor responde `200` de inmediato (Telegram no reenvía) y el worker hace el broadcast desde la
-cola: sobrevive a fallos parciales (reintentos + DLQ) y escala más allá del timeout de Lambda. La
-concurrencia reservada del worker (=1) más el delay por envío mantienen el ritmo global bajo 30 msg/s.
+El worker hace el broadcast desde la cola: sobrevive a fallos parciales (reintentos + DLQ) y escala más
+allá del timeout de Lambda. La concurrencia reservada del worker (=1, donde el límite de cuenta lo
+permita) más el delay por envío mantienen el ritmo global bajo 30 msg/s.
+
+> **Markup:** solo marca números con símbolo de moneda (`$`) en formato colombiano (`$325.000`), y
+> redondea el resultado al **mil hacia arriba** (`$325.000` +15% → `$374.000`). No toca modelos ni
+> specs (`A06 4-64GB`). Ver [`src/lambda/markup.py`](src/lambda/markup.py) y `specs/22`.
 
 ## Estructura
 
 ```
 TelegramSender/
 ├── docker/                 # Entorno local (DynamoDB + webhook dev en modo inline)
-├── infra/cloudformation/   # Stack AWS (API Gateway, Lambdas, SQS+DLQ, DynamoDB)
-├── scripts/                # Empaquetado de Lambda
-└── src/lambda/             # handler (receptor), worker, broadcaster, clientes
+├── infra/cloudformation/   # Stack AWS (API Gateway, Lambdas, SQS+DLQ, DynamoDB, EventBridge)
+├── scripts/                # Empaquetado de Lambda (build en Linux) + smoke test
+├── specs/                  # Especificaciones por fase
+└── src/lambda/             # poller, handler (receptor), worker, broadcaster, clientes
 ```
 
 ## Requisitos
@@ -146,12 +159,14 @@ confirmación y mantiene su `status` en DynamoDB.
 | Recurso          | Descripción                                              |
 |------------------|----------------------------------------------------------|
 | DynamoDB         | Tabla de suscriptores con GSI `StatusIndex`              |
-| DynamoDB (dedup) | `ProcessedUpdates` con TTL: idempotencia por `update_id` |
-| Lambda receptor  | Valida secret, deduplica, rutea comandos/markup, encola  |
+| DynamoDB (dedup) | `ProcessedUpdates` (TTL): dedup `update_id` + high-water mark del poller |
+| Lambda poller    | Sondea `t.me/s/<canal>`, detecta posts nuevos (HWM), markup, encola |
+| EventBridge      | Regla cron que dispara el poller (default cada 5 min)    |
+| Lambda receptor  | Valida secret, deduplica, rutea `/start`·`/stop`, encola |
 | SQS + DLQ        | Cola de broadcast con reintentos; DLQ para lotes fallidos|
-| Lambda worker    | Consume la cola y envía por DM (403/429), concurrencia 1 |
-| API Gateway      | HTTP API `POST /webhook/telegram`                        |
-| IAM Roles        | Receptor y worker, permisos mínimos por función          |
+| Lambda worker    | Consume la cola y envía por DM (403/429), concurrencia ≤1 |
+| API Gateway      | HTTP API `POST /webhook/telegram` (onboarding)          |
+| IAM Roles        | Poller, receptor y worker, permisos mínimos por función  |
 
 ## Variables de entorno
 
@@ -159,8 +174,9 @@ confirmación y mantiene su `status` en DynamoDB.
 |----------------------------|----------|----------------------------------------------|
 | `TELEGRAM_BOT_TOKEN`       | ambos    | Token del bot (worker envía; receptor responde /start) |
 | `WEBHOOK_SECRET_TOKEN`     | receptor | Secreto del header de Telegram. Vacío ⇒ sin validar (dev) |
-| `SOURCE_CHANNEL_ID`        | receptor | Filtra mensajes del canal fuente             |
-| `MARKUP_PERCENTAGE`        | receptor | Markup sobre precios (default 15)            |
+| `SOURCE_CHANNEL_USERNAME`  | poller   | Username del canal público a sondear (sin @, default `iproparts`) |
+| `SOURCE_CHANNEL_ID`        | receptor | Filtra `channel_post` si el bot fuera admin del canal |
+| `MARKUP_PERCENTAGE`        | poller/receptor | Markup sobre precios (default 15)     |
 | `SEND_DELAY_SECONDS`       | worker   | Delay entre envíos (default 0.05)            |
 | `BROADCAST_QUEUE_URL`      | receptor | URL de la cola SQS. Vacío ⇒ envío inline (dev)|
 | `BROADCAST_BATCH_SIZE`     | receptor | Chat IDs por mensaje SQS (default 100)       |
