@@ -1,0 +1,407 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Telegram → Telegram sync: API Gateway webhook, Lambda receptor, cola SQS + DLQ,
+  Lambda worker (broadcaster) y DynamoDB de suscriptores.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: telegram-sync
+    Description: Prefijo para nombrar recursos.
+
+  EnvironmentName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Entorno de despliegue.
+
+  TelegramBotToken:
+    Type: String
+    NoEcho: true
+    Description: Token del bot de Telegram (formato 123456:ABC...).
+
+  WebhookSecretToken:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    MaxLength: 256
+    AllowedPattern: "^[A-Za-z0-9_-]+$"
+    ConstraintDescription: 16-256 caracteres [A-Za-z0-9_-]. Es obligatorio (fail-closed).
+    Description: >
+      Secreto compartido con setWebhook. Telegram lo reenvía en el header
+      X-Telegram-Bot-Api-Secret-Token y el receptor lo valida en tiempo constante.
+      Obligatorio: el endpoint está expuesto y sin él se rechaza toda petición.
+
+  SourceChannelId:
+    Type: String
+    Default: ""
+    Description: >
+      ID del canal fuente (-100...). Vacío acepta cualquier channel_post; en prod,
+      fíjalo para que solo tu canal pueda disparar broadcasts (autorización de contenido).
+
+  DedupTtlSeconds:
+    Type: Number
+    Default: 86400
+    MinValue: 300
+    MaxValue: 604800
+    Description: Horizonte de deduplicación de update_id (TTL del registro). Default 24h.
+
+  MarkupPercentage:
+    Type: Number
+    Default: 15
+    MinValue: 0
+    MaxValue: 100
+    Description: Porcentaje de markup aplicado a precios detectados.
+
+  SendDelaySeconds:
+    Type: Number
+    Default: 0.05
+    MinValue: 0.01
+    MaxValue: 1
+    Description: Retraso entre envíos para respetar límites de Telegram.
+
+  BroadcastBatchSize:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    MaxValue: 500
+    Description: Chat IDs por mensaje SQS (lote que procesa cada invocación del worker).
+
+  ReceiverTimeoutSeconds:
+    Type: Number
+    Default: 30
+    MinValue: 10
+    MaxValue: 60
+    Description: Timeout del receptor (solo parsea, consulta y encola; responde rápido).
+
+  WorkerTimeoutSeconds:
+    Type: Number
+    Default: 120
+    MinValue: 30
+    MaxValue: 300
+    Description: Timeout del worker por lote. La VisibilityTimeout de la cola debe superarlo.
+
+  WorkerReservedConcurrency:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 100
+    Description: >
+      Concurrencia reservada del worker (=1 serializa los envíos y respeta los 30 msg/s
+      de Telegram). Usa 0 para NO reservar en cuentas con límite de concurrencia bajo
+      (p.ej. cuentas nuevas con límite 10, donde reservar deja <10 sin reservar y AWS lo
+      rechaza); en ese caso controla el ritmo con SEND_DELAY_SECONDS y/o eleva el límite.
+
+  LambdaMemorySize:
+    Type: Number
+    Default: 256
+    AllowedValues:
+      - 128
+      - 256
+      - 512
+    Description: Memoria asignada a las Lambdas.
+
+  LambdaCodeS3Bucket:
+    Type: String
+    Description: Bucket S3 con el artefacto zip de la Lambda.
+
+  LambdaCodeS3Key:
+    Type: String
+    Default: lambda/telegram-broadcaster.zip
+    Description: Key del zip de la Lambda en S3.
+
+Conditions:
+  # Solo aplica concurrencia reservada al worker si es > 0 (ver WorkerReservedConcurrency).
+  HasWorkerReservedConcurrency: !Not [!Equals [!Ref WorkerReservedConcurrency, 0]]
+
+Resources:
+  SubscribersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${EnvironmentName}-subscribers"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: chatId
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: chatId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Dedup de update_id: PutItem condicional + TTL para no crecer indefinidamente.
+  ProcessedUpdatesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${EnvironmentName}-processed-updates"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: updateId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: updateId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # --- Cola de broadcast + DLQ -------------------------------------------------
+  BroadcastDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-${EnvironmentName}-broadcast-dlq"
+      MessageRetentionPeriod: 1209600 # 14 días
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  BroadcastQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-${EnvironmentName}-broadcast"
+      # VisibilityTimeout > timeout del worker para no reentregar lotes en vuelo.
+      VisibilityTimeout: !Ref WorkerTimeoutSeconds
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt BroadcastDLQ.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # --- IAM: receptor (parsea + consulta + encola) ------------------------------
+  ReceiverExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${EnvironmentName}-receiver-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ReceiverAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem # registrar_suscriptor (/start, /stop)
+                Resource:
+                  - !GetAtt SubscribersTable.Arn
+                  - !Sub "${SubscribersTable.Arn}/index/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem # dedup de update_id
+                  - dynamodb:DeleteItem # compensación del dedup
+                Resource:
+                  - !GetAtt ProcessedUpdatesTable.Arn
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !GetAtt BroadcastQueue.Arn
+
+  # --- IAM: worker (envía + marca inactivos + consume cola) --------------------
+  WorkerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${EnvironmentName}-worker-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: WorkerAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt SubscribersTable.Arn
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !GetAtt BroadcastQueue.Arn
+
+  # --- Lambda receptor (webhook) ----------------------------------------------
+  ReceiverFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${EnvironmentName}-receiver"
+      Description: Parsea webhooks de Telegram, aplica markup y encola lotes en SQS.
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !GetAtt ReceiverExecutionRole.Arn
+      Timeout: !Ref ReceiverTimeoutSeconds
+      MemorySize: !Ref LambdaMemorySize
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          SUBSCRIBERS_TABLE: !Ref SubscribersTable
+          SUBSCRIBERS_STATUS_INDEX: StatusIndex
+          PROCESSED_UPDATES_TABLE: !Ref ProcessedUpdatesTable
+          DEDUP_TTL_SECONDS: !Ref DedupTtlSeconds
+          SOURCE_CHANNEL_ID: !Ref SourceChannelId
+          MARKUP_PERCENTAGE: !Ref MarkupPercentage
+          BROADCAST_QUEUE_URL: !Ref BroadcastQueue
+          BROADCAST_BATCH_SIZE: !Ref BroadcastBatchSize
+          # Token para responder a /start y /stop (el broadcast lo hace el worker).
+          TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
+          WEBHOOK_SECRET_TOKEN: !Ref WebhookSecretToken
+          # Nota: ALLOW_INSECURE_WEBHOOK NO se define aquí → el endpoint es fail-closed.
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # --- Lambda worker (broadcaster) --------------------------------------------
+  # ReservedConcurrentExecutions: 1 → un solo lote a la vez. Junto con
+  # SEND_DELAY_SECONDS mantiene el ritmo global bajo el límite de 30 msg/s.
+  WorkerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${EnvironmentName}-worker"
+      Description: Consume lotes de SQS y distribuye por DM con manejo de 403/429.
+      Runtime: python3.12
+      Handler: worker.lambda_handler
+      Role: !GetAtt WorkerExecutionRole.Arn
+      Timeout: !Ref WorkerTimeoutSeconds
+      MemorySize: !Ref LambdaMemorySize
+      ReservedConcurrentExecutions:
+        !If [HasWorkerReservedConcurrency, !Ref WorkerReservedConcurrency, !Ref "AWS::NoValue"]
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          # El worker solo envía y marca inactivos (update_item en la tabla base);
+          # no consulta el GSI, por eso no necesita SUBSCRIBERS_STATUS_INDEX.
+          SUBSCRIBERS_TABLE: !Ref SubscribersTable
+          TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
+          SEND_DELAY_SECONDS: !Ref SendDelaySeconds
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  WorkerEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt BroadcastQueue.Arn
+      FunctionName: !Ref WorkerFunction
+      BatchSize: 1
+      FunctionResponseTypes:
+        - ReportBatchItemFailures
+
+  # --- API Gateway HTTP -------------------------------------------------------
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${ProjectName}-${EnvironmentName}-webhook-api"
+      ProtocolType: HTTP
+      Description: Webhook público para actualizaciones de Telegram.
+
+  WebhookIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ReceiverFunction.Arn}/invocations"
+      PayloadFormatVersion: "2.0"
+
+  WebhookRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /webhook/telegram"
+      Target: !Sub "integrations/${WebhookIntegration}"
+
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: !Ref EnvironmentName
+      AutoDeploy: true
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ReceiverFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+Outputs:
+  WebhookUrl:
+    Description: URL para registrar en setWebhook de Telegram.
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}/webhook/telegram"
+
+  SubscribersTableName:
+    Description: Tabla DynamoDB de suscriptores.
+    Value: !Ref SubscribersTable
+
+  ProcessedUpdatesTableName:
+    Description: Tabla DynamoDB de deduplicación de updates.
+    Value: !Ref ProcessedUpdatesTable
+
+  ReceiverFunctionName:
+    Description: Nombre de la función Lambda receptora.
+    Value: !Ref ReceiverFunction
+
+  WorkerFunctionName:
+    Description: Nombre de la función Lambda worker.
+    Value: !Ref WorkerFunction
+
+  BroadcastQueueUrl:
+    Description: URL de la cola SQS de broadcast.
+    Value: !Ref BroadcastQueue
+
+  BroadcastDLQUrl:
+    Description: URL de la dead-letter queue.
+    Value: !Ref BroadcastDLQ
+
+  HttpApiId:
+    Description: ID del HTTP API Gateway.
+    Value: !Ref HttpApi

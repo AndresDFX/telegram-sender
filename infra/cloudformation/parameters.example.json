@@ -1,0 +1,13 @@
+ProjectName=telegram-sync
+EnvironmentName=dev
+WebhookSecretToken=REEMPLAZAR_CON_UN_SECRETO_ALEATORIO
+SourceChannelId=
+MarkupPercentage=15
+SendDelaySeconds=0.05
+DedupTtlSeconds=86400
+BroadcastBatchSize=100
+ReceiverTimeoutSeconds=30
+WorkerTimeoutSeconds=120
+LambdaMemorySize=256
+LambdaCodeS3Bucket=REEMPLAZAR_CON_TU_BUCKET
+LambdaCodeS3Key=lambda/telegram-broadcaster.zip

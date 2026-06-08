@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# AWS / build
+.aws-sam/
+packaged/
+.build/
+*.zip
+.cfn-output.json
+
+# OS
+.DS_Store
+Thumbs.db

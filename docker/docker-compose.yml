@@ -1,0 +1,80 @@
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:2.5.2
+    container_name: telegram-sync-dynamodb
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/shell/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  dynamodb-init:
+    image: amazon/aws-cli:2.17.49
+    container_name: telegram-sync-dynamodb-init
+    depends_on:
+      dynamodb-local:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_DEFAULT_REGION: us-east-1
+      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      SUBSCRIBERS_TABLE: SubscriptoresTelegram
+      PROCESSED_UPDATES_TABLE: ProcessedUpdates
+    volumes:
+      - ./init-dynamodb.sh:/init-dynamodb.sh:ro
+    entrypoint: ["/bin/sh", "/init-dynamodb.sh"]
+    restart: "no"
+
+  webhook-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    container_name: telegram-sync-webhook
+    depends_on:
+      dynamodb-init:
+        condition: service_completed_successfully
+    environment:
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      AWS_DEFAULT_REGION: us-east-1
+      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      SUBSCRIBERS_TABLE: SubscriptoresTelegram
+      SUBSCRIBERS_STATUS_INDEX: StatusIndex
+      PROCESSED_UPDATES_TABLE: ProcessedUpdates
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-replace-me}
+      SOURCE_CHANNEL_ID: ${SOURCE_CHANNEL_ID:-}
+      MARKUP_PERCENTAGE: ${MARKUP_PERCENTAGE:-15}
+      SEND_DELAY_SECONDS: ${SEND_DELAY_SECONDS:-0.05}
+      WEBHOOK_SECRET_TOKEN: ${WEBHOOK_SECRET_TOKEN:-}
+      # Solo dev: permite el webhook sin secreto. NUNCA en un endpoint expuesto.
+      ALLOW_INSECURE_WEBHOOK: "1"
+      FLASK_DEBUG: "1"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../src/lambda:/app/lambda:ro
+
+  lambda-runtime:
+    profiles: ["lambda"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.lambda
+    container_name: telegram-sync-lambda
+    environment:
+      SUBSCRIBERS_TABLE: SubscriptoresTelegram
+      SUBSCRIBERS_STATUS_INDEX: StatusIndex
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-replace-me}
+      SOURCE_CHANNEL_ID: ${SOURCE_CHANNEL_ID:-}
+      MARKUP_PERCENTAGE: ${MARKUP_PERCENTAGE:-15}
+      SEND_DELAY_SECONDS: ${SEND_DELAY_SECONDS:-0.05}
+    ports:
+      - "9000:8080"
+
+networks:
+  default:
+    name: telegram-sync-net
