@@ -14,7 +14,7 @@ Ambas fases pasaron revisión adversarial multi-lente (y un re-review de los fix
 
 > 🔀 **Pivote de ingesta (2026-06-08):** el canal fuente (`@iproparts`) es **público y ajeno**, así que
 > el bot no puede ser admin. La ingesta pasó de webhook `channel_post` a un **poller** que sondea
-> `t.me/s/iproparts` cada 5 min ([`src/lambda/poller.py`](src/lambda/poller.py), EventBridge). El
+> `t.me/s/iproparts` cada 5 min ([`src/lambda/entrypoints/poller.py`](src/lambda/entrypoints/poller.py), EventBridge). El
 > **markup** se reescribió para el formato colombiano (`$325.000` +15% → `$374.000`, redondeo al mil
 > hacia arriba), sin tocar modelos/specs. Stack `telegram-sync-dev` desplegado y poller verificado
 > (siembra HWM en message 3289). Pendiente: token de bot real para que los DMs se entreguen.
@@ -88,7 +88,7 @@ si afectan **escala/robustez/operación**.
 
 12. **`markup` demasiado agresivo.** `PRICE_PATTERN` captura cualquier número (cantidades, fechas,
     teléfonos) y le aplica markup. Riesgo de negocio: marcar precios donde no los hay.
-    _Archivo: [markup.py:9-11](src/lambda/markup.py#L9-L11)._
+    _Archivo: [markup.py:9-11](src/lambda/domain/markup.py#L9-L11)._
 
 ---
 
@@ -102,17 +102,17 @@ si afectan **escala/robustez/operación**.
 - [x] **0.1 Alta/baja de suscriptores.** El receptor rutea `message` privados: `/start` → `active`,
       `/stop` → `inactive` (`registrar_suscriptor`, upsert que preserva `createdAt`), con respuesta de
       confirmación **best-effort** (un fallo al responder no revierte el alta). Soporta `/cmd@bot`.
-      _Archivos: [handler.py](src/lambda/handler.py), [dynamodb_client.py](src/lambda/dynamodb_client.py)._
+      _Archivos: [handler.py](src/lambda/entrypoints/receiver.py), [dynamodb.py](src/lambda/adapters/dynamodb.py)._
 - [x] **0.2 Respuesta 200 inmediata + envío asíncrono.** Resuelto vía el desacople SQS de Fase 1: el
       receptor valida, encola y devuelve 200 al instante; el worker hace el broadcast.
 - [x] **0.3 Validar `secret_token`.** Comparación en tiempo constante (`hmac.compare_digest`) del header
       `X-Telegram-Bot-Api-Secret-Token`; **fail-closed** (sin secreto → 403, salvo `ALLOW_INSECURE_WEBHOOK`
       en dev). El secreto es **obligatorio** en la plantilla (MinLength/AllowedPattern, sin Default).
-      _Archivos: [handler.py](src/lambda/handler.py), [template.yaml](infra/cloudformation/template.yaml)._
+      _Archivos: [handler.py](src/lambda/entrypoints/receiver.py), [template.yaml](infra/cloudformation/template.yaml)._
 - [x] **0.4 Dedup de `update_id`.** `PutItem` condicional (`attribute_not_exists`) con TTL en
       `ProcessedUpdates`; **compensación acotada**: solo revierte la marca si el fallo ocurrió antes de
       cualquier efecto secundario (encolado/alta), evitando broadcasts duplicados en el reintento.
-      _Archivos: [handler.py](src/lambda/handler.py), [dynamodb_client.py](src/lambda/dynamodb_client.py)._
+      _Archivos: [handler.py](src/lambda/entrypoints/receiver.py), [dynamodb.py](src/lambda/adapters/dynamodb.py)._
 
 **Pruebas (36 añadidas, 63 en total):** `test_handler_fase0.py` (secret fail-closed + unit de
 `_secret_valido` + `compare_digest`; parseo seguro 400/None/dict/lista/número/bytes/vacío; dedup
@@ -139,13 +139,13 @@ duplicado/primera-vez/parcial/inline/compensación y no-enmascaramiento; comando
 - [x] **1.1 SQS + Lambda worker + DLQ.** Receptor encola un mensaje por lote de N chatIds; el worker
       lo consume con concurrencia reservada 1 (respeta los 30 msg/s) y reintentos; los lotes que agotan
       `maxReceiveCount` caen a la DLQ. Respuesta parcial de lotes evita reenviar a quienes sí recibieron.
-      _Archivos: [worker.py](src/lambda/worker.py), [sqs_client.py](src/lambda/sqs_client.py),
-      [broadcaster.py](src/lambda/broadcaster.py), [template.yaml](infra/cloudformation/template.yaml)._
+      _Archivos: [worker.py](src/lambda/entrypoints/worker.py), [sqs.py](src/lambda/adapters/sqs.py),
+      [deliver_batch.py](src/lambda/application/deliver_batch.py), [template.yaml](infra/cloudformation/template.yaml)._
 - [x] **1.2 Honrar `429 retry_after`.** `telegram_client` lee `parameters.retry_after` en 429 y aplica
       backoff exponencial acotado en 5xx, con tope de reintentos.
-      _Archivo: [telegram_client.py](src/lambda/telegram_client.py)._
+      _Archivo: [telegram.py](src/lambda/adapters/telegram.py)._
 - [x] **1.3 Soportar `caption` y `edited_channel_post`.** El receptor extrae `text`/`caption` y procesa
-      ambos tipos de update. _Archivo: [handler.py](src/lambda/handler.py)._
+      ambos tipos de update. _Archivo: [handler.py](src/lambda/entrypoints/receiver.py)._
 
 **Pruebas (27, todas en verde):** `tests/test_telegram_client.py` (403/429/5xx/agota reintentos),
 `test_broadcaster.py` (enviado/bloqueado→inactivo/fallido + delay), `test_sqs_client.py` (lotes +

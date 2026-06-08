@@ -26,6 +26,23 @@ uno por ítem.
 (alarma ante fallo de resolución de secreto) y habilita verificar en prod las invariantes de
 idempotencia. `20` formaliza `scripts/smoke_test.py` y se coordina con `12` (qué suite corre en CI).
 
+## Nota: migración a Clean Architecture (2026-06-08)
+
+El código se reorganizó en capas (`domain` / `application` / `adapters` / `entrypoints` + `wiring.py`).
+Los specs de diseño aún **propuestos** (10, 11, 21) se redactaron antes y citan los módulos planos
+previos; al implementarlos, mapéalos a las nuevas capas:
+
+| Antes (plano) | Ahora (capa) |
+|---------------|--------------|
+| `handler.py` | `entrypoints/receiver.py` (+ casos de uso en `application/`) |
+| `worker.py` | `entrypoints/worker.py` |
+| `poller.py` | `entrypoints/poller.py` + `application/poll_channel.py` + `adapters/tme.py` |
+| `broadcaster.py` | `application/deliver_batch.py` |
+| `telegram_client.py` | `adapters/telegram.py` |
+| `dynamodb_client.py` | `adapters/dynamodb.py` |
+| `sqs_client.py` | `adapters/sqs.py` |
+| `markup.py` | `domain/markup.py` |
+
 ## Convención de specs
 
 Cada spec sigue esta estructura: Contexto y objetivo · Alcance (in/out) · Requisitos funcionales (RF)

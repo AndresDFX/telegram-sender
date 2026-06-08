@@ -3,6 +3,7 @@ FROM public.ecr.aws/lambda/python:3.12
 COPY src/lambda/requirements.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
-COPY src/lambda/*.py ${LAMBDA_TASK_ROOT}/
+# Copia el árbol de paquetes (domain/application/adapters/entrypoints/wiring.py).
+COPY src/lambda/ ${LAMBDA_TASK_ROOT}/
 
-CMD ["handler.lambda_handler"]
+CMD ["entrypoints.receiver.lambda_handler"]

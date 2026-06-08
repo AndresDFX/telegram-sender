@@ -279,7 +279,7 @@ Resources:
       FunctionName: !Sub "${ProjectName}-${EnvironmentName}-receiver"
       Description: Parsea webhooks de Telegram, aplica markup y encola lotes en SQS.
       Runtime: python3.12
-      Handler: handler.lambda_handler
+      Handler: entrypoints.receiver.lambda_handler
       Role: !GetAtt ReceiverExecutionRole.Arn
       Timeout: !Ref ReceiverTimeoutSeconds
       MemorySize: !Ref LambdaMemorySize
@@ -315,7 +315,7 @@ Resources:
       FunctionName: !Sub "${ProjectName}-${EnvironmentName}-worker"
       Description: Consume lotes de SQS y distribuye por DM con manejo de 403/429.
       Runtime: python3.12
-      Handler: worker.lambda_handler
+      Handler: entrypoints.worker.lambda_handler
       Role: !GetAtt WorkerExecutionRole.Arn
       Timeout: !Ref WorkerTimeoutSeconds
       MemorySize: !Ref LambdaMemorySize
@@ -389,7 +389,7 @@ Resources:
       FunctionName: !Sub "${ProjectName}-${EnvironmentName}-poller"
       Description: Sondea el canal público (t.me/s), detecta posts nuevos, aplica markup y encola.
       Runtime: python3.12
-      Handler: poller.lambda_handler
+      Handler: entrypoints.poller.lambda_handler
       Role: !GetAtt PollerExecutionRole.Arn
       Timeout: 60
       MemorySize: !Ref LambdaMemorySize

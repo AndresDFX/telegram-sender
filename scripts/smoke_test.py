@@ -38,9 +38,9 @@ def _get(path):
 
 print("1) health            :", _get("/health"))
 
-from markup import aplicar_markup  # noqa: E402
+from domain.markup import aplicar_markup  # noqa: E402
 
-print("2) markup (demo live) :", aplicar_markup("Producto A $100.00 y B 1.250,50"))
+print("2) markup (demo live) :", aplicar_markup("A06 4-64GB $325.000 y B $1.150.000"))
 
 print("3) /start alta 7777   :", _post(
     {"update_id": 1001, "message": {"chat": {"id": 7777, "type": "private"}, "text": "/start"}}

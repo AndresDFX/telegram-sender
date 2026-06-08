@@ -1,4 +1,4 @@
-"""Servidor local que emula API Gateway invocando handler.lambda_handler."""
+"""Servidor local que emula API Gateway invocando el entrypoint del receptor."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sys
 from flask import Flask, request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lambda"))
-from handler import lambda_handler
+from entrypoints.receiver import lambda_handler
 
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)

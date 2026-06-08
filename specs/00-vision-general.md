@@ -56,20 +56,24 @@ Telegram (DM) ─► API Gateway ─► Lambda receptor ─► SQS broadcast ─
 > público y difunde solo lo nuevo (high-water mark por `message_id`). El webhook queda para el
 > onboarding. (La ruta `channel_post` del receptor se conserva por si algún día el bot es admin.)
 
-## Componentes
+## Componentes (Clean Architecture)
 
-| Componente | Archivo / recurso | Responsabilidad |
-|------------|-------------------|-----------------|
-| Poller | `src/lambda/poller.py` | Sondea `t.me/s/<canal>` (EventBridge cron), detecta posts nuevos por HWM, aplica markup y encola en SQS. **Ingesta viva.** |
-| Receptor | `src/lambda/handler.py` | Valida `secret_token` (fail-closed), parsea seguro, deduplica `update_id`, rutea `/start`·`/stop`, encola en SQS y responde `200` rápido. |
-| Worker | `src/lambda/worker.py` | Consume SQS; respuesta parcial de lotes (`batchItemFailures`). |
-| Envío por lote | `src/lambda/broadcaster.py` | `procesar_lote`: envía a cada chat con delay; 403→inactivo, errores→`failed`. |
-| Cliente Telegram | `src/lambda/telegram_client.py` | `send_message` con 403, `429 retry_after` y backoff 5xx. |
-| Encolado | `src/lambda/sqs_client.py` | `encolar_lotes` (lotes de chatIds) + `PartialEnqueueError`. |
-| Acceso a datos | `src/lambda/dynamodb_client.py` | suscriptores (Query GSI, upsert, inactivar), dedup (`marcar_/borrar_update_procesado`) y HWM del poller (`obtener_/guardar_hwm`). |
-| Markup | `src/lambda/markup.py` | `aplicar_markup`: solo precios con `$` en formato colombiano, redondeo al mil hacia arriba. |
-| Infra | `infra/cloudformation/template.yaml` | DynamoDB ×2, SQS+DLQ, Lambda ×3 (poller/receptor/worker), EventBridge, API Gateway, 3 roles IAM. |
-| Dev local | `docker/` | dynamodb-local + init + servidor Flask (modo inline). |
+Dependencia hacia adentro: `entrypoints` → `application` (casos de uso + puertos) → `domain`;
+`adapters` implementa los puertos; `wiring.py` (composition root) cablea todo.
+
+| Capa | Archivo | Responsabilidad |
+|------|---------|-----------------|
+| domain | `domain/markup.py`, `domain/models.py` | Reglas puras: markup (COP, redondeo al mil ↑) y entidades (`Post`, `SendResult`, `BroadcastStats`). Sin I/O. |
+| application | `application/ports.py` | Puertos: `SubscriberRepository`, `DedupStore`, `HighWaterMarkStore`, `BroadcastQueue`, `MessageSender`, `ChannelReader` (+ `PartialEnqueueError`). |
+| application | `application/{broadcasting,deliver_batch,onboarding,poll_channel}.py` | Casos de uso: difundir lista, entregar lote, alta/baja, sondear canal. |
+| adapters | `adapters/dynamodb.py` | `DynamoDb{SubscriberRepository,DedupStore,HighWaterMarkStore}`. |
+| adapters | `adapters/sqs.py` | `SqsBroadcastQueue` + `InlineBroadcastQueue` (dev). |
+| adapters | `adapters/telegram.py` | `TelegramSender` (403/429/5xx). |
+| adapters | `adapters/tme.py` | `TmePreviewChannelReader` (scrape `t.me/s`). |
+| adapters | `adapters/config.py` | Entorno + validación `secret_token` (fail-closed). |
+| entrypoints | `entrypoints/{receiver,poller,worker}.py` | Handlers Lambda finos. |
+| wiring | `wiring.py` | Composition root (construye los casos de uso). |
+| infra | `infra/cloudformation/template.yaml` | DynamoDB ×2, SQS+DLQ, Lambda ×3, EventBridge, API Gateway, 3 roles IAM. |
 
 ## Modelo de datos
 

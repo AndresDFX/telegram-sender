@@ -25,9 +25,14 @@ permita) más el delay por envío mantienen el ritmo global bajo 30 msg/s.
 
 > **Markup:** solo marca números con símbolo de moneda (`$`) en formato colombiano (`$325.000`), y
 > redondea el resultado al **mil hacia arriba** (`$325.000` +15% → `$374.000`). No toca modelos ni
-> specs (`A06 4-64GB`). Ver [`src/lambda/markup.py`](src/lambda/markup.py) y `specs/22`.
+> specs (`A06 4-64GB`). Ver [`domain/markup.py`](src/lambda/domain/markup.py) y `specs/22`.
 
-## Estructura
+## Estructura (Clean Architecture)
+
+La dependencia apunta hacia adentro: `domain` no conoce nada externo; `application`
+depende de `domain` y de **puertos** (interfaces); `adapters` implementa esos puertos
+con infraestructura concreta; `entrypoints` son los handlers Lambda finos; `wiring.py`
+es el composition root que lo cablea todo.
 
 ```
 TelegramSender/
@@ -35,7 +40,12 @@ TelegramSender/
 ├── infra/cloudformation/   # Stack AWS (API Gateway, Lambdas, SQS+DLQ, DynamoDB, EventBridge)
 ├── scripts/                # Empaquetado de Lambda (build en Linux) + smoke test
 ├── specs/                  # Especificaciones por fase
-└── src/lambda/             # poller, handler (receptor), worker, broadcaster, clientes
+└── src/lambda/             # Clean Architecture:
+    ├── domain/             #   entidades + reglas puras (markup, models) — sin I/O
+    ├── application/        #   casos de uso + ports (broadcasting, deliver_batch, onboarding, poll_channel)
+    ├── adapters/           #   infraestructura: dynamodb, sqs, telegram, tme, config
+    ├── entrypoints/        #   handlers Lambda (receiver, poller, worker)
+    └── wiring.py           #   composition root
 ```
 
 ## Requisitos
