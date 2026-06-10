@@ -454,6 +454,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem # leer config (canal/markup/footer/imagen)
+                  - dynamodb:PutItem # escribir caché de contactos (userbot)
                 Resource:
                   - !GetAtt ConfigTable.Arn
               - Effect: Allow
