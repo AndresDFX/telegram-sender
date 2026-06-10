@@ -44,9 +44,26 @@ function closeMsg(code) {
   return m[code] || `código ${code}`
 }
 
+let persistContactsFn = null // saveContacts del arranque actual
+let contactsSaveTimer = null
+
 function recordContact(c) {
   if (!c || !c.id) return
   contacts[c.id] = c.name || c.notify || c.verifiedName || contacts[c.id] || ''
+  scheduleSaveContacts()
+}
+
+// Guarda los contactos en DynamoDB con debounce (los eventos llegan en ráfagas).
+function scheduleSaveContacts() {
+  if (contactsSaveTimer || !persistContactsFn) return
+  contactsSaveTimer = setTimeout(async () => {
+    contactsSaveTimer = null
+    try {
+      await persistContactsFn({ ...contacts })
+    } catch (e) {
+      log.error({ err: String(e) }, 'persistir contactos falló')
+    }
+  }, 4000)
 }
 
 // (Re)arranca el socket de forma SERIALIZADA: si ya hay un arranque en curso, este se
@@ -95,7 +112,16 @@ async function doStart() {
   }
 
   try {
-    const { state, saveCreds } = await useDynamoAuthState(TABLE, SESSION_ID)
+    const { state, saveCreds, loadContacts, saveContacts } = await useDynamoAuthState(TABLE, SESSION_ID)
+    persistContactsFn = saveContacts
+    // Carga los contactos persistidos (solo si el mapa está vacío: en reconexiones ya están en memoria).
+    if (Object.keys(contacts).length === 0) {
+      try {
+        Object.assign(contacts, await loadContacts())
+      } catch (e) {
+        log.error({ err: String(e) }, 'cargar contactos falló')
+      }
+    }
     const { version } = await fetchLatestBaileysVersion()
     if (gen !== myGen) return // otro arranque ganó mientras esperábamos
     const s = makeWASocket({
@@ -105,6 +131,9 @@ async function doStart() {
       printQRInTerminal: false,
       browser: Browsers.macOS('Desktop'),
       markOnlineOnConnect: false,
+      // Re-sincroniza el historial en cada conexión para poblar los contactos (la
+      // reconexión simple no los reenvía). Una vez persistidos, se cargan al instante.
+      syncFullHistory: process.env.SYNC_FULL_HISTORY !== 'false',
     })
     sock = s
     lastError = null

@@ -44,8 +44,15 @@ export async function useDynamoAuthState(table, sessionId, region) {
 
   const creds = (await read('creds')) || initAuthCreds()
 
+  // Contactos persistidos (jid -> nombre): sobreviven reinicios/spin-down y migración de
+  // host. Se guardan bajo el mismo prefijo de sesión, así clearAll() también los borra.
+  const loadContacts = async () => (await read('__contacts__')) || {}
+  const saveContacts = async (map) => write('__contacts__', map)
+
   return {
     clearAll,
+    loadContacts,
+    saveContacts,
     state: {
       creds,
       keys: {
