@@ -20,6 +20,9 @@ let me = null
 let pairNumber = null // número para vincular por código (en vez de QR)
 let pairingCode = null // código de 8 dígitos generado
 let lastClose = null // último statusCode de cierre (diagnóstico)
+let starting = false // lock: evita arrancar sockets en paralelo
+let reconnectTimer = null // única reconexión pendiente
+let gen = 0 // generación del socket activo (ignora eventos de sockets viejos)
 const contacts = {} // jid -> nombre
 
 const log = pino({ level: 'info' })
@@ -29,63 +32,102 @@ function recordContact(c) {
   contacts[c.id] = c.name || c.notify || c.verifiedName || contacts[c.id] || ''
 }
 
+function scheduleReconnect() {
+  if (reconnectTimer) return
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    startSock().catch((e) => log.error({ err: String(e) }, 'reconexión falló'))
+  }, 3000)
+}
+
 async function startSock() {
-  const { state, saveCreds } = await useDynamoAuthState(TABLE, SESSION_ID)
-  const { version } = await fetchLatestBaileysVersion()
-  sock = makeWASocket({
-    version,
-    auth: state,
-    logger: pino({ level: 'silent' }),
-    printQRInTerminal: false,
-    browser: Browsers.macOS('Desktop'),
-    markOnlineOnConnect: false,
-  })
-
-  sock.ev.on('creds.update', saveCreds)
-
-  // Vinculación por código (8 dígitos): alternativa al QR, más fiable desde IPs de
-  // datacenter. Se pide tras crear el socket si hay número y la sesión no está registrada.
-  if (pairNumber && !sock.authState.creds.registered) {
-    setTimeout(async () => {
-      try {
-        pairingCode = await sock.requestPairingCode(pairNumber)
-        log.info({ pairingCode }, 'Código de emparejamiento generado')
-      } catch (e) {
-        log.error({ err: String(e) }, 'requestPairingCode falló')
-      }
-    }, 3000)
+  if (starting) return // un solo arranque a la vez (evita sockets en paralelo)
+  starting = true
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
   }
-  sock.ev.on('contacts.upsert', (cs) => cs.forEach(recordContact))
-  sock.ev.on('contacts.update', (cs) => cs.forEach(recordContact))
-  sock.ev.on('messaging-history.set', ({ contacts: cs }) => (cs || []).forEach(recordContact))
+  // Teardown del socket anterior: quitamos sus listeners ANTES de cerrarlo para que su
+  // 'close' no dispare otra reconexión (la causa de la tormenta de sockets/códigos).
+  if (sock) {
+    try {
+      sock.ev.removeAllListeners()
+      sock.end(undefined)
+    } catch (e) {}
+    sock = null
+  }
+  const myGen = ++gen
+  try {
+    const { state, saveCreds } = await useDynamoAuthState(TABLE, SESSION_ID)
+    const { version } = await fetchLatestBaileysVersion()
+    const s = makeWASocket({
+      version,
+      auth: state,
+      logger: pino({ level: 'silent' }),
+      printQRInTerminal: false,
+      browser: Browsers.macOS('Desktop'),
+      markOnlineOnConnect: false,
+    })
+    sock = s
 
-  sock.ev.on('connection.update', async (u) => {
-    const { connection, lastDisconnect, qr } = u
-    if (qr) {
-      currentQR = await qrcode.toDataURL(qr)
-      log.info('Nuevo QR disponible para vincular')
+    s.ev.on('creds.update', saveCreds)
+    s.ev.on('contacts.upsert', (cs) => cs.forEach(recordContact))
+    s.ev.on('contacts.update', (cs) => cs.forEach(recordContact))
+    s.ev.on('messaging-history.set', ({ contacts: cs }) => (cs || []).forEach(recordContact))
+
+    // Vinculación por código (8 dígitos), una sola vez por socket si hay número y no está registrado.
+    if (pairNumber && !s.authState.creds.registered) {
+      setTimeout(async () => {
+        if (gen !== myGen) return // socket reemplazado: no pidas código en uno viejo
+        try {
+          pairingCode = await s.requestPairingCode(pairNumber)
+          log.info({ pairingCode }, 'Código de emparejamiento generado')
+        } catch (e) {
+          log.error({ err: String(e) }, 'requestPairingCode falló')
+        }
+      }, 3000)
     }
-    if (connection === 'open') {
-      connected = true
-      currentQR = null
-      pairingCode = null
-      pairNumber = null
-      lastClose = null
-      me = sock.user
-      log.info({ me: me?.id }, 'WhatsApp conectado')
-    }
-    if (connection === 'close') {
-      connected = false
-      const code = lastDisconnect?.error?.output?.statusCode
-      lastClose = code ?? null
-      if (code === DisconnectReason.loggedOut) {
-        log.warn('Sesión cerrada (loggedOut). Reinicia para re-escanear el QR.')
-      } else {
-        log.warn({ code }, 'Conexión cerrada; reconectando...')
-        setTimeout(() => startSock().catch((e) => log.error(e)), 3000)
+
+    s.ev.on('connection.update', async (u) => {
+      if (gen !== myGen) return // ignora eventos de sockets de generaciones anteriores
+      const { connection, lastDisconnect, qr } = u
+      if (qr) {
+        currentQR = await qrcode.toDataURL(qr)
+        log.info('Nuevo QR disponible para vincular')
       }
-    }
-  })
+      if (connection === 'open') {
+        connected = true
+        currentQR = null
+        pairingCode = null
+        pairNumber = null
+        lastClose = null
+        me = s.user
+        log.info({ me: me?.id }, 'WhatsApp conectado')
+      }
+      if (connection === 'close') {
+        connected = false
+        const code = lastDisconnect?.error?.output?.statusCode
+        lastClose = code ?? null
+        const registered = !!s.authState?.creds?.registered
+        if (code === DisconnectReason.loggedOut) {
+          pairingCode = null
+          log.warn('Sesión cerrada (loggedOut).')
+        } else if (registered) {
+          log.warn({ code }, 'Sesión registrada cerrada; reconectando...')
+          scheduleReconnect()
+        } else if (pairNumber) {
+          // Vinculando por código: NO reconectar (evita invalidar el código y la tormenta).
+          log.warn({ code }, 'Cierre durante emparejamiento; esperando reintento manual.')
+        } else {
+          // Modo QR sin registrar: refrescar el QR una sola vez.
+          log.warn({ code }, 'Cierre en modo QR; renovando QR...')
+          scheduleReconnect()
+        }
+      }
+    })
+  } finally {
+    starting = false
+  }
 }
 
 const app = express()
@@ -151,11 +193,8 @@ app.post('/pair', auth, async (req, res) => {
   if (limpio.length < 8) return res.status(400).json({ error: 'numero_invalido' })
   pairNumber = limpio
   pairingCode = null
-  try {
-    if (sock) sock.end(new Error('repair'))
-  } catch (e) {}
-  await startSock()
-  for (let i = 0; i < 12 && !pairingCode; i++) await new Promise((r) => setTimeout(r, 1000))
+  await startSock() // reinicia limpio (un solo socket) y pide el código
+  for (let i = 0; i < 15 && !pairingCode; i++) await new Promise((r) => setTimeout(r, 1000))
   if (!pairingCode) return res.status(504).json({ error: 'sin_codigo', detalle: 'no se generó el código a tiempo' })
   res.json({ pairingCode, number: pairNumber })
 })
