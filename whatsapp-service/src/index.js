@@ -78,6 +78,18 @@ function auth(req, res, next) {
   next()
 }
 
+// Raíz informativa: evita el "Cannot GET /" y confirma que el servicio está vivo.
+app.get('/', (req, res) =>
+  res
+    .type('html')
+    .send(
+      '<h2>telegram-sender · servicio WhatsApp</h2>' +
+        `<p>Servicio activo ✓ · ${connected ? 'WhatsApp conectado' : 'WhatsApp NO conectado (escanea el QR)'}</p>` +
+        '<p>Endpoints: <code>/health</code> (público), <code>/status</code>, <code>/contacts</code>, <code>/send</code> (requieren token).</p>' +
+        '<p>Configura este servicio (URL + token) desde el panel admin y escanea el QR desde ahí.</p>'
+    )
+)
+
 app.get('/health', (req, res) => res.json({ ok: true }))
 
 app.get('/status', auth, (req, res) =>
