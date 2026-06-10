@@ -44,8 +44,14 @@ _CAMPOS_EDITABLES = (
     "whatsapp_service_url",
     "whatsapp_token",
     "whatsapp_excluded",
+    "telegram_lists",
+    "telegram_target",
+    "whatsapp_lists",
+    "whatsapp_target",
 )
 _LISTAS = ("strip_patterns", "excluded_ids", "whatsapp_excluded")
+_LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
+_TARGETS = ("telegram_target", "whatsapp_target")
 # Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
 _NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token")
 
@@ -118,6 +124,27 @@ def _sanea_config(cambios: dict) -> dict:
                 v = [str(x).strip() for x in v if str(x).strip()]
             else:
                 continue
+        elif k in _LISTAS_NOMBRADAS:
+            if not isinstance(v, list):
+                continue
+            limpio = []
+            for item in v:
+                if not isinstance(item, dict):
+                    continue
+                nombre = str(item.get("name", "")).strip()
+                if not nombre:
+                    continue
+                ids = [str(x).strip() for x in (item.get("ids") or []) if str(x).strip()]
+                limpio.append({"name": nombre, "ids": ids})
+            v = limpio
+        elif k in _TARGETS:
+            if not isinstance(v, dict):
+                continue
+            mode = str(v.get("mode", "all")).strip().lower()
+            if mode not in ("all", "only", "except"):
+                mode = "all"
+            listas = [str(x).strip() for x in (v.get("lists") or []) if str(x).strip()]
+            v = {"mode": mode, "lists": listas}
         elif k == "send_mode":
             v = "userbot" if str(v).strip().lower() == "userbot" else "bot"
         elif k == "whatsapp_enabled":
@@ -351,6 +378,36 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
      <button class="sec" onclick="nextPage()">▶</button>
    </div>
   </div>
+  <div class="card"><h2>Listas de distribución · Telegram</h2>
+   <div class="hint">Agrupa contactos en listas con nombre y elige a quién enviar. "+ marcados" usa los contactos marcados arriba en <b>Destinatarios</b>.</div>
+   <div id="tg_lists" style="margin-top:10px"></div>
+   <div style="display:flex;gap:8px;margin-top:10px"><input id="tg_newlist" placeholder="Nombre de nueva lista"><button class="sec" onclick="addList('telegram')">Crear lista</button></div>
+   <div style="margin-top:12px"><b>Modo de envío:</b><br>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_telegram" value="all" style="width:auto"> Todos</label>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_telegram" value="only" style="width:auto"> Solo listas activas</label>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto"><input type="radio" name="mode_telegram" value="except" style="width:auto"> Excluir listas activas</label>
+   </div>
+   <button onclick="saveLists('telegram')">Guardar listas Telegram</button>
+  </div>
+  <div class="card"><h2>Destinatarios WhatsApp</h2>
+   <div class="hint">Carga los contactos de tu WhatsApp (requiere el servicio conectado) para armar listas.</div>
+   <button class="sec" style="margin-top:10px" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button> <span id="wa_c_count" class="hint"></span>
+   <input id="wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="renderWa()" style="margin-top:10px">
+   <div style="display:flex;gap:8px;margin:10px 0"><button class="sec" onclick="waToggleAll(true)">Marcar visibles</button><button class="sec" onclick="waToggleAll(false)">Desmarcar</button></div>
+   <table><thead><tr><th></th><th>nombre / número</th></tr></thead><tbody id="wa_subs"></tbody></table>
+   <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button class="sec" onclick="waPrev()">◀</button><span id="wa_pageinfo" class="hint"></span><button class="sec" onclick="waNext()">▶</button></div>
+  </div>
+  <div class="card"><h2>Listas de distribución · WhatsApp</h2>
+   <div class="hint">"+ marcados" usa los contactos marcados arriba en <b>Destinatarios WhatsApp</b>.</div>
+   <div id="wa_lists" style="margin-top:10px"></div>
+   <div style="display:flex;gap:8px;margin-top:10px"><input id="wa_newlist" placeholder="Nombre de nueva lista"><button class="sec" onclick="addList('whatsapp')">Crear lista</button></div>
+   <div style="margin-top:12px"><b>Modo de envío:</b><br>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_whatsapp" value="all" style="width:auto"> Todos</label>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_whatsapp" value="only" style="width:auto"> Solo listas activas</label>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto"><input type="radio" name="mode_whatsapp" value="except" style="width:auto"> Excluir listas activas</label>
+   </div>
+   <button onclick="saveLists('whatsapp')">Guardar listas WhatsApp</button>
+  </div>
  </main>
 </div>
 
@@ -375,7 +432,10 @@ async function loadCfg(){ const c=await api('/api/config');
   $('strip_patterns').value=(c.strip_patterns||[]).join('\n'); $('excluded_ids').value=(c.excluded_ids||[]).join('\n');
   $('whatsapp_enabled').checked=!!c.whatsapp_enabled; $('whatsapp_service_url').value=c.whatsapp_service_url||'';
   $('whatsapp_excluded').value=(c.whatsapp_excluded||[]).join('\n');
-  $('wa_tok_status').textContent = c.whatsapp_token_set ? '· configurado ✓' : '· no configurado'; }
+  $('wa_tok_status').textContent = c.whatsapp_token_set ? '· configurado ✓' : '· no configurado';
+  LISTS.telegram=c.telegram_lists||[]; TGT.telegram=c.telegram_target||{mode:'all',lists:[]};
+  LISTS.whatsapp=c.whatsapp_lists||[]; TGT.whatsapp=c.whatsapp_target||{mode:'all',lists:[]};
+  renderLists('telegram'); renderLists('whatsapp'); }
 async function saveWhatsapp(){ const b={ whatsapp_enabled:$('whatsapp_enabled').checked, whatsapp_service_url:$('whatsapp_service_url').value,
    whatsapp_excluded:$('whatsapp_excluded').value }; const tok=$('whatsapp_token').value; if(tok) b.whatsapp_token=tok;
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
@@ -431,6 +491,54 @@ async function bulk(accion){ const ids=selectedIds(); if(!ids.length){ toast('Ma
 async function bulkFiltered(accion){ const ids=filtered().map(s=>String(s.chatId)); if(!ids.length){ toast('Sin contactos que coincidan',true); return; }
   ids.forEach(id=> accion==='excluir'?EXCLUDED.add(id):EXCLUDED.delete(id));
   await persistExcluded(); toast('✓ '+ids.length+(FILTER?' filtrados ':' ')+(accion==='excluir'?'excluidos':'incluidos')); }
+// --- listas de distribución (genérico para ambos canales) ---
+let LISTS={telegram:[],whatsapp:[]}, TGT={telegram:{mode:'all',lists:[]},whatsapp:{mode:'all',lists:[]}};
+function listsBox(ch){ return ch==='telegram'?'tg_lists':'wa_lists'; }
+function selForChannel(ch){ return ch==='telegram'?selectedIds():waSelectedIds(); }
+function renderLists(ch){ const cont=$(listsBox(ch)); cont.innerHTML='';
+  const active=new Set((TGT[ch]||{}).lists||[]);
+  if(!LISTS[ch].length){ cont.innerHTML='<div class="hint">Sin listas todavía.</div>'; }
+  LISTS[ch].forEach((l,i)=>{ const row=document.createElement('div');
+    row.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid #eee';
+    row.innerHTML=`<label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin:0"><input type="checkbox" ${active.has(l.name)?'checked':''} style="width:auto" onchange="toggleListActive('${ch}',${i},this.checked)"> <b>${l.name}</b></label>`+
+      `<span class="hint">${l.ids.length} miembros</span>`+
+      `<button class="sec" onclick="addToList('${ch}',${i})">+ marcados</button>`+
+      `<button class="ghost" onclick="removeFromList('${ch}',${i})">− marcados</button>`+
+      `<button class="ghost" onclick="delList('${ch}',${i})">🗑</button>`;
+    cont.appendChild(row); });
+  document.querySelectorAll(`input[name=mode_${ch}]`).forEach(r=>r.checked=(r.value===((TGT[ch]||{}).mode||'all'))); }
+function addList(ch){ const inp=$(ch==='telegram'?'tg_newlist':'wa_newlist'); const n=inp.value.trim(); if(!n)return;
+  if(LISTS[ch].some(l=>l.name===n)){ toast('Ya existe una lista con ese nombre',true); return; }
+  LISTS[ch].push({name:n,ids:[]}); inp.value=''; renderLists(ch); }
+function delList(ch,i){ const n=LISTS[ch][i].name; if(!confirm('¿Borrar la lista "'+n+'"?'))return;
+  LISTS[ch].splice(i,1); TGT[ch].lists=(TGT[ch].lists||[]).filter(x=>x!==n); renderLists(ch); }
+function toggleListActive(ch,i,v){ const n=LISTS[ch][i].name; const s=new Set(TGT[ch].lists||[]); v?s.add(n):s.delete(n); TGT[ch].lists=[...s]; }
+function addToList(ch,i){ const ids=selForChannel(ch); if(!ids.length){ toast('Marca contactos primero',true); return; }
+  LISTS[ch][i].ids=[...new Set([...LISTS[ch][i].ids.map(String),...ids])]; renderLists(ch); toast('✓ '+ids.length+' añadidos a '+LISTS[ch][i].name); }
+function removeFromList(ch,i){ const ids=new Set(selForChannel(ch)); if(!ids.size){ toast('Marca contactos primero',true); return; }
+  LISTS[ch][i].ids=LISTS[ch][i].ids.filter(x=>!ids.has(String(x))); renderLists(ch); toast('✓ quitados de '+LISTS[ch][i].name); }
+function curMode(ch){ const r=document.querySelector(`input[name=mode_${ch}]:checked`); return r?r.value:'all'; }
+async function saveLists(ch){ TGT[ch].mode=curMode(ch);
+  const body=ch==='telegram'?{telegram_lists:LISTS.telegram,telegram_target:TGT.telegram}:{whatsapp_lists:LISTS.whatsapp,whatsapp_target:TGT.whatsapp};
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('✓ Listas guardadas'); loadCfg(); }
+  catch(e){ toast('Error al guardar',true); } }
+// --- contactos de WhatsApp (para armar listas de WhatsApp) ---
+let WA_DEST=[], WA_PAGE=0;
+async function loadWaContacts(){ $('wa_c_count').textContent='cargando...';
+  try{ const r=await api('/api/whatsapp/contacts'); WA_DEST=r.contacts||[]; WA_PAGE=0; renderWa(); $('wa_c_count').textContent='· '+WA_DEST.length+' contactos'; }
+  catch(e){ $('wa_c_count').textContent='servicio inaccesible (¿conectado?)'; } }
+function waFiltered(){ const q=($('wa_search').value||'').trim().toLowerCase(); if(!q) return WA_DEST;
+  return WA_DEST.filter(c=> (c.name||'').toLowerCase().includes(q) || String(c.id||'').includes(q)); }
+function renderWa(){ const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
+  if(WA_PAGE>=pages)WA_PAGE=pages-1; if(WA_PAGE<0)WA_PAGE=0; const slice=f.slice(WA_PAGE*PAGE_SIZE,(WA_PAGE+1)*PAGE_SIZE);
+  const t=$('wa_subs'); t.innerHTML='';
+  slice.forEach(c=>{ const id=String(c.id||''); const tr=document.createElement('tr');
+    tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${c.name||'—'}</b><div class="hint">${id}</div></td>`; t.appendChild(tr); });
+  $('wa_pageinfo').textContent=f.length?`página ${WA_PAGE+1} de ${pages}`:'sin resultados'; }
+function waSelectedIds(){ return [...document.querySelectorAll('.wsel:checked')].map(c=>String(c.dataset.id)); }
+function waToggleAll(v){ document.querySelectorAll('.wsel').forEach(c=>c.checked=v); }
+function waPrev(){ WA_PAGE--; renderWa(); }
+function waNext(){ WA_PAGE++; renderWa(); }
 function boot(){ loadCfg(); loadQueue(); loadSubs(); }
 if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } }).catch(()=>{}); }
 </script></body></html>"""

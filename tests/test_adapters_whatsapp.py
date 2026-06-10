@@ -34,7 +34,18 @@ class WhatsAppForwarderTests(unittest.TestCase):
         req = op.call_args.args[0]
         self.assertEqual(req.full_url, "https://wa.example.com/send")
         self.assertEqual(req.get_header("Authorization"), "Bearer tok")
-        self.assertEqual(json.loads(req.data.decode()), {"text": "hola", "image_url": "http://img", "exclude": ["1", "2"]})
+        self.assertEqual(
+            json.loads(req.data.decode()),
+            {"text": "hola", "image_url": "http://img", "exclude": ["1", "2"], "mode": "all", "list_ids": []},
+        )
+
+    def test_forward_pasa_mode_y_list_ids(self):
+        fwd = HttpWhatsAppForwarder("https://wa.example.com", "tok")
+        with patch("urllib.request.urlopen", return_value=FakeResp("{}")) as op:
+            fwd.forward("hola", None, [], mode="only", list_ids=["57300@s.whatsapp.net"])
+        payload = json.loads(op.call_args.args[0].data.decode())
+        self.assertEqual(payload["mode"], "only")
+        self.assertEqual(payload["list_ids"], ["57300@s.whatsapp.net"])
 
     def test_sin_config_no_postea(self):
         with patch("urllib.request.urlopen") as op:

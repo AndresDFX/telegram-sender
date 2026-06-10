@@ -158,6 +158,10 @@ class DynamoDbConfigStore(ConfigStore):
         "whatsapp_service_url",
         "whatsapp_token",
         "whatsapp_excluded",
+        "telegram_lists",
+        "telegram_target",
+        "whatsapp_lists",
+        "whatsapp_target",
     )
     _CONTACTS_ID = "__contacts__"
 
@@ -187,6 +191,12 @@ class DynamoDbConfigStore(ConfigStore):
             "whatsapp_service_url": os.environ.get("WHATSAPP_SERVICE_URL", ""),
             "whatsapp_token": os.environ.get("WHATSAPP_TOKEN", ""),
             "whatsapp_excluded": [],  # ids de WhatsApp a excluir
+            # Listas de distribución con nombre + modo de targeting por canal.
+            # lists: [{"name": str, "ids": [str]}]; target: {"mode": all|only|except, "lists": [name]}
+            "telegram_lists": [],
+            "telegram_target": {"mode": "all", "lists": []},
+            "whatsapp_lists": [],
+            "whatsapp_target": {"mode": "all", "lists": []},
         }
 
     def get(self) -> dict:
@@ -200,7 +210,31 @@ class DynamoDbConfigStore(ConfigStore):
         cfg["excluded_ids"] = [str(x) for x in cfg["excluded_ids"]]
         cfg["whatsapp_enabled"] = bool(cfg["whatsapp_enabled"])
         cfg["whatsapp_excluded"] = [str(x) for x in cfg["whatsapp_excluded"]]
+        cfg["telegram_lists"] = self._norm_lists(cfg["telegram_lists"])
+        cfg["telegram_target"] = self._norm_target(cfg["telegram_target"])
+        cfg["whatsapp_lists"] = self._norm_lists(cfg["whatsapp_lists"])
+        cfg["whatsapp_target"] = self._norm_target(cfg["whatsapp_target"])
         return cfg
+
+    @staticmethod
+    def _norm_lists(raw) -> list[dict]:
+        out = []
+        for l in raw or []:
+            nombre = str((l or {}).get("name", "")).strip()
+            if not nombre:
+                continue
+            ids = [str(x) for x in (l or {}).get("ids", []) if str(x).strip()]
+            out.append({"name": nombre, "ids": ids})
+        return out
+
+    @staticmethod
+    def _norm_target(raw) -> dict:
+        raw = raw or {}
+        mode = str(raw.get("mode", "all"))
+        if mode not in ("all", "only", "except"):
+            mode = "all"
+        listas = [str(x) for x in raw.get("lists", []) if str(x).strip()]
+        return {"mode": mode, "lists": listas}
 
     # --- caché de contactos (para que el panel no dependa de Telethon en vivo) ---
 

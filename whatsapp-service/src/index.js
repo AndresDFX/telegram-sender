@@ -91,11 +91,23 @@ app.get('/contacts', auth, (req, res) => {
   res.json({ contacts: list })
 })
 
-async function enviarLote(text, image_url, exclude) {
+// Resuelve a quién enviar según el modo de targeting y las listas de distribución.
+// mode: "all" | "only" (whitelist sobre list_ids) | "except" (blacklist sobre list_ids).
+// Compara contra el jid completo y contra el número (id sin @dominio).
+function resolverTargets(mode, list_ids, exclude) {
   const ex = new Set((exclude || []).map(String))
-  const targets = Object.keys(contacts).filter(
-    (id) => id.endsWith('@s.whatsapp.net') && !ex.has(id) && !ex.has(id.split('@')[0])
-  )
+  const sel = new Set((list_ids || []).map(String))
+  const enSeleccion = (id) => sel.has(id) || sel.has(id.split('@')[0])
+  return Object.keys(contacts).filter((id) => {
+    if (!id.endsWith('@s.whatsapp.net')) return false
+    if (ex.has(id) || ex.has(id.split('@')[0])) return false
+    if (mode === 'only') return enSeleccion(id)
+    if (mode === 'except') return !enSeleccion(id)
+    return true
+  })
+}
+
+async function enviarLote(text, image_url, targets) {
   let sent = 0
   let failed = 0
   for (const jid of targets) {
@@ -120,13 +132,10 @@ async function enviarLote(text, image_url, exclude) {
 // contactos con delay tarda minutos; el backend no debe esperar).
 app.post('/send', auth, (req, res) => {
   if (!connected || !sock) return res.status(409).json({ error: 'whatsapp_no_conectado' })
-  const { text = '', image_url = null, exclude = [] } = req.body || {}
-  const ex = new Set((exclude || []).map(String))
-  const total = Object.keys(contacts).filter(
-    (id) => id.endsWith('@s.whatsapp.net') && !ex.has(id) && !ex.has(id.split('@')[0])
-  ).length
-  res.status(202).json({ accepted: true, targets: total })
-  enviarLote(text, image_url, exclude).catch((e) => log.error({ err: String(e) }, 'enviarLote falló'))
+  const { text = '', image_url = null, exclude = [], mode = 'all', list_ids = [] } = req.body || {}
+  const targets = resolverTargets(mode, list_ids, exclude)
+  res.status(202).json({ accepted: true, targets: targets.length, mode })
+  enviarLote(text, image_url, targets).catch((e) => log.error({ err: String(e) }, 'enviarLote falló'))
 })
 
 app.listen(PORT, () => log.info(`whatsapp-service en :${PORT}`))

@@ -86,24 +86,62 @@ class BroadcastListTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def forward(self, text, image_url, exclude):
-                self.calls.append((text, image_url, list(exclude)))
+            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None):
+                self.calls.append((text, image_url, list(exclude), mode, list(list_ids or [])))
                 return {"accepted": True}
 
         wa = FakeWa()
         BroadcastList(FakeSubs(["1"]), FakeQueue(), FakeConfig(whatsapp_enabled=True, image_url="http://img"), whatsapp=wa)("A $100.000")
         self.assertEqual(len(wa.calls), 1)
-        text, image_url, exclude = wa.calls[0]
+        text, image_url, exclude, mode, list_ids = wa.calls[0]
         self.assertIn("$115.000", text)
         self.assertEqual(image_url, "http://img")
+
+    def test_telegram_whitelist_solo_envia_a_listas_activas(self):
+        queue = FakeQueue()
+        cfg = FakeConfig(
+            telegram_lists=[{"name": "VIP", "ids": ["1", "3"]}, {"name": "otros", "ids": ["2"]}],
+            telegram_target={"mode": "only", "lists": ["VIP"]},
+        )
+        BroadcastList(FakeSubs(["1", "2", "3", "4"]), queue, cfg)("A $100.000")
+        self.assertEqual(queue.calls[0][1], ["1", "3"])  # solo VIP, intersecado con contactos
+
+    def test_telegram_blacklist_excluye_listas_activas(self):
+        queue = FakeQueue()
+        cfg = FakeConfig(
+            telegram_lists=[{"name": "bloqueados", "ids": ["2", "4"]}],
+            telegram_target={"mode": "except", "lists": ["bloqueados"]},
+        )
+        BroadcastList(FakeSubs(["1", "2", "3", "4"]), queue, cfg)("A $100.000")
+        self.assertEqual(queue.calls[0][1], ["1", "3"])
+
+    def test_whatsapp_recibe_modo_y_list_ids(self):
+        class FakeWa:
+            def __init__(self):
+                self.calls = []
+
+            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None):
+                self.calls.append((mode, list(list_ids or [])))
+                return {}
+
+        wa = FakeWa()
+        cfg = FakeConfig(
+            whatsapp_enabled=True,
+            whatsapp_lists=[{"name": "clientes", "ids": ["57300@s.whatsapp.net", "57301@s.whatsapp.net"]}],
+            whatsapp_target={"mode": "only", "lists": ["clientes"]},
+        )
+        BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, whatsapp=wa)("A $100.000")
+        mode, list_ids = wa.calls[0]
+        self.assertEqual(mode, "only")
+        self.assertEqual(list_ids, ["57300@s.whatsapp.net", "57301@s.whatsapp.net"])
 
     def test_no_reenvia_whatsapp_si_desactivado(self):
         class FakeWa:
             def __init__(self):
                 self.calls = []
 
-            def forward(self, *a):
-                self.calls.append(a)
+            def forward(self, *a, **kw):
+                self.calls.append((a, kw))
                 return {}
 
         wa = FakeWa()

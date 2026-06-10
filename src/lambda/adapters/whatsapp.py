@@ -21,10 +21,26 @@ class HttpWhatsAppForwarder(WhatsAppForwarder):
         self._token = token or ""
         self._timeout = timeout
 
-    def forward(self, text: str, image_url: str | None, exclude: list[str]) -> dict:
+    def forward(
+        self,
+        text: str,
+        image_url: str | None,
+        exclude: list[str],
+        *,
+        mode: str = "all",
+        list_ids: list[str] | None = None,
+    ) -> dict:
         if not self._url or not self._token:
             return {"skipped": "whatsapp no configurado"}
-        data = json.dumps({"text": text, "image_url": image_url, "exclude": list(exclude or [])}).encode()
+        data = json.dumps(
+            {
+                "text": text,
+                "image_url": image_url,
+                "exclude": list(exclude or []),
+                "mode": mode or "all",
+                "list_ids": list(list_ids or []),
+            }
+        ).encode()
         req = urllib.request.Request(
             f"{self._url}/send",
             data=data,
@@ -36,5 +52,13 @@ class HttpWhatsAppForwarder(WhatsAppForwarder):
 
 
 class NullWhatsAppForwarder(WhatsAppForwarder):
-    def forward(self, text: str, image_url: str | None, exclude: list[str]) -> dict:
+    def forward(
+        self,
+        text: str,
+        image_url: str | None,
+        exclude: list[str],
+        *,
+        mode: str = "all",
+        list_ids: list[str] | None = None,
+    ) -> dict:
         return {"skipped": "disabled"}

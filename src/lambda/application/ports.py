@@ -90,8 +90,20 @@ class ChannelReader(ABC):
 
 class WhatsAppForwarder(ABC):
     @abstractmethod
-    def forward(self, text: str, image_url: str | None, exclude: list[str]) -> dict:
-        """Reenvía la lista al servicio de WhatsApp (fire-and-forget). No-op si no está configurado."""
+    def forward(
+        self,
+        text: str,
+        image_url: str | None,
+        exclude: list[str],
+        *,
+        mode: str = "all",
+        list_ids: list[str] | None = None,
+    ) -> dict:
+        """Reenvía la lista al servicio de WhatsApp (fire-and-forget). No-op si no está configurado.
+
+        mode: "all" | "only" (whitelist sobre list_ids) | "except" (blacklist sobre list_ids).
+        list_ids: unión de ids de las listas activas (para whitelist/blacklist).
+        """
 
 
 class ImageStore(ABC):

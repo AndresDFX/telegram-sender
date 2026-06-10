@@ -11,6 +11,7 @@ import logging
 
 from application.ports import BroadcastQueue, ConfigStore, ImageStore, SubscriberRepository, WhatsAppForwarder
 from domain.message import componer_mensaje
+from domain.recipients import filtrar_destinatarios, ids_de_listas_activas
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +50,32 @@ class BroadcastList:
             strip_patterns=cfg["strip_patterns"],
             footer=cfg["whatsapp_footer"],
         )
-        excluidos = set(cfg.get("excluded_ids", []))
-        clientes = [c for c in self._subscribers.listar_activos() if str(c) not in excluidos]
+        # Telegram: el Lambda conoce los contactos → resuelve las listas aquí mismo.
+        clientes = filtrar_destinatarios(
+            self._subscribers.listar_activos(),
+            cfg.get("telegram_lists", []),
+            cfg.get("telegram_target", {}),
+            excluidos=cfg.get("excluded_ids", []),
+        )
         lotes = self._queue.encolar(
             mensaje, clientes, image_url=cfg.get("image_url") or None, image_key=cfg.get("image_key") or None
         )
-        logger.info("Difusión: %d lotes para %d clientes (%d excluidos)", lotes, len(clientes), len(excluidos))
+        logger.info(
+            "Difusión: %d lotes para %d clientes (modo %s)",
+            lotes,
+            len(clientes),
+            cfg.get("telegram_target", {}).get("mode", "all"),
+        )
 
         if self._whatsapp and cfg.get("whatsapp_enabled"):
             try:
+                wa_target = cfg.get("whatsapp_target", {})
                 resultado = self._whatsapp.forward(
-                    mensaje, self._image_url_para_whatsapp(cfg), cfg.get("whatsapp_excluded", [])
+                    mensaje,
+                    self._image_url_para_whatsapp(cfg),
+                    cfg.get("whatsapp_excluded", []),
+                    mode=wa_target.get("mode", "all"),
+                    list_ids=sorted(ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_target)),
                 )
                 logger.info("WhatsApp forward: %s", resultado)
             except Exception:
