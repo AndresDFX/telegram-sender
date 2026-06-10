@@ -130,19 +130,32 @@ async function doStart() {
         log.error({ err: String(e) }, 'cargar contactos falló')
       }
     }
-    const { version } = await fetchLatestBaileysVersion()
+    // fetchLatestBaileysVersion es una llamada de red SIN timeout; si se cuelga, bloquearía
+    // toda la cadena de arranques. La acotamos y caemos a la versión por defecto de Baileys.
+    let version
+    try {
+      const r = await Promise.race([
+        fetchLatestBaileysVersion(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
+      ])
+      version = r.version
+    } catch (e) {
+      log.warn({ err: String(e) }, 'fetchLatestBaileysVersion falló/timeout; uso versión por defecto')
+      version = undefined
+    }
     if (gen !== myGen) return // otro arranque ganó mientras esperábamos
-    const s = makeWASocket({
-      version,
+    const sockConfig = {
       auth: state,
       logger: pino({ level: 'silent' }),
       printQRInTerminal: false,
       browser: Browsers.macOS('Desktop'),
       markOnlineOnConnect: false,
-      // Re-sincroniza el historial en cada conexión para poblar los contactos (la
-      // reconexión simple no los reenvía). Una vez persistidos, se cargan al instante.
+      // Sincroniza el historial al vincular para poblar los contactos (la reconexión no
+      // los reenvía). Una vez persistidos, se cargan al instante de DynamoDB.
       syncFullHistory: process.env.SYNC_FULL_HISTORY !== 'false',
-    })
+    }
+    if (version) sockConfig.version = version // si no, Baileys usa su versión por defecto
+    const s = makeWASocket(sockConfig)
     sock = s
     lastError = null
 
