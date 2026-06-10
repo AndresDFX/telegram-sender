@@ -20,6 +20,7 @@ let me = null
 let pairNumber = null // número para vincular por código (en vez de QR)
 let pairingCode = null // código de 8 dígitos generado
 let lastClose = null // último statusCode de cierre (diagnóstico)
+let loggedOut = false // sesión cerrada por WhatsApp; requiere re-vincular (/reset)
 let lastError = null // último error de arranque (DynamoDB/red)
 let lastPairError = null // último error de requestPairingCode (p.ej. "inténtalo más tarde")
 let clearOnStart = false // limpiar la sesión en DynamoDB antes del próximo arranque
@@ -97,6 +98,7 @@ async function doStart() {
     sock = null
   }
   const myGen = ++gen
+  loggedOut = false // arranque fresco: limpiamos el flag
 
   // Limpieza de sesión bajo la cadena (serializada), ANTES de leer creds: así nunca se
   // borran credenciales que un socket nuevo acaba de escribir.
@@ -191,14 +193,16 @@ async function doStart() {
           return
         }
         if (lastClose === DisconnectReason.loggedOut) {
-          // Sesión inválida: se limpia en el próximo arranque (bajo la cadena) y se regenera QR.
+          // Sesión inválida. NO auto-borramos ni reconectamos: si otro host (re)vinculó,
+          // borrar aquí destruiría la sesión nueva. El usuario re-vincula con POST /reset
+          // (o el script -Reset), que es un borrado explícito y seguro.
+          loggedOut = true
           pairingCode = null
-          clearOnStart = true
-          log.warn('Sesión cerrada (loggedOut); limpiando y regenerando QR...')
+          log.warn('Sesión cerrada (loggedOut). Re-vincula con /reset o el script -Reset.')
         } else {
           log.warn({ code: lastClose }, 'Conexión cerrada; reconectando...')
+          scheduleReconnect()
         }
-        scheduleReconnect()
       }
     })
   } catch (e) {
@@ -264,6 +268,7 @@ app.get('/status', auth, (req, res) =>
     mode: pairNumber ? 'pairing' : 'qr',
     qr: currentQR,
     pairingCode,
+    loggedOut,
     lastClose,
     lastCloseMsg: closeMsg(lastClose),
     lastError,
