@@ -16,7 +16,9 @@ param(
   [int]$Port = 8099,
   [string]$Pair = ""
 )
-$ErrorActionPreference = "Stop"
+# Continue (no Stop): en PowerShell 5.1 el stderr de comandos nativos (docker) con Stop
+# se vuelve error fatal. Los fallos que importan se validan por exit code / try-catch.
+$ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent $PSScriptRoot
 
 function Load-EnvFile($path) {

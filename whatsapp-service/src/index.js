@@ -197,6 +197,17 @@ async function doStart() {
         lastPairError = null
         me = s.user
         log.info({ me: me?.id }, 'WhatsApp conectado')
+        // Si hay pocos contactos, fuerza la re-sincronización del address-book (app-state)
+        // para poblar contactos + nombres SIN re-vincular. Una vez persistidos, no se repite.
+        if (Object.keys(contacts).length < 50) {
+          try {
+            log.info('Pocos contactos; re-sincronizando app-state...')
+            await s.resyncAppState(['critical_unblock_low', 'critical_block', 'regular_high', 'regular_low', 'regular'], true)
+            log.info({ contactos: Object.keys(contacts).length }, 'app-state re-sincronizado')
+          } catch (e) {
+            log.error({ err: String(e) }, 'resyncAppState falló')
+          }
+        }
       }
       if (connection === 'close') {
         connected = false
@@ -314,6 +325,17 @@ app.post('/pair', auth, async (req, res) => {
   pairingCode = null
   restart() // vuelve a modo QR (sin await)
   return res.status(504).json({ error: 'sin_codigo', detalle })
+})
+
+// Fuerza la re-sincronización del address-book (contactos + nombres) sobre la sesión actual.
+app.post('/sync', auth, async (req, res) => {
+  if (!connected || !sock) return res.status(409).json({ error: 'whatsapp_no_conectado' })
+  try {
+    await sock.resyncAppState(['critical_unblock_low', 'critical_block', 'regular_high', 'regular_low', 'regular'], true)
+    res.json({ ok: true, contacts: Object.keys(contacts).length })
+  } catch (e) {
+    res.status(500).json({ error: 'sync_fallo', detalle: String(e?.message || e) })
+  }
 })
 
 // Reconecta releyendo las credenciales de DynamoDB SIN borrarlas. Útil para que un host
