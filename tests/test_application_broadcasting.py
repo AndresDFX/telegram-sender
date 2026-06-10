@@ -81,6 +81,35 @@ class BroadcastListTests(unittest.TestCase):
         BroadcastList(FakeSubs(["1"]), queue, FakeConfig(image_key="images/broadcast.jpg"))("A $100.000")
         self.assertEqual(queue.calls[0][3], "images/broadcast.jpg")
 
+    def test_reenvia_a_whatsapp_si_activo(self):
+        class FakeWa:
+            def __init__(self):
+                self.calls = []
+
+            def forward(self, text, image_url, exclude):
+                self.calls.append((text, image_url, list(exclude)))
+                return {"accepted": True}
+
+        wa = FakeWa()
+        BroadcastList(FakeSubs(["1"]), FakeQueue(), FakeConfig(whatsapp_enabled=True, image_url="http://img"), whatsapp=wa)("A $100.000")
+        self.assertEqual(len(wa.calls), 1)
+        text, image_url, exclude = wa.calls[0]
+        self.assertIn("$115.000", text)
+        self.assertEqual(image_url, "http://img")
+
+    def test_no_reenvia_whatsapp_si_desactivado(self):
+        class FakeWa:
+            def __init__(self):
+                self.calls = []
+
+            def forward(self, *a):
+                self.calls.append(a)
+                return {}
+
+        wa = FakeWa()
+        BroadcastList(FakeSubs(["1"]), FakeQueue(), FakeConfig(whatsapp_enabled=False), whatsapp=wa)("A $100.000")
+        self.assertEqual(wa.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

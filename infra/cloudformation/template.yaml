@@ -233,6 +233,24 @@ Resources:
         - Key: Environment
           Value: !Ref EnvironmentName
 
+  # Sesión de WhatsApp (Baileys) persistida por el servicio externo (Render/Fly/...).
+  WhatsAppAuthTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${EnvironmentName}-whatsapp-auth"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
   # --- Cola de broadcast + DLQ -------------------------------------------------
   BroadcastDLQ:
     Type: AWS::SQS::Queue
@@ -462,6 +480,11 @@ Resources:
                   - sqs:SendMessage
                 Resource:
                   - !GetAtt BroadcastQueue.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject # firmar URL temporal de la imagen para WhatsApp
+                Resource:
+                  - !Sub "arn:aws:s3:::${LambdaCodeS3Bucket}/images/*"
 
   PollerFunction:
     Type: AWS::Lambda::Function

@@ -19,6 +19,7 @@ from adapters.sqs import InlineBroadcastQueue, SqsBroadcastQueue, SqsQueueStats
 from adapters.telegram import TelegramSender
 from adapters.telethon_user import CachedContacts, ContactRecipients, TelethonContacts, TelethonUserSender
 from adapters.tme import TmePreviewChannelReader
+from adapters.whatsapp import HttpWhatsAppForwarder
 from application.broadcasting import BroadcastList
 from application.deliver_batch import DeliverBatch
 from application.onboarding import HandleCommand
@@ -64,7 +65,8 @@ def _broadcast_list() -> BroadcastList:
     else:
         deliver = DeliverBatch(_sender(cfg), recipients, delay=config.send_delay_seconds())
         queue = InlineBroadcastQueue(lambda text, ids, image_url=None: deliver(text, ids, image_url))
-    return BroadcastList(recipients, queue, store)
+    whatsapp = HttpWhatsAppForwarder(cfg.get("whatsapp_service_url", ""), cfg.get("whatsapp_token", ""))
+    return BroadcastList(recipients, queue, store, whatsapp=whatsapp, image_store=S3ImageStore())
 
 
 def build_dedup() -> DynamoDbDedupStore:

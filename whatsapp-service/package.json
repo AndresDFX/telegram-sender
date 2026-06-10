@@ -1,0 +1,20 @@
+{
+  "name": "telegram-sender-whatsapp",
+  "version": "1.0.0",
+  "description": "Servicio portable que reenvía por WhatsApp (Baileys) las listas de Telegram. Sesión persistida en DynamoDB.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "express": "^4.19.2",
+    "pino": "^9.0.0",
+    "qrcode": "^1.5.4"
+  }
+}

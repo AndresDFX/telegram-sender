@@ -88,6 +88,12 @@ class ChannelReader(ABC):
         """Publicaciones (con texto) del canal público, en orden de aparición."""
 
 
+class WhatsAppForwarder(ABC):
+    @abstractmethod
+    def forward(self, text: str, image_url: str | None, exclude: list[str]) -> dict:
+        """Reenvía la lista al servicio de WhatsApp (fire-and-forget). No-op si no está configurado."""
+
+
 class ImageStore(ABC):
     @abstractmethod
     def guardar(self, data: bytes, content_type: str = "image/jpeg") -> str:

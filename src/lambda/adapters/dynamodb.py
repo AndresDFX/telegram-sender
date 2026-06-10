@@ -154,6 +154,10 @@ class DynamoDbConfigStore(ConfigStore):
         "telethon_api_id",
         "telethon_api_hash",
         "telethon_session",
+        "whatsapp_enabled",
+        "whatsapp_service_url",
+        "whatsapp_token",
+        "whatsapp_excluded",
     )
     _CONTACTS_ID = "__contacts__"
 
@@ -179,6 +183,10 @@ class DynamoDbConfigStore(ConfigStore):
             "telethon_api_id": os.environ.get("TELETHON_API_ID", ""),
             "telethon_api_hash": os.environ.get("TELETHON_API_HASH", ""),
             "telethon_session": os.environ.get("TELETHON_SESSION", ""),
+            "whatsapp_enabled": False,
+            "whatsapp_service_url": os.environ.get("WHATSAPP_SERVICE_URL", ""),
+            "whatsapp_token": os.environ.get("WHATSAPP_TOKEN", ""),
+            "whatsapp_excluded": [],  # ids de WhatsApp a excluir
         }
 
     def get(self) -> dict:
@@ -190,6 +198,8 @@ class DynamoDbConfigStore(ConfigStore):
         cfg["markup_percentage"] = float(cfg["markup_percentage"])
         cfg["strip_patterns"] = list(cfg["strip_patterns"])
         cfg["excluded_ids"] = [str(x) for x in cfg["excluded_ids"]]
+        cfg["whatsapp_enabled"] = bool(cfg["whatsapp_enabled"])
+        cfg["whatsapp_excluded"] = [str(x) for x in cfg["whatsapp_excluded"]]
         return cfg
 
     # --- caché de contactos (para que el panel no dependa de Telethon en vivo) ---

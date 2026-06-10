@@ -40,10 +40,14 @@ _CAMPOS_EDITABLES = (
     "telethon_api_id",
     "telethon_api_hash",
     "telethon_session",
+    "whatsapp_enabled",
+    "whatsapp_service_url",
+    "whatsapp_token",
+    "whatsapp_excluded",
 )
-_LISTAS = ("strip_patterns", "excluded_ids")
+_LISTAS = ("strip_patterns", "excluded_ids", "whatsapp_excluded")
 # Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
-_NO_VACIAR = ("telethon_session", "telethon_api_hash")
+_NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token")
 
 
 def _ensure() -> None:
@@ -116,6 +120,8 @@ def _sanea_config(cambios: dict) -> dict:
                 continue
         elif k == "send_mode":
             v = "userbot" if str(v).strip().lower() == "userbot" else "bot"
+        elif k == "whatsapp_enabled":
+            v = bool(v)
         else:
             v = str(v).strip()
         if k in _NO_VACIAR and not v:  # no borrar secretos con vacío
@@ -125,11 +131,31 @@ def _sanea_config(cambios: dict) -> dict:
 
 
 def _config_publico() -> dict:
-    """Config para el panel, con la sesión Telethon enmascarada (no se expone el secreto)."""
+    """Config para el panel, con los secretos enmascarados (no se exponen)."""
     cfg = config.get()
     cfg["telethon_session_set"] = bool(cfg.get("telethon_session"))
     cfg["telethon_session"] = ""
+    cfg["whatsapp_token_set"] = bool(cfg.get("whatsapp_token"))
+    cfg["whatsapp_token"] = ""
     return cfg
+
+
+def _whatsapp_proxy(path: str, timeout: float = 20.0) -> dict:
+    """GET al servicio de WhatsApp (status/contacts) usando la URL+token de la config."""
+    import urllib.request
+
+    cfg = config.get()
+    url = (cfg.get("whatsapp_service_url") or "").rstrip("/")
+    token = cfg.get("whatsapp_token") or ""
+    if not url or not token:
+        return _json({"error": "whatsapp_no_configurado"}, 409)
+    req = urllib.request.Request(f"{url}{path}", headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return {"statusCode": resp.status, "headers": {"Content-Type": "application/json"}, "body": resp.read().decode()}
+    except Exception as error:
+        logger.exception("Proxy WhatsApp %s falló", path)
+        return _json({"error": "whatsapp_inaccesible", "detalle": str(error)}, 502)
 
 
 # --- dispatcher -------------------------------------------------------------
@@ -179,6 +205,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json({"ok": True})
         if sub == "/api/queue" and method == "GET":
             return _json(queue_stats.profundidades())
+        if sub == "/api/whatsapp/status" and method == "GET":
+            return _whatsapp_proxy("/status")
+        if sub == "/api/whatsapp/contacts" and method == "GET":
+            return _whatsapp_proxy("/contacts", timeout=25)
     except Exception:
         logger.exception("Error en admin %s %s", method, sub)
         return _json({"error": "internal"}, 500)
@@ -263,6 +293,21 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
    <div class="hint">Genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a tu cuenta: trátala como secreto.</div>
    <button onclick="saveAccount()">Guardar cuenta</button>
   </div>
+  <div class="card"><h2>WhatsApp (reenvío)</h2>
+   <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="whatsapp_enabled" style="width:auto"> Reenviar también cada lista por WhatsApp</label>
+   <label>URL del servicio WhatsApp</label><input id="whatsapp_service_url" placeholder="https://...onrender.com">
+   <label>Token del servicio <span id="wa_tok_status" class="hint"></span></label>
+   <input id="whatsapp_token" type="password" placeholder="(pegar solo si quieres cambiarlo)">
+   <button onclick="saveWhatsapp()">Guardar WhatsApp</button>
+   <div style="margin-top:14px">
+     <button class="sec" onclick="waStatus()">Ver estado / QR</button> <span id="wa_state" class="hint"></span>
+     <div><img id="wa_qr" class="preview" style="display:none"></div>
+     <div class="hint" id="wa_qr_hint" style="display:none">Escanéalo: WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</div>
+   </div>
+   <label>Excluir de WhatsApp (ids, uno por línea)</label><textarea id="whatsapp_excluded"></textarea>
+   <button onclick="saveWhatsapp()">Guardar exclusiones WhatsApp</button>
+   <div class="hint">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza excluyendo casi todos y prueba con pocos.</div>
+  </div>
   <div class="card"><h2>Canal y mensaje</h2>
    <label>Canal fuente (username sin @)</label><input id="source_channel">
    <label>Símbolos de moneda</label><input id="currency_symbols">
@@ -321,7 +366,20 @@ async function loadCfg(){ const c=await api('/api/config');
   ['source_channel','markup_percentage','currency_symbols','whatsapp_footer','image_url','telethon_api_id','telethon_api_hash'].forEach(k=>$(k).value=c[k]??'');
   $('send_mode').value=c.send_mode||'bot';
   $('sess_status').textContent = c.telethon_session_set ? '· conectada ✓' : '· no configurada';
-  $('strip_patterns').value=(c.strip_patterns||[]).join('\n'); $('excluded_ids').value=(c.excluded_ids||[]).join('\n'); }
+  $('strip_patterns').value=(c.strip_patterns||[]).join('\n'); $('excluded_ids').value=(c.excluded_ids||[]).join('\n');
+  $('whatsapp_enabled').checked=!!c.whatsapp_enabled; $('whatsapp_service_url').value=c.whatsapp_service_url||'';
+  $('whatsapp_excluded').value=(c.whatsapp_excluded||[]).join('\n');
+  $('wa_tok_status').textContent = c.whatsapp_token_set ? '· configurado ✓' : '· no configurado'; }
+async function saveWhatsapp(){ const b={ whatsapp_enabled:$('whatsapp_enabled').checked, whatsapp_service_url:$('whatsapp_service_url').value,
+   whatsapp_excluded:$('whatsapp_excluded').value }; const tok=$('whatsapp_token').value; if(tok) b.whatsapp_token=tok;
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+    toast('✓ WhatsApp guardado'); $('whatsapp_token').value=''; loadCfg(); } catch(e){ toast('Error',true); } }
+async function waStatus(){ $('wa_state').textContent='consultando...';
+  try{ const s=await api('/api/whatsapp/status');
+    $('wa_state').textContent = s.connected ? ('conectado ✓ ('+(s.contacts||0)+' contactos)') : 'no conectado — escanea el QR';
+    if(s.qr){ $('wa_qr').src=s.qr; $('wa_qr').style.display='block'; $('wa_qr_hint').style.display='block'; }
+    else { $('wa_qr').style.display='none'; $('wa_qr_hint').style.display='none'; }
+  }catch(e){ $('wa_state').textContent='servicio inaccesible (¿URL/token? ¿desplegado?)'; } }
 async function saveAccount(){ const b={ send_mode:$('send_mode').value, telethon_api_id:$('telethon_api_id').value,
    telethon_api_hash:$('telethon_api_hash').value, telethon_session:$('telethon_session').value };
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
