@@ -150,7 +150,12 @@ class DynamoDbConfigStore(ConfigStore):
         "image_url",
         "image_key",
         "excluded_ids",
+        "send_mode",
+        "telethon_api_id",
+        "telethon_api_hash",
+        "telethon_session",
     )
+    _CONTACTS_ID = "__contacts__"
 
     def __init__(self, table_name: str | None = None, endpoint: str | None = None, config_id: str = "default"):
         self._name = table_name or os.environ.get("CONFIG_TABLE", "Config")
@@ -170,6 +175,10 @@ class DynamoDbConfigStore(ConfigStore):
             "image_url": os.environ.get("BROADCAST_IMAGE_URL", ""),
             "image_key": "",  # objeto subido en S3 (tiene prioridad sobre image_url)
             "excluded_ids": [],  # chat IDs a excluir del envío
+            "send_mode": os.environ.get("SEND_MODE", "bot"),
+            "telethon_api_id": os.environ.get("TELETHON_API_ID", ""),
+            "telethon_api_hash": os.environ.get("TELETHON_API_HASH", ""),
+            "telethon_session": os.environ.get("TELETHON_SESSION", ""),
         }
 
     def get(self) -> dict:
@@ -182,6 +191,15 @@ class DynamoDbConfigStore(ConfigStore):
         cfg["strip_patterns"] = list(cfg["strip_patterns"])
         cfg["excluded_ids"] = [str(x) for x in cfg["excluded_ids"]]
         return cfg
+
+    # --- caché de contactos (para que el panel no dependa de Telethon en vivo) ---
+
+    def get_contacts(self) -> list[dict]:
+        item = self._t().get_item(Key={"configId": self._CONTACTS_ID}).get("Item") or {}
+        return list(item.get("items", []))
+
+    def set_contacts(self, contactos: list[dict]) -> None:
+        self._t().put_item(Item={"configId": self._CONTACTS_ID, "items": contactos})
 
     def set(self, cambios: dict) -> dict:
         from decimal import Decimal

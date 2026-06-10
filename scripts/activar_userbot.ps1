@@ -1,7 +1,9 @@
 # Activa el modo userbot: empaqueta, sube y redespliega con SEND_MODE=userbot usando
 # las credenciales Telethon que dejó scripts/generar_sesion.py en .env.deploy.
 # Uso:  .\scripts\activar_userbot.ps1     (tras correr generar_sesion.py)
-$ErrorActionPreference = "Stop"
+# EAP=Continue: docker/aws escriben warnings/progreso a stderr; no deben ser fatales.
+# Validamos los pasos críticos por código de salida.
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
@@ -32,6 +34,7 @@ if (-not $session -or -not $apiId -or -not $apiHash) {
 
 Write-Host "Empaquetando..."
 & "$PSScriptRoot\package-lambda.ps1"
+if (-not (Test-Path .build\telegram-broadcaster.zip)) { throw "No se genero el zip" }
 
 $acct   = (aws sts get-caller-identity --query Account --output text).Trim()
 $bucket = "telegram-sync-lambda-$acct-us-east-1"

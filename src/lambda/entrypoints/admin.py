@@ -36,8 +36,14 @@ _CAMPOS_EDITABLES = (
     "whatsapp_footer",
     "image_url",
     "excluded_ids",
+    "send_mode",
+    "telethon_api_id",
+    "telethon_api_hash",
+    "telethon_session",
 )
 _LISTAS = ("strip_patterns", "excluded_ids")
+# Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
+_NO_VACIAR = ("telethon_session", "telethon_api_hash")
 
 
 def _ensure() -> None:
@@ -108,10 +114,22 @@ def _sanea_config(cambios: dict) -> dict:
                 v = [str(x).strip() for x in v if str(x).strip()]
             else:
                 continue
+        elif k == "send_mode":
+            v = "userbot" if str(v).strip().lower() == "userbot" else "bot"
         else:
-            v = str(v)
+            v = str(v).strip()
+        if k in _NO_VACIAR and not v:  # no borrar secretos con vacío
+            continue
         out[k] = v
     return out
+
+
+def _config_publico() -> dict:
+    """Config para el panel, con la sesión Telethon enmascarada (no se expone el secreto)."""
+    cfg = config.get()
+    cfg["telethon_session_set"] = bool(cfg.get("telethon_session"))
+    cfg["telethon_session"] = ""
+    return cfg
 
 
 # --- dispatcher -------------------------------------------------------------
@@ -135,7 +153,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if sub == "/api/me" and method == "GET":
             return _json({"ok": True, "user": admin_user()})
         if sub == "/api/config" and method == "GET":
-            return _json(config.get())
+            return _json(_config_publico())
         if sub == "/api/config" and method == "POST":
             return _json(config.set(_sanea_config(_body(event))))
         if sub == "/api/image" and method == "POST":
@@ -191,9 +209,9 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
    border-radius:16px;padding:22px}
  h2{margin:0 0 16px;font-size:15px;color:var(--ac2);letter-spacing:.3px;text-transform:uppercase}
  label{display:block;margin:12px 0 5px;font-size:12px;color:var(--mut);font-weight:600}
- input,textarea{width:100%;background:#0e1428;border:1px solid var(--bd);color:var(--tx);border-radius:10px;
+ input,textarea,select{width:100%;background:#0e1428;border:1px solid var(--bd);color:var(--tx);border-radius:10px;
    padding:11px;font-size:14px;transition:border .15s}
- input:focus,textarea:focus{outline:0;border-color:var(--ac)}
+ input:focus,textarea:focus,select:focus{outline:0;border-color:var(--ac)}
  textarea{min-height:84px;font-family:ui-monospace,monospace;font-size:13px}
  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
  button{background:linear-gradient(90deg,var(--ac),#818cf8);color:#fff;border:0;border-radius:10px;
@@ -233,6 +251,18 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
      <div style="font-size:13px">% que se suma a cada precio</div>
      <div class="hint">Ej: $325.000 + 15% → $374.000 (redondeo al mil ↑)</div></div></div>
   </div>
+  <div class="card"><h2>Cuenta de Telegram</h2>
+   <label>Modo de envío</label>
+   <select id="send_mode"><option value="bot">Bot — a suscriptores que dan /start</option><option value="userbot">Userbot — desde mi cuenta a mis contactos</option></select>
+   <div class="row">
+     <div><label>API ID</label><input id="telethon_api_id"></div>
+     <div><label>API Hash</label><input id="telethon_api_hash"></div>
+   </div>
+   <label>StringSession <span id="sess_status" class="hint"></span></label>
+   <input id="telethon_session" type="password" placeholder="(pegar solo si quieres cambiar la cuenta)">
+   <div class="hint">Genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a tu cuenta: trátala como secreto.</div>
+   <button onclick="saveAccount()">Guardar cuenta</button>
+  </div>
   <div class="card"><h2>Canal y mensaje</h2>
    <label>Canal fuente (username sin @)</label><input id="source_channel">
    <label>Símbolos de moneda</label><input id="currency_symbols">
@@ -257,9 +287,18 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
    <button class="sec" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
   </div>
-  <div class="card"><h2>Suscriptores</h2>
-   <table><thead><tr><th>chatId</th><th>estado</th><th></th></tr></thead><tbody id="subs"></tbody></table>
-   <div class="hint" id="subsempty" style="display:none;margin-top:12px">Aún no hay suscriptores: nadie le ha dado /start al bot.</div>
+  <div class="card"><h2>Destinatarios</h2>
+   <div class="hint">Marca contactos y usa los botones para incluirlos/excluirlos en masa. Los excluidos NO reciben las listas.</div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0">
+     <button class="sec" onclick="toggleAll(true)">Marcar todos</button>
+     <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
+     <button onclick="bulk('excluir')">Excluir seleccionados</button>
+     <button onclick="bulk('incluir')">Incluir seleccionados</button>
+     <button class="ghost" onclick="bulkAll('excluir')">Excluir TODOS</button>
+     <button class="ghost" onclick="bulkAll('incluir')">Incluir TODOS</button>
+   </div>
+   <table><thead><tr><th><input type="checkbox" id="selall" onchange="toggleAll(this.checked)"></th><th>nombre / id</th><th>estado</th></tr></thead><tbody id="subs"></tbody></table>
+   <div class="hint" id="subsempty" style="display:none;margin-top:12px">Sin destinatarios (modo bot: nadie dio /start; modo userbot: la cuenta no tiene contactos).</div>
   </div>
  </main>
 </div>
@@ -279,8 +318,14 @@ async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':
   catch(e){ $('lerr').textContent='Usuario o contraseña incorrectos'; } }
 function logout(){ sessionStorage.removeItem('cred'); CRED=''; $('app').style.display='none'; $('login').style.display='flex'; }
 async function loadCfg(){ const c=await api('/api/config');
-  ['source_channel','markup_percentage','currency_symbols','whatsapp_footer','image_url'].forEach(k=>$(k).value=c[k]??'');
+  ['source_channel','markup_percentage','currency_symbols','whatsapp_footer','image_url','telethon_api_id','telethon_api_hash'].forEach(k=>$(k).value=c[k]??'');
+  $('send_mode').value=c.send_mode||'bot';
+  $('sess_status').textContent = c.telethon_session_set ? '· conectada ✓' : '· no configurada';
   $('strip_patterns').value=(c.strip_patterns||[]).join('\n'); $('excluded_ids').value=(c.excluded_ids||[]).join('\n'); }
+async function saveAccount(){ const b={ send_mode:$('send_mode').value, telethon_api_id:$('telethon_api_id').value,
+   telethon_api_hash:$('telethon_api_hash').value, telethon_session:$('telethon_session').value };
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+    toast('✓ Cuenta guardada'); $('telethon_session').value=''; loadCfg(); loadSubs(); } catch(e){ toast('Error',true); } }
 async function saveCfg(){ const b={ source_channel:$('source_channel').value, markup_percentage:parseFloat($('markup_percentage').value),
    currency_symbols:$('currency_symbols').value, whatsapp_footer:$('whatsapp_footer').value, image_url:$('image_url').value,
    strip_patterns:$('strip_patterns').value, excluded_ids:$('excluded_ids').value };
@@ -292,13 +337,23 @@ async function uploadImg(){ const f=$('imgfile').files[0]; if(!f) return;
       $('imgprev').src=r.result; $('imgprev').style.display='block'; toast('✓ Imagen subida'); }
     catch(e){ toast('Error al subir',true); } }; r.readAsDataURL(f); }
 async function loadQueue(){ const q=await api('/api/queue'); $('q_b').textContent=q.broadcast; $('q_d').textContent=q.dlq; }
-async function loadSubs(){ const d=await api('/api/subscribers'); const t=$('subs'); t.innerHTML='';
-  const subs=d.subscribers||[]; $('subsempty').style.display=subs.length?'none':'block';
-  subs.forEach(s=>{ const act=s.status==='active', next=act?'inactive':'active'; const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${s.chatId}</td><td><span class="pill ${act?'active':'inactive'}">${s.status||'—'}</span></td>`+
-      `<td><button class="ghost" style="padding:6px 12px" onclick="toggle('${s.chatId}','${next}')">${act?'Desactivar':'Activar'}</button></td>`;
+let EXCLUDED=new Set(), DEST=[];
+async function loadSubs(){ const [d,c]=await Promise.all([api('/api/subscribers'),api('/api/config')]);
+  DEST=d.subscribers||[]; EXCLUDED=new Set((c.excluded_ids||[]).map(String));
+  const t=$('subs'); t.innerHTML=''; $('subsempty').style.display=DEST.length?'none':'block'; $('selall').checked=false;
+  DEST.forEach(s=>{ const ex=EXCLUDED.has(String(s.chatId)); const label=s.name||s.status||'—'; const tr=document.createElement('tr');
+    tr.innerHTML=`<td><input type="checkbox" class="selrow" data-id="${s.chatId}"></td>`+
+      `<td><b>${label}</b><div class="hint">${s.chatId}</div></td>`+
+      `<td><span class="pill ${ex?'inactive':'active'}">${ex?'Excluido':'Incluido'}</span></td>`;
     t.appendChild(tr); }); }
-async function toggle(id,status){ await api('/api/subscribers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:id,status})}); loadSubs(); }
+function toggleAll(v){ document.querySelectorAll('.selrow').forEach(c=>c.checked=v); $('selall').checked=v; }
+function selectedIds(){ return [...document.querySelectorAll('.selrow:checked')].map(c=>String(c.dataset.id)); }
+async function persistExcluded(){ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({excluded_ids:[...EXCLUDED]})}); }
+async function bulk(accion){ const ids=selectedIds(); if(!ids.length){ toast('Marca al menos un contacto',true); return; }
+  ids.forEach(id=> accion==='excluir'?EXCLUDED.add(id):EXCLUDED.delete(id));
+  await persistExcluded(); toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); loadSubs(); loadCfg(); }
+async function bulkAll(accion){ EXCLUDED = accion==='excluir' ? new Set(DEST.map(s=>String(s.chatId))) : new Set();
+  await persistExcluded(); toast(accion==='excluir'?'✓ Todos excluidos':'✓ Todos incluidos'); loadSubs(); loadCfg(); }
 function boot(){ loadCfg(); loadQueue(); loadSubs(); }
 if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } }).catch(()=>{}); }
 </script></body></html>"""

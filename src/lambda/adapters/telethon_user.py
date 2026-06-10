@@ -76,14 +76,20 @@ class TelethonUserSender(_TelethonBase, MessageSender):
                 return SendResult(ok=False, blocked=True)
             raise
 
+    @staticmethod
+    def _entidad(chat_id):
+        # id numérico → int; "me", username u otro → tal cual (Telethon los resuelve).
+        s = str(chat_id)
+        return int(s) if s.lstrip("-").isdigit() else s
+
     def enviar(self, chat_id: str, text: str) -> SendResult:
-        return self._ejecutar(lambda: self._c().send_message(int(chat_id), text))
+        return self._ejecutar(lambda: self._c().send_message(self._entidad(chat_id), text))
 
     def enviar_foto(self, chat_id: str, image_url: str, caption: str = "") -> SendResult:
         import requests
 
         data = requests.get(image_url, timeout=20).content
-        return self._ejecutar(lambda: self._c().send_file(int(chat_id), data, caption=caption or None))
+        return self._ejecutar(lambda: self._c().send_file(self._entidad(chat_id), data, caption=caption or None))
 
 
 class TelethonContacts(_TelethonBase):
@@ -101,7 +107,7 @@ class TelethonContacts(_TelethonBase):
 
 
 class ContactRecipients:
-    """Adapta los contactos de Telethon a la interfaz que usan BroadcastList/DeliverBatch/admin."""
+    """Adapta los contactos de Telethon a la interfaz que usan BroadcastList/DeliverBatch."""
 
     def __init__(self, contacts: TelethonContacts):
         self._contacts = contacts
@@ -110,10 +116,32 @@ class ContactRecipients:
         return [c["id"] for c in self._contacts.listar()]
 
     def listar_todos(self) -> list[dict]:
-        return [{"chatId": c["id"], "status": c["name"]} for c in self._contacts.listar()]
+        return [{"chatId": c["id"], "name": c["name"]} for c in self._contacts.listar()]
 
     def registrar(self, chat_id: str, status: str) -> None:
         pass  # no aplica a contactos de una cuenta
 
     def marcar_inactivo(self, chat_id: str) -> None:
         pass  # los bloqueos no se persisten para contactos
+
+
+class CachedContacts:
+    """Contactos desde la caché en DynamoDB (rápido, para el panel; sin Telethon en vivo)."""
+
+    def __init__(self, config_store):
+        self._cfg = config_store
+
+    def _items(self):
+        return self._cfg.get_contacts()
+
+    def listar_activos(self) -> list[str]:
+        return [str(c.get("id") or c.get("chatId")) for c in self._items()]
+
+    def listar_todos(self) -> list[dict]:
+        return [{"chatId": str(c.get("id") or c.get("chatId")), "name": c.get("name", "")} for c in self._items()]
+
+    def registrar(self, chat_id: str, status: str) -> None:
+        pass
+
+    def marcar_inactivo(self, chat_id: str) -> None:
+        pass

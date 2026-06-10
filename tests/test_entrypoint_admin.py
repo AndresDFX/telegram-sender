@@ -18,7 +18,8 @@ class FakeConfig:
     def __init__(self):
         self.saved = None
         self.cfg = {"source_channel": "iproparts", "markup_percentage": 15.0, "currency_symbols": "$",
-                    "strip_patterns": ["ubicad"], "whatsapp_footer": "", "image_url": ""}
+                    "strip_patterns": ["ubicad"], "whatsapp_footer": "", "image_url": "",
+                    "send_mode": "bot", "telethon_api_id": "", "telethon_api_hash": "", "telethon_session": ""}
 
     def get(self):
         return dict(self.cfg)
@@ -140,6 +141,24 @@ class AdminTests(unittest.TestCase):
     def test_get_queue(self):
         resp = admin.lambda_handler(_event("GET", "/admin/api/queue"), None)
         self.assertEqual(json.loads(resp["body"]), {"broadcast": 3, "dlq": 1})
+
+    def test_config_enmascara_sesion(self):
+        admin.config.cfg["telethon_session"] = "SECRETO_TOTAL"
+        resp = admin.lambda_handler(_event("GET", "/admin/api/config"), None)
+        body = json.loads(resp["body"])
+        self.assertEqual(body["telethon_session"], "")          # nunca se expone
+        self.assertTrue(body["telethon_session_set"])           # pero se indica que está
+
+    def test_post_cuenta_userbot(self):
+        body = {"send_mode": "userbot", "telethon_api_id": "123", "telethon_api_hash": "abc", "telethon_session": "SESS"}
+        admin.lambda_handler(_event("POST", "/admin/api/config", body), None)
+        self.assertEqual(admin.config.saved["send_mode"], "userbot")
+        self.assertEqual(admin.config.saved["telethon_session"], "SESS")
+
+    def test_post_no_borra_sesion_con_vacio(self):
+        admin.config.cfg["telethon_session"] = "YA_EXISTE"
+        admin.lambda_handler(_event("POST", "/admin/api/config", {"source_channel": "x", "telethon_session": ""}), None)
+        self.assertNotIn("telethon_session", admin.config.saved)  # vacío → no se guarda (no borra)
 
 
 if __name__ == "__main__":

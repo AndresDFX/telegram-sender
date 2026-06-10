@@ -1,7 +1,8 @@
 """Composition root: construye los casos de uso cableando adapters y configuración.
 
-Conmuta entre modo **bot** (envía como bot a los suscriptores que dieron /start) y
-modo **userbot** (envía como TU cuenta vía Telethon a tus contactos) según SEND_MODE.
+Conmuta entre modo **bot** y **userbot** según la config (DynamoDB, con fallback a
+env). Las credenciales de Telethon también viven en la config → la cuenta de Telegram
+se gestiona desde la plataforma sin redeploy.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from adapters.dynamodb import (
 from adapters.s3 import S3ImageStore
 from adapters.sqs import InlineBroadcastQueue, SqsBroadcastQueue, SqsQueueStats
 from adapters.telegram import TelegramSender
-from adapters.telethon_user import ContactRecipients, TelethonContacts, TelethonUserSender
+from adapters.telethon_user import CachedContacts, ContactRecipients, TelethonContacts, TelethonUserSender
 from adapters.tme import TmePreviewChannelReader
 from application.broadcasting import BroadcastList
 from application.deliver_batch import DeliverBatch
@@ -24,31 +25,46 @@ from application.onboarding import HandleCommand
 from application.poll_channel import PollChannel
 
 
-def _userbot() -> bool:
-    return config.send_mode() == "userbot"
-
-
-def _recipients():
-    """Destinatarios: contactos de la cuenta (userbot) o suscriptores del bot."""
-    return ContactRecipients(TelethonContacts()) if _userbot() else DynamoDbSubscriberRepository()
-
-
-def _sender():
-    return TelethonUserSender() if _userbot() else TelegramSender(bot_token=config.bot_token())
-
-
 def build_config_store() -> DynamoDbConfigStore:
     return DynamoDbConfigStore()
 
 
+def _es_userbot(cfg: dict) -> bool:
+    return str(cfg.get("send_mode", "bot")).lower() == "userbot"
+
+
+def _telethon_contacts(cfg: dict) -> TelethonContacts:
+    return TelethonContacts(
+        api_id=cfg.get("telethon_api_id") or None,
+        api_hash=cfg.get("telethon_api_hash") or None,
+        session=cfg.get("telethon_session") or None,
+    )
+
+
+def _sender(cfg: dict):
+    if _es_userbot(cfg):
+        return TelethonUserSender(
+            api_id=cfg.get("telethon_api_id") or None,
+            api_hash=cfg.get("telethon_api_hash") or None,
+            session=cfg.get("telethon_session") or None,
+        )
+    return TelegramSender(bot_token=config.bot_token())
+
+
+def _recipients(cfg: dict):
+    return ContactRecipients(_telethon_contacts(cfg)) if _es_userbot(cfg) else DynamoDbSubscriberRepository()
+
+
 def _broadcast_list() -> BroadcastList:
-    recipients = _recipients()
+    store = build_config_store()
+    cfg = store.get()
+    recipients = _recipients(cfg)
     if config.broadcast_queue_url():
         queue = SqsBroadcastQueue()
     else:
-        deliver = DeliverBatch(_sender(), recipients, delay=config.send_delay_seconds())
+        deliver = DeliverBatch(_sender(cfg), recipients, delay=config.send_delay_seconds())
         queue = InlineBroadcastQueue(lambda text, ids, image_url=None: deliver(text, ids, image_url))
-    return BroadcastList(recipients, queue, build_config_store())
+    return BroadcastList(recipients, queue, store)
 
 
 def build_dedup() -> DynamoDbDedupStore:
@@ -64,21 +80,31 @@ def build_image_store() -> S3ImageStore:
 
 
 def build_subscribers():
-    """Lo que el panel muestra como 'destinatarios' (suscriptores o contactos)."""
-    return _recipients()
+    """Destinatarios para el PANEL: contactos cacheados (userbot) o suscriptores (bot)."""
+    store = build_config_store()
+    if _es_userbot(store.get()):
+        return CachedContacts(store)
+    return DynamoDbSubscriberRepository()
+
+
+def build_contacts_source() -> TelethonContacts | None:
+    """Fuente en vivo de contactos (para refrescar el caché desde el poller). None en modo bot."""
+    store = build_config_store()
+    cfg = store.get()
+    return _telethon_contacts(cfg) if _es_userbot(cfg) else None
 
 
 def build_handle_command() -> HandleCommand:
-    # El onboarding /start solo aplica al modo bot; en userbot el sender es Telethon.
     return HandleCommand(DynamoDbSubscriberRepository(), TelegramSender(bot_token=config.bot_token()))
+
+
+def build_deliver_batch() -> DeliverBatch:
+    cfg = build_config_store().get()
+    return DeliverBatch(_sender(cfg), _recipients(cfg), delay=config.send_delay_seconds())
 
 
 def build_broadcast_list() -> BroadcastList:
     return _broadcast_list()
-
-
-def build_deliver_batch() -> DeliverBatch:
-    return DeliverBatch(_sender(), _recipients(), delay=config.send_delay_seconds())
 
 
 def build_poll_channel() -> PollChannel:

@@ -15,7 +15,13 @@ if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
 
 Write-Host "Empaquetando dentro de python:3.12-slim (Linux)..."
 $mount = "$($RootDir):/work"
+# docker escribe warnings (p.ej. de pip) a stderr; en PS 5.1 eso puede volverse error
+# fatal con ErrorActionPreference=Stop. Lo neutralizamos y validamos por código de salida.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 docker run --rm -v $mount -w /work python:3.12-slim python /work/scripts/_build_lambda_pkg.py
-if ($LASTEXITCODE -ne 0) { throw "Fallo el empaquetado en Docker (exit $LASTEXITCODE)" }
+$code = $LASTEXITCODE
+$ErrorActionPreference = $prevEAP
+if ($code -ne 0) { throw "Fallo el empaquetado en Docker (exit $code)" }
 
 Write-Host "Artefacto listo: $ZipPath"
