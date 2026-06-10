@@ -1,7 +1,7 @@
 // Servicio WhatsApp portable (Baileys). Mantiene la conexión de WhatsApp Web (sesión
 // en DynamoDB), expone el QR para vincular desde el panel, lista contactos y envía las
 // listas reenviadas desde Telegram. Protegido con un bearer token compartido.
-import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
+import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
 import express from 'express'
 import pino from 'pino'
 import qrcode from 'qrcode'
@@ -17,6 +17,9 @@ let sock = null
 let connected = false
 let currentQR = null
 let me = null
+let pairNumber = null // número para vincular por código (en vez de QR)
+let pairingCode = null // código de 8 dígitos generado
+let lastClose = null // último statusCode de cierre (diagnóstico)
 const contacts = {} // jid -> nombre
 
 const log = pino({ level: 'info' })
@@ -34,11 +37,24 @@ async function startSock() {
     auth: state,
     logger: pino({ level: 'silent' }),
     printQRInTerminal: false,
-    browser: ['TelegramSender', 'Chrome', '1.0'],
+    browser: Browsers.macOS('Desktop'),
     markOnlineOnConnect: false,
   })
 
   sock.ev.on('creds.update', saveCreds)
+
+  // Vinculación por código (8 dígitos): alternativa al QR, más fiable desde IPs de
+  // datacenter. Se pide tras crear el socket si hay número y la sesión no está registrada.
+  if (pairNumber && !sock.authState.creds.registered) {
+    setTimeout(async () => {
+      try {
+        pairingCode = await sock.requestPairingCode(pairNumber)
+        log.info({ pairingCode }, 'Código de emparejamiento generado')
+      } catch (e) {
+        log.error({ err: String(e) }, 'requestPairingCode falló')
+      }
+    }, 3000)
+  }
   sock.ev.on('contacts.upsert', (cs) => cs.forEach(recordContact))
   sock.ev.on('contacts.update', (cs) => cs.forEach(recordContact))
   sock.ev.on('messaging-history.set', ({ contacts: cs }) => (cs || []).forEach(recordContact))
@@ -52,12 +68,16 @@ async function startSock() {
     if (connection === 'open') {
       connected = true
       currentQR = null
+      pairingCode = null
+      pairNumber = null
+      lastClose = null
       me = sock.user
       log.info({ me: me?.id }, 'WhatsApp conectado')
     }
     if (connection === 'close') {
       connected = false
       const code = lastDisconnect?.error?.output?.statusCode
+      lastClose = code ?? null
       if (code === DisconnectReason.loggedOut) {
         log.warn('Sesión cerrada (loggedOut). Reinicia para re-escanear el QR.')
       } else {
@@ -83,7 +103,7 @@ app.get('/', (req, res) =>
   res
     .type('html')
     .send(
-      '<h2>telegram-sender · servicio WhatsApp</h2>' +
+      '<h2>Sender · servicio WhatsApp</h2>' +
         `<p>Servicio activo ✓ · ${connected ? 'WhatsApp conectado' : 'WhatsApp NO conectado (escanea el QR)'}</p>` +
         '<p>Endpoints: <code>/health</code> (público), <code>/status</code>, <code>/contacts</code>, <code>/send</code> (requieren token).</p>' +
         '<p>Configura este servicio (URL + token) desde el panel admin y escanea el QR desde ahí.</p>'
@@ -93,8 +113,33 @@ app.get('/', (req, res) =>
 app.get('/health', (req, res) => res.json({ ok: true }))
 
 app.get('/status', auth, (req, res) =>
-  res.json({ connected, me: me ? { id: me.id, name: me.name } : null, qr: currentQR, contacts: Object.keys(contacts).length })
+  res.json({
+    connected,
+    me: me ? { id: me.id, name: me.name } : null,
+    qr: currentQR,
+    pairingCode,
+    lastClose,
+    contacts: Object.keys(contacts).length,
+  })
 )
+
+// Vincular por código de 8 dígitos (alternativa al QR). Recibe el número con código de
+// país (solo dígitos). Reinicia el socket pidiendo el código y lo devuelve.
+app.post('/pair', auth, async (req, res) => {
+  if (connected) return res.status(409).json({ error: 'ya_conectado' })
+  const { number } = req.body || {}
+  const limpio = String(number || '').replace(/[^0-9]/g, '')
+  if (limpio.length < 8) return res.status(400).json({ error: 'numero_invalido' })
+  pairNumber = limpio
+  pairingCode = null
+  try {
+    if (sock) sock.end(new Error('repair'))
+  } catch (e) {}
+  await startSock()
+  for (let i = 0; i < 12 && !pairingCode; i++) await new Promise((r) => setTimeout(r, 1000))
+  if (!pairingCode) return res.status(504).json({ error: 'sin_codigo', detalle: 'no se generó el código a tiempo' })
+  res.json({ pairingCode, number: pairNumber })
+})
 
 app.get('/contacts', auth, (req, res) => {
   const list = Object.entries(contacts)

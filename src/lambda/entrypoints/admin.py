@@ -167,8 +167,12 @@ def _config_publico() -> dict:
     return cfg
 
 
-def _whatsapp_proxy(path: str, timeout: float = 20.0) -> dict:
-    """GET al servicio de WhatsApp (status/contacts) usando la URL+token de la config."""
+def _whatsapp_proxy(path: str, timeout: float = 20.0, body: dict | None = None) -> dict:
+    """Proxy al servicio de WhatsApp (status/contacts/pair) usando la URL+token de la config.
+
+    GET por defecto; si se pasa `body`, hace POST con ese JSON.
+    """
+    import urllib.error
     import urllib.request
 
     cfg = config.get()
@@ -176,10 +180,17 @@ def _whatsapp_proxy(path: str, timeout: float = 20.0) -> dict:
     token = cfg.get("whatsapp_token") or ""
     if not url or not token:
         return _json({"error": "whatsapp_no_configurado"}, 409)
-    req = urllib.request.Request(f"{url}{path}", headers={"Authorization": f"Bearer {token}"})
+    headers = {"Authorization": f"Bearer {token}"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(f"{url}{path}", headers=headers, data=data, method=("POST" if data else "GET"))
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return {"statusCode": resp.status, "headers": {"Content-Type": "application/json"}, "body": resp.read().decode()}
+    except urllib.error.HTTPError as error:
+        return {"statusCode": error.code, "headers": {"Content-Type": "application/json"}, "body": error.read().decode()}
     except Exception as error:
         logger.exception("Proxy WhatsApp %s falló", path)
         return _json({"error": "whatsapp_inaccesible", "detalle": str(error)}, 502)
@@ -236,6 +247,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _whatsapp_proxy("/status")
         if sub == "/api/whatsapp/contacts" and method == "GET":
             return _whatsapp_proxy("/contacts", timeout=25)
+        if sub == "/api/whatsapp/pair" and method == "POST":
+            return _whatsapp_proxy("/pair", timeout=25, body={"number": _body(event).get("number", "")})
     except Exception:
         logger.exception("Error en admin %s %s", method, sub)
         return _json({"error": "internal"}, 500)
@@ -245,7 +258,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>TelegramSender · Panel</title>
+<title>Sender · Panel</title>
 <style>
  :root{--bg:#0b1020;--card:#151c32;--card2:#1c2540;--bd:#2a3354;--tx:#e6ebff;--mut:#8b96b8;--ac:#6366f1;--ac2:#22d3ee;--ok:#34d399;--warn:#fbbf24;--bad:#fb7185}
  *{box-sizing:border-box}body{font-family:system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:
@@ -256,6 +269,13 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
    box-shadow:0 24px 60px rgba(0,0,0,.45)}
  #login h1{font-size:20px;margin:0 0 4px}#login p{color:var(--mut);margin:0 0 22px;font-size:13px}
  .logo{font-size:34px;margin-bottom:10px}
+ /* marca Sender */
+ .brand{display:flex;align-items:center;gap:11px}
+ .brand .wordmark{font-weight:800;font-size:21px;letter-spacing:-.4px;
+   background:linear-gradient(90deg,#a5b4fc,#22d3ee);-webkit-background-clip:text;background-clip:text;color:transparent}
+ .brand svg{border-radius:11px;filter:drop-shadow(0 6px 16px rgba(99,102,241,.45))}
+ .brand-lg{justify-content:center;margin-bottom:8px}
+ .brand-lg .wordmark{font-size:32px}
  /* app */
  #app{display:none}
  header{display:flex;align-items:center;justify-content:space-between;background:rgba(21,28,50,.8);
@@ -298,8 +318,8 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 </style></head><body>
 
 <div id="login"><div class="box">
-  <div class="logo">📦</div>
-  <h1>TelegramSender</h1><p>Panel de administración</p>
+  <div class="brand brand-lg"><svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg)"/><path transform="translate(12,12)" fill="#fff" d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg><span class="wordmark">Sender</span></div>
+  <p style="text-align:center">Panel de administración</p>
   <label>Usuario</label><input id="lu" autocomplete="username" value="admin">
   <label>Contraseña</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
   <div class="err" id="lerr"></div>
@@ -307,7 +327,7 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 </div></div>
 
 <div id="app">
- <header><div class="t">📦 TelegramSender</div><div><span class="u" id="who"></span>
+ <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><path transform="translate(12,12)" fill="#fff" d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg><span class="wordmark">Sender</span></div><div><span class="u" id="who"></span>
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
  <nav class="nav">
    <button data-tab="msg" onclick="showTab('msg')">📝 Mensaje</button>
@@ -340,9 +360,24 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
    <input id="whatsapp_token" type="password" placeholder="(pegar solo si quieres cambiarlo)">
    <button onclick="saveWhatsapp()">Guardar WhatsApp</button>
    <div style="margin-top:14px">
-     <button class="sec" onclick="waStatus()">Ver estado / QR</button> <span id="wa_state" class="hint"></span>
-     <div><img id="wa_qr" class="preview" style="display:none"></div>
-     <div class="hint" id="wa_qr_hint" style="display:none">Escanéalo: WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</div>
+     <button class="sec" onclick="waStatus()">Ver estado</button> <span id="wa_state" class="hint"></span>
+   </div>
+   <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--bd)">
+     <div style="font-weight:700;font-size:13px;margin-bottom:6px">Vincular WhatsApp</div>
+     <div class="hint" style="margin-bottom:10px">Si el QR da "inténtalo más tarde" (típico desde servidores), usa el código de 8 dígitos.</div>
+     <div class="row">
+       <div>
+         <button class="sec" style="width:100%" onclick="waStatus(true)">Mostrar QR</button>
+         <div><img id="wa_qr" class="preview" style="display:none"></div>
+         <div class="hint" id="wa_qr_hint" style="display:none">WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</div>
+       </div>
+       <div>
+         <input id="wa_pair_num" placeholder="Número con código país, ej: 573001234567">
+         <button class="sec" style="width:100%;margin-top:8px" onclick="waPair()">Vincular por código</button>
+         <div class="hint" id="wa_pair_out" style="display:none"></div>
+       </div>
+     </div>
+     <div class="hint" style="margin-top:10px">💡 Lo más fiable si Render bloquea el linking: vincula <b>localmente</b> (corre el servicio en tu PC con las mismas credenciales AWS) y Render reusará la sesión guardada en DynamoDB.</div>
    </div>
    <label>Excluir de WhatsApp (ids, uno por línea)</label><textarea id="whatsapp_excluded"></textarea>
    <button onclick="saveWhatsapp()">Guardar exclusiones WhatsApp</button>
@@ -453,12 +488,21 @@ async function saveWhatsapp(){ const b={ whatsapp_enabled:$('whatsapp_enabled').
    whatsapp_excluded:$('whatsapp_excluded').value }; const tok=$('whatsapp_token').value; if(tok) b.whatsapp_token=tok;
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
     toast('✓ WhatsApp guardado'); $('whatsapp_token').value=''; loadCfg(); } catch(e){ toast('Error',true); } }
-async function waStatus(){ $('wa_state').textContent='consultando...';
+async function waStatus(showQr){ $('wa_state').textContent='consultando...';
   try{ const s=await api('/api/whatsapp/status');
-    $('wa_state').textContent = s.connected ? ('conectado ✓ ('+(s.contacts||0)+' contactos)') : 'no conectado — escanea el QR';
-    if(s.qr){ $('wa_qr').src=s.qr; $('wa_qr').style.display='block'; $('wa_qr_hint').style.display='block'; }
-    else { $('wa_qr').style.display='none'; $('wa_qr_hint').style.display='none'; }
+    let txt = s.connected ? ('conectado ✓ ('+(s.contacts||0)+' contactos)') : 'no conectado';
+    if(!s.connected && s.lastClose) txt += ' · último cierre: '+s.lastClose;
+    $('wa_state').textContent = txt;
+    if(showQr && s.qr){ $('wa_qr').src=s.qr; $('wa_qr').style.display='block'; $('wa_qr_hint').style.display='block'; }
+    else if(!showQr){ $('wa_qr').style.display='none'; $('wa_qr_hint').style.display='none'; }
   }catch(e){ $('wa_state').textContent='servicio inaccesible (¿URL/token? ¿desplegado?)'; } }
+async function waPair(){ const num=$('wa_pair_num').value.replace(/[^0-9]/g,''); const out=$('wa_pair_out');
+  if(num.length<8){ toast('Número inválido (incluye código de país, sin +)',true); return; }
+  out.style.display='block'; out.textContent='generando código... (puede tardar unos segundos)';
+  try{ const r=await api('/api/whatsapp/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({number:num})});
+    if(r.pairingCode){ out.innerHTML='Código: <b style="font-size:19px;letter-spacing:3px;color:var(--ac2)">'+r.pairingCode+'</b><br>En el teléfono: WhatsApp → Dispositivos vinculados → <b>Vincular con número de teléfono</b> → ingresa el código.'; }
+    else { out.textContent='No se pudo generar: '+(r.error||r.detalle||'desconocido'); } }
+  catch(e){ out.textContent='Error: el servicio no respondió (¿ya conectado? ¿URL/token?)'; } }
 async function saveAccount(){ const b={ send_mode:$('send_mode').value, telethon_api_id:$('telethon_api_id').value,
    telethon_api_hash:$('telethon_api_hash').value, telethon_session:$('telethon_session').value };
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});

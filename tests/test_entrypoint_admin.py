@@ -102,7 +102,7 @@ class AdminTests(unittest.TestCase):
         resp = admin.lambda_handler(_event("GET", "/admin", auth=False), None)  # la página es pública
         self.assertEqual(resp["statusCode"], 200)
         self.assertIn("text/html", resp["headers"]["Content-Type"])
-        self.assertIn("TelegramSender", resp["body"])
+        self.assertIn("wordmark", resp["body"])  # marca "Sender" (logo + wordmark)
 
     def test_me(self):
         resp = admin.lambda_handler(_event("GET", "/admin/api/me"), None)
