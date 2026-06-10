@@ -21,6 +21,7 @@ let pairNumber = null // número para vincular por código (en vez de QR)
 let pairingCode = null // código de 8 dígitos generado
 let lastClose = null // último statusCode de cierre (diagnóstico)
 let loggedOut = false // sesión cerrada por WhatsApp; requiere re-vincular (/reset)
+let replaced = false // 440: otro host tomó la sesión; este cedió (usar /reconnect para retomar)
 let lastError = null // último error de arranque (DynamoDB/red)
 let lastPairError = null // último error de requestPairingCode (p.ej. "inténtalo más tarde")
 let clearOnStart = false // limpiar la sesión en DynamoDB antes del próximo arranque
@@ -102,7 +103,8 @@ async function doStart() {
     sock = null
   }
   const myGen = ++gen
-  loggedOut = false // arranque fresco: limpiamos el flag
+  loggedOut = false // arranque fresco: limpiamos los flags
+  replaced = false
 
   // Limpieza de sesión bajo la cadena (serializada), ANTES de leer creds: así nunca se
   // borran credenciales que un socket nuevo acaba de escribir.
@@ -225,6 +227,11 @@ async function doStart() {
           loggedOut = true
           pairingCode = null
           log.warn('Sesión cerrada (loggedOut). Re-vincula con /reset o el script -Reset.')
+        } else if (lastClose === DisconnectReason.connectionReplaced) {
+          // 440: otro host tomó la misma sesión. CEDEMOS (no reconectar) para evitar la
+          // "guerra de 440" entre local y Render. El host activo es el último que conectó.
+          replaced = true
+          log.warn('Conexión reemplazada (440) por otro host; cedo (no reconecto). Usa /reconnect para retomar.')
         } else {
           log.warn({ code: lastClose }, 'Conexión cerrada; reconectando...')
           scheduleReconnect()
@@ -295,6 +302,7 @@ app.get('/status', auth, (req, res) =>
     qr: currentQR,
     pairingCode,
     loggedOut,
+    replaced,
     lastClose,
     lastCloseMsg: closeMsg(lastClose),
     lastError,

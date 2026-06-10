@@ -72,7 +72,7 @@ if ($Pair) {
   Start-Sleep -Seconds 3
   $body = @{ number = $num } | ConvertTo-Json -Compress
   try {
-    $r = Invoke-RestMethod "$base/pair" -Method POST -Headers $hdr -ContentType 'application/json' -Body $body -TimeoutSec 30
+    $r = Invoke-RestMethod "$base/pair" -Method POST -Headers $hdr -ContentType 'application/json' -Body $body -TimeoutSec 90
     Write-Host ""
     Write-Host "  CODIGO: $($r.pairingCode)" -ForegroundColor Green
     Write-Host "  WhatsApp -> Dispositivos vinculados -> Vincular con numero de telefono -> ingresa el codigo." -ForegroundColor Yellow
