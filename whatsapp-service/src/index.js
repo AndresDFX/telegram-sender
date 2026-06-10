@@ -20,29 +20,52 @@ let me = null
 let pairNumber = null // número para vincular por código (en vez de QR)
 let pairingCode = null // código de 8 dígitos generado
 let lastClose = null // último statusCode de cierre (diagnóstico)
-let starting = false // lock: evita arrancar sockets en paralelo
+let lastError = null // último error de arranque (DynamoDB/red)
+let lastPairError = null // último error de requestPairingCode (p.ej. "inténtalo más tarde")
+let clearOnStart = false // limpiar la sesión en DynamoDB antes del próximo arranque
 let reconnectTimer = null // única reconexión pendiente
 let gen = 0 // generación del socket activo (ignora eventos de sockets viejos)
+let chain = Promise.resolve() // mutex: serializa los (re)arranques en vez de descartarlos
 const contacts = {} // jid -> nombre
 
 const log = pino({ level: 'info' })
+
+// Mapea códigos de cierre de Baileys a un mensaje legible para el usuario.
+function closeMsg(code) {
+  if (code == null) return null
+  const m = {
+    401: 'sesión cerrada (loggedOut)',
+    403: 'bloqueado por WhatsApp ("inténtalo más tarde")',
+    408: 'timeout: no se completó la vinculación a tiempo',
+    428: 'conexión cerrada',
+    440: 'sesión reemplazada (vinculada en otro lugar)',
+    515: 'requiere reinicio (normal justo tras vincular)',
+  }
+  return m[code] || `código ${code}`
+}
 
 function recordContact(c) {
   if (!c || !c.id) return
   contacts[c.id] = c.name || c.notify || c.verifiedName || contacts[c.id] || ''
 }
 
+// (Re)arranca el socket de forma SERIALIZADA: si ya hay un arranque en curso, este se
+// encola y espera (no se descarta como antes). Así /pair y las reconexiones nunca quedan
+// en no-op silencioso. Devuelve la promesa de la cadena para poder await-earla.
+function restart() {
+  chain = chain.then(doStart).catch((e) => log.error({ err: String(e) }, 'arranque falló'))
+  return chain
+}
+
 function scheduleReconnect() {
   if (reconnectTimer) return
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
-    startSock().catch((e) => log.error({ err: String(e) }, 'reconexión falló'))
+    restart()
   }, 3000)
 }
 
-async function startSock() {
-  if (starting) return // un solo arranque a la vez (evita sockets en paralelo)
-  starting = true
+async function doStart() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
@@ -57,9 +80,24 @@ async function startSock() {
     sock = null
   }
   const myGen = ++gen
+
+  // Limpieza de sesión bajo la cadena (serializada), ANTES de leer creds: así nunca se
+  // borran credenciales que un socket nuevo acaba de escribir.
+  if (clearOnStart) {
+    clearOnStart = false
+    try {
+      const prev = await useDynamoAuthState(TABLE, SESSION_ID)
+      await prev.clearAll()
+    } catch (e) {
+      log.error({ err: String(e) }, 'clearAll falló')
+    }
+    if (gen !== myGen) return // reemplazado mientras limpiábamos
+  }
+
   try {
     const { state, saveCreds } = await useDynamoAuthState(TABLE, SESSION_ID)
     const { version } = await fetchLatestBaileysVersion()
+    if (gen !== myGen) return // otro arranque ganó mientras esperábamos
     const s = makeWASocket({
       version,
       auth: state,
@@ -69,21 +107,26 @@ async function startSock() {
       markOnlineOnConnect: false,
     })
     sock = s
+    lastError = null
 
     s.ev.on('creds.update', saveCreds)
     s.ev.on('contacts.upsert', (cs) => cs.forEach(recordContact))
     s.ev.on('contacts.update', (cs) => cs.forEach(recordContact))
     s.ev.on('messaging-history.set', ({ contacts: cs }) => (cs || []).forEach(recordContact))
 
-    // Vinculación por código (8 dígitos), una sola vez por socket si hay número y no está registrado.
+    // Vinculación por código (8 dígitos): una sola vez por socket si hay número y no está registrado.
     if (pairNumber && !s.authState.creds.registered) {
       setTimeout(async () => {
         if (gen !== myGen) return // socket reemplazado: no pidas código en uno viejo
         try {
-          pairingCode = await s.requestPairingCode(pairNumber)
+          const code = await s.requestPairingCode(pairNumber)
+          if (gen !== myGen) return // reemplazado tras el await: no publiques un código muerto
+          pairingCode = code
+          lastPairError = null
           log.info({ pairingCode }, 'Código de emparejamiento generado')
         } catch (e) {
-          log.error({ err: String(e) }, 'requestPairingCode falló')
+          lastPairError = String(e?.message || e)
+          log.error({ err: lastPairError }, 'requestPairingCode falló')
         }
       }, 3000)
     }
@@ -92,7 +135,10 @@ async function startSock() {
       if (gen !== myGen) return // ignora eventos de sockets de generaciones anteriores
       const { connection, lastDisconnect, qr } = u
       if (qr) {
-        currentQR = await qrcode.toDataURL(qr)
+        if (pairNumber) return // en modo emparejamiento no publicamos QR (no mezclar flujos)
+        const data = await qrcode.toDataURL(qr)
+        if (gen !== myGen) return // recheck tras el await
+        currentQR = data
         log.info('Nuevo QR disponible para vincular')
       }
       if (connection === 'open') {
@@ -101,32 +147,36 @@ async function startSock() {
         pairingCode = null
         pairNumber = null
         lastClose = null
+        lastError = null
+        lastPairError = null
         me = s.user
         log.info({ me: me?.id }, 'WhatsApp conectado')
       }
       if (connection === 'close') {
         connected = false
-        const code = lastDisconnect?.error?.output?.statusCode
-        lastClose = code ?? null
-        const registered = !!s.authState?.creds?.registered
-        if (code === DisconnectReason.loggedOut) {
-          pairingCode = null
-          log.warn('Sesión cerrada (loggedOut).')
-        } else if (registered) {
-          log.warn({ code }, 'Sesión registrada cerrada; reconectando...')
-          scheduleReconnect()
-        } else if (pairNumber) {
-          // Vinculando por código: NO reconectar (evita invalidar el código y la tormenta).
-          log.warn({ code }, 'Cierre durante emparejamiento; esperando reintento manual.')
-        } else {
-          // Modo QR sin registrar: refrescar el QR una sola vez.
-          log.warn({ code }, 'Cierre en modo QR; renovando QR...')
-          scheduleReconnect()
+        lastClose = lastDisconnect?.error?.output?.statusCode ?? null
+        if (gen !== myGen) return
+        // En emparejamiento NO reconectamos: invalidaría el código entregado al usuario.
+        if (pairNumber) {
+          log.warn({ code: lastClose }, 'Cierre durante emparejamiento; reintenta manualmente.')
+          return
         }
+        if (lastClose === DisconnectReason.loggedOut) {
+          // Sesión inválida: se limpia en el próximo arranque (bajo la cadena) y se regenera QR.
+          pairingCode = null
+          clearOnStart = true
+          log.warn('Sesión cerrada (loggedOut); limpiando y regenerando QR...')
+        } else {
+          log.warn({ code: lastClose }, 'Conexión cerrada; reconectando...')
+        }
+        scheduleReconnect()
       }
     })
-  } finally {
-    starting = false
+  } catch (e) {
+    // Fallo de DynamoDB/red al arrancar: no dejar el servicio mudo, reintentar.
+    lastError = String(e?.message || e)
+    log.error({ err: lastError }, 'arranque falló; reintentando...')
+    scheduleReconnect()
   }
 }
 
@@ -160,16 +210,21 @@ app.get('/qr', (req, res) => {
   if ((req.query.token || '') !== TOKEN) return res.status(401).type('html').send('token inválido')
   res.type('html').send(
     '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<meta name="referrer" content="no-referrer">' + // evita filtrar el token por Referer
       '<title>Vincular WhatsApp · Sender</title>' +
       '<body style="font-family:system-ui;text-align:center;background:#0b1020;color:#e6ebff;padding:28px;margin:0">' +
       '<h2>Vincular WhatsApp · Sender</h2><div id="s">cargando…</div>' +
       '<img id="q" style="width:300px;height:300px;margin:18px;background:#fff;border-radius:10px;padding:10px;object-fit:contain"/>' +
-      '<p style="color:#8b96b8">WhatsApp → Dispositivos vinculados → Vincular un dispositivo</p>' +
+      '<div id="hint" style="color:#8b96b8">WhatsApp → Dispositivos vinculados → Vincular un dispositivo</div>' +
       '<script>const tok=new URLSearchParams(location.search).get("token");' +
       'async function tick(){try{const r=await fetch("/status",{headers:{Authorization:"Bearer "+tok}});const s=await r.json();' +
-      'if(s.connected){document.getElementById("s").textContent="✅ Conectado"+(s.me?(" como "+s.me.id):"");document.getElementById("q").style.display="none";return;}' +
-      'if(s.qr){document.getElementById("q").src=s.qr;document.getElementById("s").textContent="Escanea el QR (se renueva solo):";}' +
-      'else{document.getElementById("s").textContent="esperando QR…";}}catch(e){}setTimeout(tick,3000);}tick();</script>'
+      'const S=document.getElementById("s"),Q=document.getElementById("q"),H=document.getElementById("hint");' +
+      'if(s.connected){S.textContent="✅ Conectado"+(s.me?(" como "+s.me.id):"");Q.style.display="none";H.textContent="";return;}' +
+      'if(s.pairingCode){Q.style.display="none";S.innerHTML="Código: <b style=\\"font-size:22px;letter-spacing:3px\\">"+s.pairingCode+"</b>";H.textContent="WhatsApp → Dispositivos vinculados → Vincular con número de teléfono.";}' +
+      'else if(s.qr){Q.style.display="inline";Q.src=s.qr;S.textContent="Escanea el QR (se renueva solo):";}' +
+      'else{S.textContent="esperando…";Q.style.display="none";}' +
+      'if(s.lastPairError){H.textContent="WhatsApp dijo: "+s.lastPairError;}else if(!s.connected&&s.lastCloseMsg){H.textContent="Último cierre: "+s.lastCloseMsg;}' +
+      '}catch(e){}setTimeout(tick,3000);}tick();</script>'
   )
 })
 
@@ -177,9 +232,13 @@ app.get('/status', auth, (req, res) =>
   res.json({
     connected,
     me: me ? { id: me.id, name: me.name } : null,
+    mode: pairNumber ? 'pairing' : 'qr',
     qr: currentQR,
     pairingCode,
     lastClose,
+    lastCloseMsg: closeMsg(lastClose),
+    lastError,
+    lastPairError,
     contacts: Object.keys(contacts).length,
   })
 )
@@ -193,10 +252,32 @@ app.post('/pair', auth, async (req, res) => {
   if (limpio.length < 8) return res.status(400).json({ error: 'numero_invalido' })
   pairNumber = limpio
   pairingCode = null
-  await startSock() // reinicia limpio (un solo socket) y pide el código
-  for (let i = 0; i < 15 && !pairingCode; i++) await new Promise((r) => setTimeout(r, 1000))
-  if (!pairingCode) return res.status(504).json({ error: 'sin_codigo', detalle: 'no se generó el código a tiempo' })
-  res.json({ pairingCode, number: pairNumber })
+  lastPairError = null
+  currentQR = null
+  lastClose = null
+  clearOnStart = true // empezar limpio: evita quedar atascado con una sesión registrada inválida
+  await restart() // serializado: garantiza un socket nuevo que pide el código
+  for (let i = 0; i < 20 && !pairingCode && !lastPairError; i++) await new Promise((r) => setTimeout(r, 1000))
+  if (pairingCode) return res.json({ pairingCode, number: pairNumber })
+  // Falló: limpiar el estado de emparejamiento y volver a modo QR para no quedar bloqueado.
+  const detalle = lastPairError || 'no se generó el código a tiempo'
+  pairNumber = null
+  pairingCode = null
+  restart() // vuelve a modo QR (sin await)
+  return res.status(504).json({ error: 'sin_codigo', detalle })
+})
+
+// Reinicia desde cero: borra la sesión guardada y regenera QR. Útil si quedó en mal estado.
+app.post('/reset', auth, async (req, res) => {
+  pairNumber = null
+  pairingCode = null
+  currentQR = null
+  lastClose = null
+  lastError = null
+  lastPairError = null
+  clearOnStart = true
+  await restart()
+  res.json({ ok: true })
 })
 
 app.get('/contacts', auth, (req, res) => {
@@ -254,4 +335,4 @@ app.post('/send', auth, (req, res) => {
 })
 
 app.listen(PORT, () => log.info(`whatsapp-service en :${PORT}`))
-startSock().catch((e) => log.error(e))
+restart()
