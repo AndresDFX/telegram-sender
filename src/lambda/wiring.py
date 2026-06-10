@@ -8,11 +8,12 @@ from __future__ import annotations
 
 from adapters import config
 from adapters.dynamodb import (
+    DynamoDbConfigStore,
     DynamoDbDedupStore,
     DynamoDbHighWaterMarkStore,
     DynamoDbSubscriberRepository,
 )
-from adapters.sqs import InlineBroadcastQueue, SqsBroadcastQueue
+from adapters.sqs import InlineBroadcastQueue, SqsBroadcastQueue, SqsQueueStats
 from adapters.telegram import TelegramSender
 from adapters.tme import TmePreviewChannelReader
 from application.broadcasting import BroadcastList
@@ -29,6 +30,10 @@ def _sender() -> TelegramSender:
     return TelegramSender(bot_token=config.bot_token())
 
 
+def build_config_store() -> DynamoDbConfigStore:
+    return DynamoDbConfigStore()
+
+
 def _broadcast_list() -> BroadcastList:
     subs = _subscribers()
     if config.broadcast_queue_url():
@@ -36,12 +41,20 @@ def _broadcast_list() -> BroadcastList:
     else:
         # Dev local sin SQS: entrega inmediata (el envío inline NO lanza, ver DeliverBatch).
         deliver = DeliverBatch(_sender(), subs, delay=config.send_delay_seconds())
-        queue = InlineBroadcastQueue(lambda text, ids: deliver(text, ids))
-    return BroadcastList(subs, queue, percentage=config.markup_percentage())
+        queue = InlineBroadcastQueue(lambda text, ids, image_url=None: deliver(text, ids, image_url))
+    return BroadcastList(subs, queue, build_config_store())
 
 
 def build_dedup() -> DynamoDbDedupStore:
     return DynamoDbDedupStore()
+
+
+def build_queue_stats() -> SqsQueueStats:
+    return SqsQueueStats()
+
+
+def build_subscribers() -> DynamoDbSubscriberRepository:
+    return _subscribers()
 
 
 def build_handle_command() -> HandleCommand:
@@ -61,5 +74,5 @@ def build_poll_channel() -> PollChannel:
         TmePreviewChannelReader(),
         DynamoDbHighWaterMarkStore(),
         _broadcast_list(),
-        config.source_channel_username(),
+        build_config_store(),
     )

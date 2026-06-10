@@ -17,6 +17,10 @@ def bot_token() -> str | None:
     return os.environ.get("TELEGRAM_BOT_TOKEN")
 
 
+def admin_user() -> str:
+    return os.environ.get("ADMIN_USER", "admin")
+
+
 def markup_percentage() -> float:
     return float(os.environ.get("MARKUP_PERCENTAGE", "15"))
 

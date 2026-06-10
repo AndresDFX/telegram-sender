@@ -10,7 +10,9 @@ import os
 import time
 from datetime import datetime, timezone
 
-from application.ports import DedupStore, HighWaterMarkStore, SubscriberRepository
+from application.ports import ConfigStore, DedupStore, HighWaterMarkStore, SubscriberRepository
+from domain.markup import DEFAULT_CURRENCY_SYMBOLS
+from domain.message import DEFAULT_LOCATION_PATTERNS
 from domain.models import ACTIVE, INACTIVE
 
 
@@ -73,6 +75,21 @@ class DynamoDbSubscriberRepository(SubscriberRepository):
             ConditionExpression=Attr("chatId").exists(),
         )
 
+    def listar_todos(self) -> list[dict]:
+        table = self._t()
+        items: list[dict] = []
+        kwargs = {"ProjectionExpression": "chatId, #s", "ExpressionAttributeNames": {"#s": "status"}}
+        while True:
+            resp = table.scan(**kwargs)
+            items.extend(
+                {"chatId": i["chatId"], "status": i.get("status", "")} for i in resp.get("Items", [])
+            )
+            last = resp.get("LastEvaluatedKey")
+            if not last:
+                break
+            kwargs["ExclusiveStartKey"] = last
+        return items
+
 
 class DynamoDbDedupStore(DedupStore):
     def __init__(self, table_name: str | None = None, ttl_seconds: int | None = None, endpoint: str | None = None):
@@ -119,3 +136,63 @@ class DynamoDbHighWaterMarkStore(HighWaterMarkStore):
 
     def guardar(self, channel: str, value: int) -> None:
         self._t().put_item(Item={"updateId": self._PREFIX + channel, "value": int(value)})
+
+
+class DynamoDbConfigStore(ConfigStore):
+    """Config editable en runtime: un único item; los defaults vienen del entorno."""
+
+    _CAMPOS = (
+        "source_channel",
+        "markup_percentage",
+        "currency_symbols",
+        "strip_patterns",
+        "whatsapp_footer",
+        "image_url",
+    )
+
+    def __init__(self, table_name: str | None = None, endpoint: str | None = None, config_id: str = "default"):
+        self._name = table_name or os.environ.get("CONFIG_TABLE", "Config")
+        self._endpoint = endpoint or os.environ.get("DYNAMODB_ENDPOINT")
+        self._id = config_id
+
+    def _t(self):
+        return _table(self._name, self._endpoint)
+
+    def _defaults(self) -> dict:
+        return {
+            "source_channel": os.environ.get("SOURCE_CHANNEL_USERNAME", "iproparts"),
+            "markup_percentage": float(os.environ.get("MARKUP_PERCENTAGE", "15")),
+            "currency_symbols": os.environ.get("CURRENCY_SYMBOLS", DEFAULT_CURRENCY_SYMBOLS),
+            "strip_patterns": list(DEFAULT_LOCATION_PATTERNS),
+            "whatsapp_footer": os.environ.get("WHATSAPP_FOOTER", ""),
+            "image_url": os.environ.get("BROADCAST_IMAGE_URL", ""),
+        }
+
+    def get(self) -> dict:
+        item = self._t().get_item(Key={"configId": self._id}).get("Item") or {}
+        cfg = self._defaults()
+        for k in self._CAMPOS:
+            if item.get(k) is not None:
+                cfg[k] = item[k]
+        cfg["markup_percentage"] = float(cfg["markup_percentage"])
+        cfg["strip_patterns"] = list(cfg["strip_patterns"])
+        return cfg
+
+    def set(self, cambios: dict) -> dict:
+        from decimal import Decimal
+
+        permitidos = {k: v for k, v in cambios.items() if k in self._CAMPOS}
+        if permitidos:
+            names = {f"#k{i}": k for i, k in enumerate(permitidos)}
+            values = {
+                f":v{i}": (Decimal(str(v)) if k == "markup_percentage" else v)
+                for i, (k, v) in enumerate(permitidos.items())
+            }
+            set_expr = "SET " + ", ".join(f"#k{i} = :v{i}" for i in range(len(permitidos)))
+            self._t().update_item(
+                Key={"configId": self._id},
+                UpdateExpression=set_expr,
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
+            )
+        return self.get()

@@ -82,6 +82,33 @@ class DedupStoreTests(unittest.TestCase):
                 store.marcar("42")
 
 
+class ConfigStoreTests(unittest.TestCase):
+    def test_get_mezcla_defaults_con_item(self):
+        from decimal import Decimal
+
+        table = MagicMock()
+        table.get_item.return_value = {
+            "Item": {"configId": "default", "source_channel": "otro", "markup_percentage": Decimal("20")}
+        }
+        store = dynamodb.DynamoDbConfigStore()
+        with patch.object(dynamodb, "_table", return_value=table):
+            cfg = store.get()
+        self.assertEqual(cfg["source_channel"], "otro")        # override
+        self.assertEqual(cfg["markup_percentage"], 20.0)        # Decimal -> float
+        self.assertIsInstance(cfg["markup_percentage"], float)
+        self.assertIn("strip_patterns", cfg)                    # default presente
+        self.assertEqual(cfg["whatsapp_footer"], "")            # default
+
+    def test_set_actualiza_solo_campos_validos(self):
+        table = MagicMock()
+        table.get_item.return_value = {"Item": {}}
+        store = dynamodb.DynamoDbConfigStore()
+        with patch.object(dynamodb, "_table", return_value=table):
+            store.set({"source_channel": "nuevo", "campo_basura": "x"})
+        kw = table.update_item.call_args.kwargs
+        self.assertEqual(set(kw["ExpressionAttributeNames"].values()), {"source_channel"})  # ignora basura
+
+
 class HwmStoreTests(unittest.TestCase):
     def test_obtener_y_guardar(self):
         table = MagicMock()

@@ -23,9 +23,12 @@ El worker hace el broadcast desde la cola: sobrevive a fallos parciales (reinten
 allá del timeout de Lambda. La concurrencia reservada del worker (=1, donde el límite de cuenta lo
 permita) más el delay por envío mantienen el ritmo global bajo 30 msg/s.
 
-> **Markup:** solo marca números con símbolo de moneda (`$`) en formato colombiano (`$325.000`), y
-> redondea el resultado al **mil hacia arriba** (`$325.000` +15% → `$374.000`). No toca modelos ni
-> specs (`A06 4-64GB`). Ver [`domain/markup.py`](src/lambda/domain/markup.py) y `specs/22`.
+> **Composición del mensaje** ([`domain/message.py`](src/lambda/domain/message.py)): a cada lista se le
+> (1) **quita el bloque de ubicación** (patrones configurables), (2) aplica **markup** a los precios y
+> (3) añade un **footer de WhatsApp** opcional. El markup solo toca números con símbolo de moneda
+> (`$`, `💸`, `💲`) en formato colombiano y redondea al **mil hacia arriba** (`$325.000` +15% →
+> `$374.000`), sin tocar modelos/specs (`A06 4-64GB`). Si hay **imagen** configurada, se envía como
+> foto antes de la lista. Todo es editable en runtime desde la [interfaz admin](#interfaz-de-administración).
 
 ## Estructura (Clean Architecture)
 
@@ -163,6 +166,27 @@ https://api.telegram.org/bot<TOKEN>/setWebhook?url=<WebhookUrl>&secret_token=<MI
 Los usuarios se suscriben escribiéndole `/start` al bot por privado (esto es además requisito de
 Telegram para que el bot pueda enviarles DMs). `/stop` los da de baja. El receptor responde la
 confirmación y mantiene su `status` en DynamoDB.
+
+## Interfaz de administración
+
+Panel web en la misma URL pública, protegido con **usuario/contraseña** (HTTP Basic Auth):
+
+```
+https://<api-id>.execute-api.<region>.amazonaws.com/<env>/admin      (output AdminUrl)
+```
+
+Credenciales: parámetros `AdminUser` (default `admin`) y `AdminPassword` (obligatorio en el deploy).
+Permite, en runtime (sin redeploy):
+
+- **Cambiar el canal fuente** que sondea el poller (y markup, símbolos, footer WhatsApp, URL de imagen).
+- **Ver la cola**: profundidad de la cola de broadcast y de la DLQ.
+- **Ver/gestionar suscriptores**: lista con estado y botón activar/desactivar.
+
+Endpoints (todos bajo Basic Auth): `GET /admin` (página), `GET|POST /admin/api/config`,
+`GET /admin/api/subscribers`, `POST /admin/api/subscribers`, `GET /admin/api/queue`.
+
+> Nota: un bot de Telegram **no puede leer los contactos de tu cuenta personal** (limitación de la
+> plataforma). Los destinatarios son quienes le dan `/start` al bot; el panel gestiona esa lista.
 
 ## Recursos AWS creados
 

@@ -11,7 +11,8 @@ from __future__ import annotations
 import re
 from decimal import ROUND_CEILING, Decimal
 
-DEFAULT_CURRENCY_SYMBOLS = "$"
+# El canal marca precios con varios símbolos: "$" y los emojis 💸 (billete) y 💲 (dólar).
+DEFAULT_CURRENCY_SYMBOLS = "$\U0001F4B8\U0001F4B2"
 DEFAULT_MARKUP_PERCENTAGE = 15.0
 _ROUND_TO = 1000
 

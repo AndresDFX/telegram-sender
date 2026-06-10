@@ -7,7 +7,7 @@ import os
 import time
 from typing import Callable, Iterator, Sequence
 
-from application.ports import BroadcastQueue, PartialEnqueueError
+from application.ports import BroadcastQueue, PartialEnqueueError, QueueStats
 
 
 def _chunk(items: Sequence[str], size: int) -> Iterator[list[str]]:
@@ -38,7 +38,7 @@ class SqsBroadcastQueue(BroadcastQueue):
         kwargs = {"endpoint_url": self._endpoint} if self._endpoint else {}
         return boto3.client("sqs", **kwargs)
 
-    def encolar(self, text: str, chat_ids: Sequence[str]) -> int:
+    def encolar(self, text: str, chat_ids: Sequence[str], image_url: str | None = None) -> int:
         if not self._url:
             raise RuntimeError("BROADCAST_QUEUE_URL no configurado")
         if self._size <= 0:
@@ -50,7 +50,9 @@ class SqsBroadcastQueue(BroadcastQueue):
         enqueued = 0
 
         for index, lote in enumerate(lotes):
-            body = json.dumps({"text": text, "chat_ids": lote, "batch_index": index})
+            body = json.dumps(
+                {"text": text, "chat_ids": lote, "batch_index": index, "image_url": image_url}
+            )
             attempt = 0
             while True:
                 try:
@@ -69,9 +71,35 @@ class SqsBroadcastQueue(BroadcastQueue):
 class InlineBroadcastQueue(BroadcastQueue):
     """Entrega de inmediato (dev local sin SQS) delegando en una función de entrega."""
 
-    def __init__(self, deliver: Callable[[str, Sequence[str]], object]):
+    def __init__(self, deliver: Callable[..., object]):
         self._deliver = deliver
 
-    def encolar(self, text: str, chat_ids: Sequence[str]) -> int:
-        self._deliver(text, list(chat_ids))
+    def encolar(self, text: str, chat_ids: Sequence[str], image_url: str | None = None) -> int:
+        self._deliver(text, list(chat_ids), image_url)
         return 1
+
+
+class SqsQueueStats(QueueStats):
+    """Profundidad aproximada de la cola de broadcast y de la DLQ (para el admin)."""
+
+    def __init__(self, queue_url: str | None = None, dlq_url: str | None = None, endpoint: str | None = None):
+        self._url = queue_url or os.environ.get("BROADCAST_QUEUE_URL")
+        self._dlq = dlq_url or os.environ.get("BROADCAST_DLQ_URL")
+        self._endpoint = endpoint or os.environ.get("SQS_ENDPOINT")
+
+    def _client(self):
+        import boto3
+
+        kwargs = {"endpoint_url": self._endpoint} if self._endpoint else {}
+        return boto3.client("sqs", **kwargs)
+
+    def profundidades(self) -> dict:
+        client = self._client()
+
+        def depth(url: str | None) -> int:
+            if not url:
+                return 0
+            resp = client.get_queue_attributes(QueueUrl=url, AttributeNames=["ApproximateNumberOfMessages"])
+            return int(resp["Attributes"].get("ApproximateNumberOfMessages", 0))
+
+        return {"broadcast": depth(self._url), "dlq": depth(self._dlq)}

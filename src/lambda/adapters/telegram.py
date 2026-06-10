@@ -38,9 +38,16 @@ class TelegramSender(MessageSender):
         return self._token
 
     def enviar(self, chat_id: str, text: str) -> SendResult:
-        url = _API.format(token=self._resolve_token(), method="sendMessage")
-        payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+        return self._post("sendMessage", {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}, chat_id)
 
+    def enviar_foto(self, chat_id: str, image_url: str, caption: str = "") -> SendResult:
+        payload = {"chat_id": chat_id, "photo": image_url}
+        if caption:
+            payload["caption"] = caption
+        return self._post("sendPhoto", payload, chat_id)
+
+    def _post(self, method: str, payload: dict, chat_id: str) -> SendResult:
+        url = _API.format(token=self._resolve_token(), method=method)
         attempt = 0
         while True:
             attempt += 1

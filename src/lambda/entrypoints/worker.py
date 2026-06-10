@@ -33,7 +33,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         message_id = record.get("messageId")
         try:
             body = json.loads(record["body"])
-            stats = deliver(body["text"], body.get("chat_ids", []))
+            stats = deliver(body["text"], body.get("chat_ids", []), body.get("image_url"))
             logger.info("Lote %s procesado: %s", body.get("batch_index"), stats.resumen())
             if stats.total > 0 and stats.failed == stats.total:
                 raise RuntimeError(f"Todos los envíos del lote {message_id} fallaron")

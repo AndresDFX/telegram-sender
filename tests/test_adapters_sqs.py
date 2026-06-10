@@ -42,12 +42,12 @@ class SqsQueueTests(unittest.TestCase):
 
 
 class InlineQueueTests(unittest.TestCase):
-    def test_entrega_inmediata(self):
+    def test_entrega_inmediata_con_imagen(self):
         entregados = []
-        q = InlineBroadcastQueue(lambda text, ids: entregados.append((text, list(ids))))
-        n = q.encolar("lista", ["1", "2"])
+        q = InlineBroadcastQueue(lambda text, ids, image_url=None: entregados.append((text, list(ids), image_url)))
+        n = q.encolar("lista", ["1", "2"], image_url="http://img")
         self.assertEqual(n, 1)
-        self.assertEqual(entregados, [("lista", ["1", "2"])])
+        self.assertEqual(entregados, [("lista", ["1", "2"], "http://img")])
 
 
 if __name__ == "__main__":

@@ -34,6 +34,16 @@ class SubscriberRepository(ABC):
     def marcar_inactivo(self, chat_id: str) -> None:
         """Marca inactivo (p.ej. tras un 403). No falla si no existe el flujo de negocio."""
 
+    @abstractmethod
+    def listar_todos(self) -> list[dict]:
+        """Todos los suscriptores con su estado: [{'chatId': ..., 'status': ...}] (para el admin)."""
+
+
+class QueueStats(ABC):
+    @abstractmethod
+    def profundidades(self) -> dict:
+        """Mensajes aproximados en la cola de broadcast y en la DLQ: {'broadcast': n, 'dlq': n}."""
+
 
 class DedupStore(ABC):
     @abstractmethod
@@ -56,17 +66,33 @@ class HighWaterMarkStore(ABC):
 
 class BroadcastQueue(ABC):
     @abstractmethod
-    def encolar(self, text: str, chat_ids: Sequence[str]) -> int:
+    def encolar(self, text: str, chat_ids: Sequence[str], image_url: str | None = None) -> int:
         """Encola el broadcast (en lotes). Devuelve cuántos lotes; lanza PartialEnqueueError si falla a medias."""
 
 
 class MessageSender(ABC):
     @abstractmethod
     def enviar(self, chat_id: str, text: str) -> SendResult:
-        """Envía un DM. Devuelve SendResult(ok/blocked); lanza ante errores no recuperables."""
+        """Envía un DM de texto. Devuelve SendResult(ok/blocked); lanza ante errores no recuperables."""
+
+    @abstractmethod
+    def enviar_foto(self, chat_id: str, image_url: str, caption: str = "") -> SendResult:
+        """Envía una foto (por URL) con caption opcional."""
 
 
 class ChannelReader(ABC):
     @abstractmethod
     def leer_publicaciones(self, channel: str) -> list[Post]:
         """Publicaciones (con texto) del canal público, en orden de aparición."""
+
+
+class ConfigStore(ABC):
+    @abstractmethod
+    def get(self) -> dict:
+        """Configuración efectiva (defaults de entorno mezclados con overrides guardados):
+        source_channel, markup_percentage, currency_symbols, strip_patterns,
+        whatsapp_footer, image_url."""
+
+    @abstractmethod
+    def set(self, cambios: dict) -> dict:
+        """Persiste un cambio parcial y devuelve la config resultante."""

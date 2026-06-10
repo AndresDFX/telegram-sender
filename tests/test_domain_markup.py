@@ -38,6 +38,11 @@ class MarkupTests(unittest.TestCase):
     def test_con_espacio_tras_simbolo(self):
         self.assertEqual(aplicar_markup("$ 100.000", 15), "$115.000")
 
+    def test_reconoce_emojis_de_moneda(self):
+        billete, dolar = "\U0001F4B8", "\U0001F4B2"  # 💸 y 💲 que usa el canal
+        self.assertEqual(aplicar_markup(billete + "2.400.000", 15), billete + "2.760.000")
+        self.assertEqual(aplicar_markup(dolar + "1.950.000", 15), dolar + "2.243.000")
+
     def test_default_15_y_sin_precios(self):
         self.assertEqual(aplicar_markup("$100.000"), "$115.000")  # default 15%
         self.assertEqual(aplicar_markup("sin precios"), "sin precios")

@@ -34,6 +34,19 @@ Parameters:
       X-Telegram-Bot-Api-Secret-Token y el receptor lo valida en tiempo constante.
       Obligatorio: el endpoint está expuesto y sin él se rechaza toda petición.
 
+  AdminUser:
+    Type: String
+    Default: admin
+    Description: Usuario de la interfaz web de administración (Basic Auth).
+
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 128
+    ConstraintDescription: 8-128 caracteres. Obligatorio (la GUI es fail-closed).
+    Description: Contraseña de la interfaz web (Basic Auth). Sin ella, el panel rechaza todo.
+
   SourceChannelId:
     Type: String
     Default: ""
@@ -175,6 +188,24 @@ Resources:
         - Key: Environment
           Value: !Ref EnvironmentName
 
+  # Config editable en runtime (canal, markup, símbolos, ubicación, whatsapp, imagen).
+  ConfigTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${EnvironmentName}-config"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: configId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: configId
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
   # --- Cola de broadcast + DLQ -------------------------------------------------
   BroadcastDLQ:
     Type: AWS::SQS::Queue
@@ -236,6 +267,11 @@ Resources:
                   - !GetAtt ProcessedUpdatesTable.Arn
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem # leer config (canal/markup/footer/imagen)
+                Resource:
+                  - !GetAtt ConfigTable.Arn
+              - Effect: Allow
+                Action:
                   - sqs:SendMessage
                 Resource:
                   - !GetAtt BroadcastQueue.Arn
@@ -291,6 +327,7 @@ Resources:
           SUBSCRIBERS_TABLE: !Ref SubscribersTable
           SUBSCRIBERS_STATUS_INDEX: StatusIndex
           PROCESSED_UPDATES_TABLE: !Ref ProcessedUpdatesTable
+          CONFIG_TABLE: !Ref ConfigTable
           DEDUP_TTL_SECONDS: !Ref DedupTtlSeconds
           SOURCE_CHANNEL_ID: !Ref SourceChannelId
           MARKUP_PERCENTAGE: !Ref MarkupPercentage
@@ -379,6 +416,11 @@ Resources:
                   - !GetAtt ProcessedUpdatesTable.Arn
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem # leer config (canal/markup/footer/imagen)
+                Resource:
+                  - !GetAtt ConfigTable.Arn
+              - Effect: Allow
+                Action:
                   - sqs:SendMessage
                 Resource:
                   - !GetAtt BroadcastQueue.Arn
@@ -402,6 +444,7 @@ Resources:
           SUBSCRIBERS_TABLE: !Ref SubscribersTable
           SUBSCRIBERS_STATUS_INDEX: StatusIndex
           PROCESSED_UPDATES_TABLE: !Ref ProcessedUpdatesTable
+          CONFIG_TABLE: !Ref ConfigTable
           BROADCAST_QUEUE_URL: !Ref BroadcastQueue
           BROADCAST_BATCH_SIZE: !Ref BroadcastBatchSize
           MARKUP_PERCENTAGE: !Ref MarkupPercentage
@@ -430,6 +473,72 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt PollerSchedule.Arn
 
+  # --- Interfaz web de administración -----------------------------------------
+  AdminExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${EnvironmentName}-admin-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AdminAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem # leer config
+                  - dynamodb:UpdateItem # guardar config
+                Resource:
+                  - !GetAtt ConfigTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan # listar suscriptores
+                  - dynamodb:UpdateItem # activar/desactivar
+                Resource:
+                  - !GetAtt SubscribersTable.Arn
+              - Effect: Allow
+                Action:
+                  - sqs:GetQueueAttributes # profundidad de cola/DLQ
+                Resource:
+                  - !GetAtt BroadcastQueue.Arn
+                  - !GetAtt BroadcastDLQ.Arn
+
+  AdminFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-${EnvironmentName}-admin"
+      Description: Interfaz web de administración (config, cola, suscriptores) con Basic Auth.
+      Runtime: python3.12
+      Handler: entrypoints.admin.lambda_handler
+      Role: !GetAtt AdminExecutionRole.Arn
+      Timeout: 30
+      MemorySize: !Ref LambdaMemorySize
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          CONFIG_TABLE: !Ref ConfigTable
+          SUBSCRIBERS_TABLE: !Ref SubscribersTable
+          SUBSCRIBERS_STATUS_INDEX: StatusIndex
+          BROADCAST_QUEUE_URL: !Ref BroadcastQueue
+          BROADCAST_DLQ_URL: !Ref BroadcastDLQ
+          ADMIN_USER: !Ref AdminUser
+          ADMIN_PASSWORD: !Ref AdminPassword
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
   # --- API Gateway HTTP -------------------------------------------------------
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
@@ -453,6 +562,36 @@ Resources:
       RouteKey: "POST /webhook/telegram"
       Target: !Sub "integrations/${WebhookIntegration}"
 
+  AdminIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AdminFunction.Arn}/invocations"
+      PayloadFormatVersion: "2.0"
+
+  AdminRoot:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "GET /admin"
+      Target: !Sub "integrations/${AdminIntegration}"
+
+  AdminProxy:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "ANY /admin/{proxy+}"
+      Target: !Sub "integrations/${AdminIntegration}"
+
+  AdminInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref AdminFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
   HttpApiStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
@@ -472,6 +611,10 @@ Outputs:
   WebhookUrl:
     Description: URL para registrar en setWebhook de Telegram.
     Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}/webhook/telegram"
+
+  AdminUrl:
+    Description: URL de la interfaz web de administración (Basic Auth).
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}/admin"
 
   SubscribersTableName:
     Description: Tabla DynamoDB de suscriptores.

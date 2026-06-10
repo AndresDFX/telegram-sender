@@ -41,13 +41,25 @@ class FakeBroadcast:
         return {"batches": 1, "subscribers": 1}
 
 
+class FakeConfig:
+    def __init__(self, channel="ch"):
+        self._channel = channel
+
+    def get(self):
+        return {"source_channel": self._channel}
+
+    def set(self, cambios):
+        return self.get()
+
+
 POSTS = [Post(1001, "A $325.000"), Post(1002, "B $100.000")]
+CFG = FakeConfig("ch")
 
 
 class PollChannelTests(unittest.TestCase):
     def test_primera_ejecucion_siembra_sin_difundir(self):
         hwm, bc = FakeHwm(None), FakeBroadcast()
-        res = PollChannel(FakeReader(POSTS), hwm, bc, "ch")()
+        res = PollChannel(FakeReader(POSTS), hwm, bc, CFG)()
         self.assertEqual(res["seeded"], 1002)
         self.assertEqual(res["new"], 0)
         self.assertEqual(bc.textos, [])
@@ -55,19 +67,19 @@ class PollChannelTests(unittest.TestCase):
 
     def test_solo_difunde_nuevos(self):
         hwm, bc = FakeHwm(1001), FakeBroadcast()
-        res = PollChannel(FakeReader(POSTS), hwm, bc, "ch")()
+        res = PollChannel(FakeReader(POSTS), hwm, bc, CFG)()
         self.assertEqual(res["new"], 1)
         self.assertEqual(bc.textos, ["B $100.000"])
         self.assertEqual(hwm.value, 1002)
 
     def test_sin_nuevos(self):
         hwm, bc = FakeHwm(1002), FakeBroadcast()
-        res = PollChannel(FakeReader(POSTS), hwm, bc, "ch")()
+        res = PollChannel(FakeReader(POSTS), hwm, bc, CFG)()
         self.assertEqual(res["new"], 0)
         self.assertEqual(bc.textos, [])
 
     def test_preview_vacio(self):
-        res = PollChannel(FakeReader([]), FakeHwm(1), FakeBroadcast(), "ch")()
+        res = PollChannel(FakeReader([]), FakeHwm(1), FakeBroadcast(), CFG)()
         self.assertEqual(res, {"checked": 0, "new": 0})
 
 

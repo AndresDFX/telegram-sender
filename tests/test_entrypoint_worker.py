@@ -31,7 +31,7 @@ class WorkerTests(unittest.TestCase):
         worker.deliver = MagicMock(return_value=_stats(2, sent=2))
         event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1", "2"]})]}
         self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [])
-        worker.deliver.assert_called_once_with("x", ["1", "2"])
+        worker.deliver.assert_called_once_with("x", ["1", "2"], None)
 
     def test_fallo_sistemico_reporta(self):
         worker.deliver = MagicMock(return_value=_stats(2, failed=2))

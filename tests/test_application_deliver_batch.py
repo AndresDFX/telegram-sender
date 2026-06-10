@@ -17,6 +17,7 @@ class FakeSender:
     def __init__(self, outcomes=None):
         self.outcomes = outcomes or {}
         self.calls = []
+        self.fotos = []
 
     def enviar(self, chat_id, text):
         self.calls.append((chat_id, text))
@@ -24,6 +25,10 @@ class FakeSender:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+    def enviar_foto(self, chat_id, image_url, caption=""):
+        self.fotos.append((chat_id, image_url))
+        return SendResult(ok=True)
 
 
 class FakeSubscribers:
@@ -64,6 +69,14 @@ class DeliverBatchTests(unittest.TestCase):
         deliver = DeliverBatch(FakeSender(), FakeSubscribers(), delay=0.05, sleep=sleeps.append)
         deliver("x", ["1", "2"])
         self.assertEqual(sleeps, [0.05, 0.05])
+
+    def test_envia_foto_y_texto_cuando_hay_imagen(self):
+        sender = FakeSender()
+        deliver = DeliverBatch(sender, FakeSubscribers(), delay=0)
+        stats = deliver("lista", ["1", "2"], image_url="http://img/p.jpg")
+        self.assertEqual(stats.sent, 2)
+        self.assertEqual(sender.fotos, [("1", "http://img/p.jpg"), ("2", "http://img/p.jpg")])  # foto por chat
+        self.assertEqual([c[0] for c in sender.calls], ["1", "2"])  # y el texto
 
     def test_fallo_al_inactivar_no_rompe(self):
         class BadSubs(FakeSubscribers):
