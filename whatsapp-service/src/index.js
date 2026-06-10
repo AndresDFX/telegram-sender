@@ -112,6 +112,25 @@ app.get('/', (req, res) =>
 
 app.get('/health', (req, res) => res.json({ ok: true }))
 
+// Página de QR en vivo (mismo origen → sin CORS). El token va por query para abrirla
+// directo en el navegador. El QR se auto-renueva y avisa cuando conecta.
+app.get('/qr', (req, res) => {
+  if ((req.query.token || '') !== TOKEN) return res.status(401).type('html').send('token inválido')
+  res.type('html').send(
+    '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>Vincular WhatsApp · Sender</title>' +
+      '<body style="font-family:system-ui;text-align:center;background:#0b1020;color:#e6ebff;padding:28px;margin:0">' +
+      '<h2>Vincular WhatsApp · Sender</h2><div id="s">cargando…</div>' +
+      '<img id="q" style="width:300px;height:300px;margin:18px;background:#fff;border-radius:10px;padding:10px;object-fit:contain"/>' +
+      '<p style="color:#8b96b8">WhatsApp → Dispositivos vinculados → Vincular un dispositivo</p>' +
+      '<script>const tok=new URLSearchParams(location.search).get("token");' +
+      'async function tick(){try{const r=await fetch("/status",{headers:{Authorization:"Bearer "+tok}});const s=await r.json();' +
+      'if(s.connected){document.getElementById("s").textContent="✅ Conectado"+(s.me?(" como "+s.me.id):"");document.getElementById("q").style.display="none";return;}' +
+      'if(s.qr){document.getElementById("q").src=s.qr;document.getElementById("s").textContent="Escanea el QR (se renueva solo):";}' +
+      'else{document.getElementById("s").textContent="esperando QR…";}}catch(e){}setTimeout(tick,3000);}tick();</script>'
+  )
+})
+
 app.get('/status', auth, (req, res) =>
   res.json({
     connected,
