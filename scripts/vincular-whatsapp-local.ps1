@@ -1,13 +1,16 @@
-# Vincula tu WhatsApp ejecutando el servicio LOCALMENTE (desde tu IP residencial,
-# que WhatsApp acepta mejor que una IP de datacenter). La sesión se guarda en DynamoDB,
-# así que Render la reutiliza después sin re-escanear.
+# Vincula tu WhatsApp ejecutando el servicio LOCALMENTE (desde tu IP residencial, que
+# WhatsApp acepta mejor que una IP de datacenter). La sesion se guarda en DynamoDB, asi
+# que Render la reutiliza despues sin re-escanear.
 #
-# Uso (desde la raíz del repo):
-#   ./scripts/vincular-whatsapp-local.ps1                 # QR en vivo en el navegador
-#   ./scripts/vincular-whatsapp-local.ps1 -Pair 573001234567   # código de 8 dígitos
-#   ./scripts/vincular-whatsapp-local.ps1 -Reset          # borra la sesión y re-vincula
+# NOTA: solo ASCII a proposito. Windows PowerShell 5.1 lee los .ps1 UTF-8-sin-BOM como
+# ANSI; un acento puede decodificarse como comilla tipografica y romper el parseo.
 #
-# Requisitos: Docker Desktop corriendo; .env.aws y .env.deploy presentes en la raíz.
+# Uso (desde la raiz del repo):
+#   ./scripts/vincular-whatsapp-local.ps1                        # QR en vivo en el navegador
+#   ./scripts/vincular-whatsapp-local.ps1 -Pair 573001234567     # codigo de 8 digitos
+#   ./scripts/vincular-whatsapp-local.ps1 -Reset                 # borra la sesion y re-vincula
+#
+# Requisitos: Docker Desktop corriendo; .env.aws y .env.deploy en la raiz.
 param(
   [switch]$Reset,
   [int]$Port = 8099,
@@ -31,12 +34,13 @@ $aws = Load-EnvFile (Join-Path $Root '.env.aws')
 $dep = Load-EnvFile (Join-Path $Root '.env.deploy')
 $tok = $dep['WHATSAPP_TOKEN']
 $tbl = 'telegram-sync-dev-whatsapp-auth'
+$hdr = @{ Authorization = "Bearer $tok" }
 
 Write-Host "==> Construyendo imagen sender-wa..." -ForegroundColor Cyan
 $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 docker build -t sender-wa (Join-Path $Root 'whatsapp-service') | Out-Host
 $code = $LASTEXITCODE; $ErrorActionPreference = $prev
-if ($code -ne 0) { throw "docker build falló ($code)" }
+if ($code -ne 0) { throw "docker build fallo ($code)" }
 
 docker rm -f sender-wa-local 2>$null | Out-Null
 Write-Host "==> Levantando contenedor en :$Port..." -ForegroundColor Cyan
@@ -52,22 +56,25 @@ for ($i = 0; $i -lt 20; $i++) {
 }
 
 if ($Reset) {
-  Write-Host "==> Reiniciando sesión (POST /reset)..." -ForegroundColor Cyan
+  Write-Host "==> Reiniciando sesion (POST /reset)..." -ForegroundColor Cyan
   try {
-    Invoke-RestMethod "$base/reset" -Method POST -Headers @{Authorization = "Bearer $tok" } -TimeoutSec 20 | Out-Null
-    Write-Host "   sesión reiniciada"
+    Invoke-RestMethod "$base/reset" -Method POST -Headers $hdr -TimeoutSec 20 | Out-Null
+    Write-Host "   sesion reiniciada"
     Start-Sleep -Seconds 3
-  } catch { Write-Host "   /reset falló: $_" -ForegroundColor Red }
+  } catch { Write-Host "   /reset fallo: $_" -ForegroundColor Red }
 }
 
 if ($Pair) {
   $num = ($Pair -replace '[^0-9]', '')
-  Write-Host "==> Pidiendo código de emparejamiento para $num..." -ForegroundColor Cyan
+  Write-Host "==> Pidiendo codigo de emparejamiento para $num..." -ForegroundColor Cyan
   Start-Sleep -Seconds 3
-  $r = Invoke-RestMethod "$base/pair" -Method POST -Headers @{Authorization = "Bearer $tok" } -ContentType 'application/json' -Body "{`"number`":`"$num`"}" -TimeoutSec 30
-  Write-Host ""
-  Write-Host "  CÓDIGO: $($r.pairingCode)" -ForegroundColor Green
-  Write-Host "  WhatsApp -> Dispositivos vinculados -> Vincular con número de teléfono -> ingresa el código." -ForegroundColor Yellow
+  $body = @{ number = $num } | ConvertTo-Json -Compress
+  try {
+    $r = Invoke-RestMethod "$base/pair" -Method POST -Headers $hdr -ContentType 'application/json' -Body $body -TimeoutSec 30
+    Write-Host ""
+    Write-Host "  CODIGO: $($r.pairingCode)" -ForegroundColor Green
+    Write-Host "  WhatsApp -> Dispositivos vinculados -> Vincular con numero de telefono -> ingresa el codigo." -ForegroundColor Yellow
+  } catch { Write-Host "  /pair fallo: $_" -ForegroundColor Red }
 }
 else {
   $url = "$base/qr?token=$tok"
@@ -77,12 +84,12 @@ else {
 }
 
 Write-Host ""
-Write-Host "Esperando vinculación (Ctrl+C para salir)..." -ForegroundColor Cyan
+Write-Host "Esperando vinculacion (Ctrl+C para salir)..." -ForegroundColor Cyan
 for ($i = 0; $i -lt 100; $i++) {
   try {
-    $s = Invoke-RestMethod "$base/status" -Headers @{Authorization = "Bearer $tok" } -TimeoutSec 8
-    if ($s.connected) { Write-Host "✅ CONECTADO como $($s.me.id). La sesión quedó en DynamoDB; Render la reutilizará." -ForegroundColor Green; break }
+    $s = Invoke-RestMethod "$base/status" -Headers $hdr -TimeoutSec 8
+    if ($s.connected) { Write-Host "OK: CONECTADO como $($s.me.id). La sesion quedo en DynamoDB; Render la reutilizara." -ForegroundColor Green; break }
   } catch {}
   Start-Sleep -Seconds 3
 }
-Write-Host "(El contenedor sigue corriendo como 'sender-wa-local'. Páralo con: docker rm -f sender-wa-local)"
+Write-Host "(El contenedor sigue corriendo como 'sender-wa-local'. Detenlo con: docker rm -f sender-wa-local)"
