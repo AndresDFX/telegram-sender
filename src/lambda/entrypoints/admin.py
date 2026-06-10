@@ -288,6 +288,13 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
  .toast.show{opacity:1;transform:none}.toast.err{background:var(--bad);color:#3b0712}
  .err{color:var(--bad);font-size:13px;min-height:18px;margin-top:8px}
  img.preview{max-width:160px;border-radius:10px;margin-top:10px;border:1px solid var(--bd)}
+ /* navegación por módulos */
+ .nav{position:sticky;top:51px;z-index:4;background:rgba(11,16,32,.85);backdrop-filter:blur(8px);
+   display:flex;gap:8px;justify-content:center;padding:14px 16px;border-bottom:1px solid var(--bd);flex-wrap:wrap}
+ .nav button{background:#1c2540;border:1px solid var(--bd);color:var(--mut);padding:9px 18px;border-radius:999px;font-weight:600}
+ .nav button.on{background:linear-gradient(90deg,var(--ac),#818cf8);color:#fff;border-color:transparent}
+ main>.card{display:none}
+ main>.card.show{display:block}
 </style></head><body>
 
 <div id="login"><div class="box">
@@ -302,13 +309,19 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <div id="app">
  <header><div class="t">📦 TelegramSender</div><div><span class="u" id="who"></span>
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
+ <nav class="nav">
+   <button data-tab="msg" onclick="showTab('msg')">📝 Mensaje</button>
+   <button data-tab="telegram" onclick="showTab('telegram')">✈️ Telegram</button>
+   <button data-tab="whatsapp" onclick="showTab('whatsapp')">🟢 WhatsApp</button>
+   <button data-tab="estado" onclick="showTab('estado')">📊 Estado</button>
+ </nav>
  <main>
-  <div class="card"><h2>Aumento (markup)</h2>
+  <div class="card" data-tab="msg"><h2>Aumento (markup)</h2>
    <div class="markup"><input id="markup_percentage" type="number" step="0.1"><div>
      <div style="font-size:13px">% que se suma a cada precio</div>
      <div class="hint">Ej: $325.000 + 15% → $374.000 (redondeo al mil ↑)</div></div></div>
   </div>
-  <div class="card"><h2>Cuenta de Telegram</h2>
+  <div class="card" data-tab="telegram"><h2>Cuenta de Telegram</h2>
    <label>Modo de envío</label>
    <select id="send_mode"><option value="bot">Bot — a suscriptores que dan /start</option><option value="userbot">Userbot — desde mi cuenta a mis contactos</option></select>
    <div class="row">
@@ -320,7 +333,7 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
    <div class="hint">Genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a tu cuenta: trátala como secreto.</div>
    <button onclick="saveAccount()">Guardar cuenta</button>
   </div>
-  <div class="card"><h2>WhatsApp (reenvío)</h2>
+  <div class="card" data-tab="whatsapp"><h2>WhatsApp (reenvío)</h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="whatsapp_enabled" style="width:auto"> Reenviar también cada lista por WhatsApp</label>
    <label>URL del servicio WhatsApp</label><input id="whatsapp_service_url" placeholder="https://...onrender.com">
    <label>Token del servicio <span id="wa_tok_status" class="hint"></span></label>
@@ -335,31 +348,31 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
    <button onclick="saveWhatsapp()">Guardar exclusiones WhatsApp</button>
    <div class="hint">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza excluyendo casi todos y prueba con pocos.</div>
   </div>
-  <div class="card"><h2>Canal y mensaje</h2>
+  <div class="card" data-tab="msg"><h2>Canal y mensaje</h2>
    <label>Canal fuente (username sin @)</label><input id="source_channel">
    <label>Símbolos de moneda</label><input id="currency_symbols">
    <label>Footer WhatsApp (se añade al final de cada lista)</label><textarea id="whatsapp_footer"></textarea>
    <label>Patrones a quitar (ubicación), uno por línea</label><textarea id="strip_patterns"></textarea>
    <button onclick="saveCfg()">Guardar cambios</button>
   </div>
-  <div class="card"><h2>Imagen de la lista</h2>
+  <div class="card" data-tab="msg"><h2>Imagen de la lista</h2>
    <div class="hint">Se envía como foto antes de cada lista. Sube un archivo o pega una URL.</div>
    <input type="file" id="imgfile" accept="image/*" style="margin-top:10px" onchange="uploadImg()">
    <img id="imgprev" class="preview" style="display:none">
    <label>…o URL externa</label><input id="image_url" placeholder="https://...">
    <button class="sec" onclick="saveCfg()">Guardar URL</button>
   </div>
-  <div class="card"><h2>Excluir destinatarios</h2>
+  <div class="card" data-tab="telegram"><h2>Excluir destinatarios</h2>
    <div class="hint">chat IDs que NO recibirán las listas, uno por línea.</div>
    <textarea id="excluded_ids" style="margin-top:8px"></textarea>
    <button onclick="saveCfg()">Guardar exclusiones</button>
   </div>
-  <div class="card"><h2>Cola de mensajes</h2>
+  <div class="card" data-tab="estado"><h2>Cola de mensajes</h2>
    <div class="stats"><div class="stat"><b id="q_b">–</b><span>en cola</span></div>
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
    <button class="sec" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
   </div>
-  <div class="card"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
+  <div class="card" data-tab="telegram"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
    <input id="subsearch" placeholder="🔎 Buscar por nombre o id..." oninput="onSearch()" style="margin-top:10px">
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
@@ -378,7 +391,7 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
      <button class="sec" onclick="nextPage()">▶</button>
    </div>
   </div>
-  <div class="card"><h2>Listas de distribución · Telegram</h2>
+  <div class="card" data-tab="telegram"><h2>Listas de distribución · Telegram</h2>
    <div class="hint">Agrupa contactos en listas con nombre y elige a quién enviar. "+ marcados" usa los contactos marcados arriba en <b>Destinatarios</b>.</div>
    <div id="tg_lists" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;margin-top:10px"><input id="tg_newlist" placeholder="Nombre de nueva lista"><button class="sec" onclick="addList('telegram')">Crear lista</button></div>
@@ -389,7 +402,7 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
    </div>
    <button onclick="saveLists('telegram')">Guardar listas Telegram</button>
   </div>
-  <div class="card"><h2>Destinatarios WhatsApp</h2>
+  <div class="card" data-tab="whatsapp"><h2>Destinatarios WhatsApp</h2>
    <div class="hint">Carga los contactos de tu WhatsApp (requiere el servicio conectado) para armar listas.</div>
    <button class="sec" style="margin-top:10px" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button> <span id="wa_c_count" class="hint"></span>
    <input id="wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="renderWa()" style="margin-top:10px">
@@ -397,7 +410,7 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
    <table><thead><tr><th></th><th>nombre / número</th></tr></thead><tbody id="wa_subs"></tbody></table>
    <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button class="sec" onclick="waPrev()">◀</button><span id="wa_pageinfo" class="hint"></span><button class="sec" onclick="waNext()">▶</button></div>
   </div>
-  <div class="card"><h2>Listas de distribución · WhatsApp</h2>
+  <div class="card" data-tab="whatsapp"><h2>Listas de distribución · WhatsApp</h2>
    <div class="hint">"+ marcados" usa los contactos marcados arriba en <b>Destinatarios WhatsApp</b>.</div>
    <div id="wa_lists" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;margin-top:10px"><input id="wa_newlist" placeholder="Nombre de nueva lista"><button class="sec" onclick="addList('whatsapp')">Crear lista</button></div>
@@ -539,6 +552,11 @@ function waSelectedIds(){ return [...document.querySelectorAll('.wsel:checked')]
 function waToggleAll(v){ document.querySelectorAll('.wsel').forEach(c=>c.checked=v); }
 function waPrev(){ WA_PAGE--; renderWa(); }
 function waNext(){ WA_PAGE++; renderWa(); }
-function boot(){ loadCfg(); loadQueue(); loadSubs(); }
+function showTab(t){
+  document.querySelectorAll('main>.card').forEach(c=>c.classList.toggle('show', c.dataset.tab===t));
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===t));
+  try{ localStorage.setItem('tab',t); }catch(e){}
+  window.scrollTo(0,0); }
+function boot(){ showTab((()=>{try{return localStorage.getItem('tab')}catch(e){return null}})()||'msg'); loadCfg(); loadQueue(); loadSubs(); }
 if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } }).catch(()=>{}); }
 </script></body></html>"""
