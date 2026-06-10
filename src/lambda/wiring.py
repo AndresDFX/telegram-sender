@@ -1,7 +1,7 @@
 """Composition root: construye los casos de uso cableando adapters y configuración.
 
-Es la única capa que conoce a la vez los casos de uso y las implementaciones
-concretas. Los entrypoints piden aquí sus dependencias ya cableadas.
+Conmuta entre modo **bot** (envía como bot a los suscriptores que dieron /start) y
+modo **userbot** (envía como TU cuenta vía Telethon a tus contactos) según SEND_MODE.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from adapters.dynamodb import (
 from adapters.s3 import S3ImageStore
 from adapters.sqs import InlineBroadcastQueue, SqsBroadcastQueue, SqsQueueStats
 from adapters.telegram import TelegramSender
+from adapters.telethon_user import ContactRecipients, TelethonContacts, TelethonUserSender
 from adapters.tme import TmePreviewChannelReader
 from application.broadcasting import BroadcastList
 from application.deliver_batch import DeliverBatch
@@ -23,12 +24,17 @@ from application.onboarding import HandleCommand
 from application.poll_channel import PollChannel
 
 
-def _subscribers() -> DynamoDbSubscriberRepository:
-    return DynamoDbSubscriberRepository()
+def _userbot() -> bool:
+    return config.send_mode() == "userbot"
 
 
-def _sender() -> TelegramSender:
-    return TelegramSender(bot_token=config.bot_token())
+def _recipients():
+    """Destinatarios: contactos de la cuenta (userbot) o suscriptores del bot."""
+    return ContactRecipients(TelethonContacts()) if _userbot() else DynamoDbSubscriberRepository()
+
+
+def _sender():
+    return TelethonUserSender() if _userbot() else TelegramSender(bot_token=config.bot_token())
 
 
 def build_config_store() -> DynamoDbConfigStore:
@@ -36,14 +42,13 @@ def build_config_store() -> DynamoDbConfigStore:
 
 
 def _broadcast_list() -> BroadcastList:
-    subs = _subscribers()
+    recipients = _recipients()
     if config.broadcast_queue_url():
         queue = SqsBroadcastQueue()
     else:
-        # Dev local sin SQS: entrega inmediata (el envío inline NO lanza, ver DeliverBatch).
-        deliver = DeliverBatch(_sender(), subs, delay=config.send_delay_seconds())
+        deliver = DeliverBatch(_sender(), recipients, delay=config.send_delay_seconds())
         queue = InlineBroadcastQueue(lambda text, ids, image_url=None: deliver(text, ids, image_url))
-    return BroadcastList(subs, queue, build_config_store())
+    return BroadcastList(recipients, queue, build_config_store())
 
 
 def build_dedup() -> DynamoDbDedupStore:
@@ -58,12 +63,14 @@ def build_image_store() -> S3ImageStore:
     return S3ImageStore()
 
 
-def build_subscribers() -> DynamoDbSubscriberRepository:
-    return _subscribers()
+def build_subscribers():
+    """Lo que el panel muestra como 'destinatarios' (suscriptores o contactos)."""
+    return _recipients()
 
 
 def build_handle_command() -> HandleCommand:
-    return HandleCommand(_subscribers(), _sender())
+    # El onboarding /start solo aplica al modo bot; en userbot el sender es Telethon.
+    return HandleCommand(DynamoDbSubscriberRepository(), TelegramSender(bot_token=config.bot_token()))
 
 
 def build_broadcast_list() -> BroadcastList:
@@ -71,7 +78,7 @@ def build_broadcast_list() -> BroadcastList:
 
 
 def build_deliver_batch() -> DeliverBatch:
-    return DeliverBatch(_sender(), _subscribers(), delay=config.send_delay_seconds())
+    return DeliverBatch(_sender(), _recipients(), delay=config.send_delay_seconds())
 
 
 def build_poll_channel() -> PollChannel:

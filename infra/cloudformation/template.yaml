@@ -54,6 +54,33 @@ Parameters:
       ID del canal fuente (-100...). Vacío acepta cualquier channel_post; en prod,
       fíjalo para que solo tu canal pueda disparar broadcasts (autorización de contenido).
 
+  SendMode:
+    Type: String
+    Default: bot
+    AllowedValues:
+      - bot
+      - userbot
+    Description: >
+      bot = envía como bot a los suscriptores (/start); userbot = envía como TU cuenta
+      (Telethon) a tus contactos. userbot requiere TelethonApiId/Hash/Session.
+
+  TelethonApiId:
+    Type: String
+    Default: ""
+    Description: API ID de my.telegram.org (solo modo userbot).
+
+  TelethonApiHash:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: API Hash de my.telegram.org (solo modo userbot).
+
+  TelethonSession:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: StringSession generado con scripts/generar_sesion.py (solo modo userbot; acceso total a tu cuenta).
+
   SourceChannelUsername:
     Type: String
     Default: iproparts
@@ -374,6 +401,10 @@ Resources:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
           SEND_DELAY_SECONDS: !Ref SendDelaySeconds
           IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
+          SEND_MODE: !Ref SendMode
+          TELETHON_API_ID: !Ref TelethonApiId
+          TELETHON_API_HASH: !Ref TelethonApiHash
+          TELETHON_SESSION: !Ref TelethonSession
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -454,6 +485,10 @@ Resources:
           BROADCAST_QUEUE_URL: !Ref BroadcastQueue
           BROADCAST_BATCH_SIZE: !Ref BroadcastBatchSize
           MARKUP_PERCENTAGE: !Ref MarkupPercentage
+          SEND_MODE: !Ref SendMode
+          TELETHON_API_ID: !Ref TelethonApiId
+          TELETHON_API_HASH: !Ref TelethonApiHash
+          TELETHON_SESSION: !Ref TelethonSession
       Tags:
         - Key: Project
           Value: !Ref ProjectName

@@ -21,6 +21,11 @@ def admin_user() -> str:
     return os.environ.get("ADMIN_USER", "admin")
 
 
+def send_mode() -> str:
+    """'bot' (envía como bot a suscriptores) o 'userbot' (envía como tu cuenta a tus contactos)."""
+    return os.environ.get("SEND_MODE", "bot").strip().lower()
+
+
 def markup_percentage() -> float:
     return float(os.environ.get("MARKUP_PERCENTAGE", "15"))
 
