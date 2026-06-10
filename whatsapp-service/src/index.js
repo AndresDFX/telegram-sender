@@ -50,7 +50,11 @@ let contactsSaveTimer = null
 
 function recordContact(c) {
   if (!c || !c.id) return
-  contacts[c.id] = c.name || c.notify || c.verifiedName || contacts[c.id] || ''
+  if (c.name) {
+    contacts[c.id] = c.name // nombre de tu agenda: máxima prioridad, gana siempre
+  } else if (!contacts[c.id]) {
+    contacts[c.id] = c.notify || c.verifiedName || '' // solo si no hay nada, no degradar
+  }
   scheduleSaveContacts()
 }
 
@@ -144,6 +148,17 @@ async function doStart() {
     s.ev.on('contacts.upsert', (cs) => cs.forEach(recordContact))
     s.ev.on('contacts.update', (cs) => cs.forEach(recordContact))
     s.ev.on('messaging-history.set', ({ contacts: cs }) => (cs || []).forEach(recordContact))
+    // (B) Captura el pushName de mensajes entrantes: rellena nombres con la actividad,
+    // sin pisar el nombre de agenda ya guardado.
+    s.ev.on('messages.upsert', ({ messages }) => {
+      for (const m of messages || []) {
+        const jid = m.key?.remoteJid
+        if (jid && jid.endsWith('@s.whatsapp.net') && !m.key.fromMe && m.pushName && !contacts[jid]) {
+          contacts[jid] = m.pushName
+          scheduleSaveContacts()
+        }
+      }
+    })
 
     // Vinculación por código (8 dígitos): una sola vez por socket si hay número y no está registrado.
     if (pairNumber && !s.authState.creds.registered) {
@@ -299,6 +314,15 @@ app.post('/pair', auth, async (req, res) => {
   pairingCode = null
   restart() // vuelve a modo QR (sin await)
   return res.status(504).json({ error: 'sin_codigo', detalle })
+})
+
+// Reconecta releyendo las credenciales de DynamoDB SIN borrarlas. Útil para que un host
+// (p.ej. Render) tome una sesión recién (re)vinculada por otro host, o salga de loggedOut.
+app.post('/reconnect', auth, async (req, res) => {
+  pairNumber = null
+  pairingCode = null
+  await restart()
+  res.json({ ok: true })
 })
 
 // Reinicia desde cero: borra la sesión guardada y regenera QR. Útil si quedó en mal estado.
