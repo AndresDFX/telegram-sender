@@ -148,6 +148,8 @@ class DynamoDbConfigStore(ConfigStore):
         "strip_patterns",
         "whatsapp_footer",
         "image_url",
+        "image_key",
+        "excluded_ids",
     )
 
     def __init__(self, table_name: str | None = None, endpoint: str | None = None, config_id: str = "default"):
@@ -166,6 +168,8 @@ class DynamoDbConfigStore(ConfigStore):
             "strip_patterns": list(DEFAULT_LOCATION_PATTERNS),
             "whatsapp_footer": os.environ.get("WHATSAPP_FOOTER", ""),
             "image_url": os.environ.get("BROADCAST_IMAGE_URL", ""),
+            "image_key": "",  # objeto subido en S3 (tiene prioridad sobre image_url)
+            "excluded_ids": [],  # chat IDs a excluir del envío
         }
 
     def get(self) -> dict:
@@ -176,6 +180,7 @@ class DynamoDbConfigStore(ConfigStore):
                 cfg[k] = item[k]
         cfg["markup_percentage"] = float(cfg["markup_percentage"])
         cfg["strip_patterns"] = list(cfg["strip_patterns"])
+        cfg["excluded_ids"] = [str(x) for x in cfg["excluded_ids"]]
         return cfg
 
     def set(self, cambios: dict) -> dict:

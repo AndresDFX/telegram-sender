@@ -26,6 +26,7 @@ def _stats(total, sent=0, failed=0):
 class WorkerTests(unittest.TestCase):
     def tearDown(self):
         worker.deliver = None
+        worker.image_store = None
 
     def test_lote_exitoso(self):
         worker.deliver = MagicMock(return_value=_stats(2, sent=2))

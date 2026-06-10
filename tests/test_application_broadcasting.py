@@ -27,8 +27,8 @@ class FakeQueue:
     def __init__(self):
         self.calls = []
 
-    def encolar(self, text, chat_ids, image_url=None):
-        self.calls.append((text, list(chat_ids), image_url))
+    def encolar(self, text, chat_ids, image_url=None, image_key=None):
+        self.calls.append((text, list(chat_ids), image_url, image_key))
         return 1
 
 
@@ -59,7 +59,7 @@ class BroadcastListTests(unittest.TestCase):
         res = bl("UBICADOS aqui\nA06 4-64GB $100.000")
 
         self.assertEqual(res, {"batches": 1, "subscribers": 2})
-        text, ids, image_url = queue.calls[0]
+        text, ids, image_url, image_key = queue.calls[0]
         self.assertNotIn("UBICADOS", text)            # ubicación fuera
         self.assertIn("$115.000", text)               # markup aplicado
         self.assertTrue(text.endswith("📲 WhatsApp 300"))  # footer
@@ -70,6 +70,16 @@ class BroadcastListTests(unittest.TestCase):
         queue = FakeQueue()
         BroadcastList(FakeSubs(["1"]), queue, FakeConfig(image_url="http://img/p.jpg"))("A $100.000")
         self.assertEqual(queue.calls[0][2], "http://img/p.jpg")
+
+    def test_excluye_ids(self):
+        queue = FakeQueue()
+        BroadcastList(FakeSubs(["1", "2", "3"]), queue, FakeConfig(excluded_ids=["2"]))("A $100.000")
+        self.assertEqual(queue.calls[0][1], ["1", "3"])  # 2 excluido
+
+    def test_pasa_image_key(self):
+        queue = FakeQueue()
+        BroadcastList(FakeSubs(["1"]), queue, FakeConfig(image_key="images/broadcast.jpg"))("A $100.000")
+        self.assertEqual(queue.calls[0][3], "images/broadcast.jpg")
 
 
 if __name__ == "__main__":

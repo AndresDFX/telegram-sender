@@ -29,7 +29,10 @@ class BroadcastList:
             strip_patterns=cfg["strip_patterns"],
             footer=cfg["whatsapp_footer"],
         )
-        clientes = self._subscribers.listar_activos()
-        lotes = self._queue.encolar(mensaje, clientes, image_url=cfg["image_url"] or None)
-        logger.info("Difusión: %d lotes para %d clientes", lotes, len(clientes))
+        excluidos = set(cfg.get("excluded_ids", []))
+        clientes = [c for c in self._subscribers.listar_activos() if str(c) not in excluidos]
+        lotes = self._queue.encolar(
+            mensaje, clientes, image_url=cfg.get("image_url") or None, image_key=cfg.get("image_key") or None
+        )
+        logger.info("Difusión: %d lotes para %d clientes (%d excluidos)", lotes, len(clientes), len(excluidos))
         return {"batches": lotes, "subscribers": len(clientes)}

@@ -45,6 +45,18 @@ class FakeQueueStats:
         return {"broadcast": 3, "dlq": 1}
 
 
+class FakeImageStore:
+    def __init__(self):
+        self.saved = None
+
+    def guardar(self, data, content_type="image/jpeg"):
+        self.saved = (data, content_type)
+        return "images/broadcast.jpg"
+
+    def url_temporal(self, key, expira=3600):
+        return "http://signed/" + key
+
+
 def _event(method, path, body=None, auth=True):
     headers = {}
     if auth:
@@ -63,33 +75,44 @@ class AdminTests(unittest.TestCase):
         admin.config = FakeConfig()
         admin.subscribers = FakeSubs()
         admin.queue_stats = FakeQueueStats()
+        admin.image_store = FakeImageStore()
         os.environ["ADMIN_USER"] = "admin"
         os.environ["ADMIN_PASSWORD"] = "secret123"
 
     def tearDown(self):
-        admin.config = admin.subscribers = admin.queue_stats = None
+        admin.config = admin.subscribers = admin.queue_stats = admin.image_store = None
         os.environ.pop("ADMIN_USER", None)
         os.environ.pop("ADMIN_PASSWORD", None)
 
-    def test_sin_auth_401(self):
-        resp = admin.lambda_handler(_event("GET", "/admin", auth=False), None)
+    def test_api_sin_auth_401(self):
+        resp = admin.lambda_handler(_event("GET", "/admin/api/config", auth=False), None)
         self.assertEqual(resp["statusCode"], 401)
-        self.assertIn("WWW-Authenticate", resp["headers"])
 
-    def test_password_incorrecta_401(self):
-        ev = _event("GET", "/admin", auth=False)
+    def test_api_password_incorrecta_401(self):
+        ev = _event("GET", "/admin/api/config", auth=False)
         ev["headers"]["authorization"] = "Basic " + base64.b64encode(b"admin:mala").decode()
         self.assertEqual(admin.lambda_handler(ev, None)["statusCode"], 401)
 
     def test_sin_password_configurada_401(self):
         os.environ.pop("ADMIN_PASSWORD", None)  # fail-closed
-        self.assertEqual(admin.lambda_handler(_event("GET", "/admin"), None)["statusCode"], 401)
+        self.assertEqual(admin.lambda_handler(_event("GET", "/admin/api/config"), None)["statusCode"], 401)
 
-    def test_pagina_html(self):
-        resp = admin.lambda_handler(_event("GET", "/admin"), None)
+    def test_shell_publico_sin_auth(self):
+        resp = admin.lambda_handler(_event("GET", "/admin", auth=False), None)  # la página es pública
         self.assertEqual(resp["statusCode"], 200)
         self.assertIn("text/html", resp["headers"]["Content-Type"])
         self.assertIn("TelegramSender", resp["body"])
+
+    def test_me(self):
+        resp = admin.lambda_handler(_event("GET", "/admin/api/me"), None)
+        self.assertTrue(json.loads(resp["body"])["ok"])
+
+    def test_post_image(self):
+        img_b64 = base64.b64encode(b"PNGDATA").decode()
+        resp = admin.lambda_handler(_event("POST", "/admin/api/image", {"image": img_b64, "content_type": "image/png"}), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(admin.image_store.saved, (b"PNGDATA", "image/png"))
+        self.assertEqual(admin.config.cfg["image_key"], "images/broadcast.jpg")
 
     def test_get_config(self):
         resp = admin.lambda_handler(_event("GET", "/admin/api/config"), None)

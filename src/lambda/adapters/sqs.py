@@ -38,7 +38,9 @@ class SqsBroadcastQueue(BroadcastQueue):
         kwargs = {"endpoint_url": self._endpoint} if self._endpoint else {}
         return boto3.client("sqs", **kwargs)
 
-    def encolar(self, text: str, chat_ids: Sequence[str], image_url: str | None = None) -> int:
+    def encolar(
+        self, text: str, chat_ids: Sequence[str], image_url: str | None = None, image_key: str | None = None
+    ) -> int:
         if not self._url:
             raise RuntimeError("BROADCAST_QUEUE_URL no configurado")
         if self._size <= 0:
@@ -51,7 +53,13 @@ class SqsBroadcastQueue(BroadcastQueue):
 
         for index, lote in enumerate(lotes):
             body = json.dumps(
-                {"text": text, "chat_ids": lote, "batch_index": index, "image_url": image_url}
+                {
+                    "text": text,
+                    "chat_ids": lote,
+                    "batch_index": index,
+                    "image_url": image_url,
+                    "image_key": image_key,
+                }
             )
             attempt = 0
             while True:
@@ -74,8 +82,10 @@ class InlineBroadcastQueue(BroadcastQueue):
     def __init__(self, deliver: Callable[..., object]):
         self._deliver = deliver
 
-    def encolar(self, text: str, chat_ids: Sequence[str], image_url: str | None = None) -> int:
-        self._deliver(text, list(chat_ids), image_url)
+    def encolar(
+        self, text: str, chat_ids: Sequence[str], image_url: str | None = None, image_key: str | None = None
+    ) -> int:
+        self._deliver(text, list(chat_ids), image_url)  # inline (dev) usa solo image_url
         return 1
 
 

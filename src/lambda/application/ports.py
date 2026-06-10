@@ -66,7 +66,9 @@ class HighWaterMarkStore(ABC):
 
 class BroadcastQueue(ABC):
     @abstractmethod
-    def encolar(self, text: str, chat_ids: Sequence[str], image_url: str | None = None) -> int:
+    def encolar(
+        self, text: str, chat_ids: Sequence[str], image_url: str | None = None, image_key: str | None = None
+    ) -> int:
         """Encola el broadcast (en lotes). Devuelve cuántos lotes; lanza PartialEnqueueError si falla a medias."""
 
 
@@ -84,6 +86,16 @@ class ChannelReader(ABC):
     @abstractmethod
     def leer_publicaciones(self, channel: str) -> list[Post]:
         """Publicaciones (con texto) del canal público, en orden de aparición."""
+
+
+class ImageStore(ABC):
+    @abstractmethod
+    def guardar(self, data: bytes, content_type: str = "image/jpeg") -> str:
+        """Guarda la imagen y devuelve su key."""
+
+    @abstractmethod
+    def url_temporal(self, key: str, expira: int = 3600) -> str:
+        """URL temporal (presigned) para que Telegram descargue la imagen al enviarla."""
 
 
 class ConfigStore(ABC):

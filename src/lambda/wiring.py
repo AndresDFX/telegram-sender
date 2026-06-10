@@ -13,6 +13,7 @@ from adapters.dynamodb import (
     DynamoDbHighWaterMarkStore,
     DynamoDbSubscriberRepository,
 )
+from adapters.s3 import S3ImageStore
 from adapters.sqs import InlineBroadcastQueue, SqsBroadcastQueue, SqsQueueStats
 from adapters.telegram import TelegramSender
 from adapters.tme import TmePreviewChannelReader
@@ -51,6 +52,10 @@ def build_dedup() -> DynamoDbDedupStore:
 
 def build_queue_stats() -> SqsQueueStats:
     return SqsQueueStats()
+
+
+def build_image_store() -> S3ImageStore:
+    return S3ImageStore()
 
 
 def build_subscribers() -> DynamoDbSubscriberRepository:

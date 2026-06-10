@@ -307,6 +307,11 @@ Resources:
                   - sqs:GetQueueAttributes
                 Resource:
                   - !GetAtt BroadcastQueue.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject # firmar URL temporal de la imagen para enviarla
+                Resource:
+                  - !Sub "arn:aws:s3:::${LambdaCodeS3Bucket}/images/*"
 
   # --- Lambda receptor (webhook) ----------------------------------------------
   ReceiverFunction:
@@ -368,6 +373,7 @@ Resources:
           SUBSCRIBERS_TABLE: !Ref SubscribersTable
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
           SEND_DELAY_SECONDS: !Ref SendDelaySeconds
+          IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -510,6 +516,11 @@ Resources:
                 Resource:
                   - !GetAtt BroadcastQueue.Arn
                   - !GetAtt BroadcastDLQ.Arn
+              - Effect: Allow
+                Action:
+                  - s3:PutObject # subir la imagen de la lista
+                Resource:
+                  - !Sub "arn:aws:s3:::${LambdaCodeS3Bucket}/images/*"
 
   AdminFunction:
     Type: AWS::Lambda::Function
@@ -531,6 +542,7 @@ Resources:
           SUBSCRIBERS_STATUS_INDEX: StatusIndex
           BROADCAST_QUEUE_URL: !Ref BroadcastQueue
           BROADCAST_DLQ_URL: !Ref BroadcastDLQ
+          IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
           ADMIN_USER: !Ref AdminUser
           ADMIN_PASSWORD: !Ref AdminPassword
       Tags:
