@@ -332,18 +332,24 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
    <button class="sec" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
   </div>
-  <div class="card"><h2>Destinatarios</h2>
-   <div class="hint">Marca contactos y usa los botones para incluirlos/excluirlos en masa. Los excluidos NO reciben las listas.</div>
-   <div style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0">
-     <button class="sec" onclick="toggleAll(true)">Marcar todos</button>
+  <div class="card"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
+   <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
+   <input id="subsearch" placeholder="🔎 Buscar por nombre o id..." oninput="onSearch()" style="margin-top:10px">
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+     <button class="sec" onclick="toggleAll(true)">Marcar visibles</button>
      <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
-     <button onclick="bulk('excluir')">Excluir seleccionados</button>
-     <button onclick="bulk('incluir')">Incluir seleccionados</button>
-     <button class="ghost" onclick="bulkAll('excluir')">Excluir TODOS</button>
-     <button class="ghost" onclick="bulkAll('incluir')">Incluir TODOS</button>
+     <button onclick="bulk('excluir')">Excluir marcados</button>
+     <button onclick="bulk('incluir')">Incluir marcados</button>
+     <button class="ghost" onclick="bulkFiltered('excluir')">Excluir filtrados</button>
+     <button class="ghost" onclick="bulkFiltered('incluir')">Incluir filtrados</button>
    </div>
    <table><thead><tr><th><input type="checkbox" id="selall" onchange="toggleAll(this.checked)"></th><th>nombre / id</th><th>estado</th></tr></thead><tbody id="subs"></tbody></table>
    <div class="hint" id="subsempty" style="display:none;margin-top:12px">Sin destinatarios (modo bot: nadie dio /start; modo userbot: la cuenta no tiene contactos).</div>
+   <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+     <button class="sec" onclick="prevPage()">◀</button>
+     <span id="pageinfo" class="hint"></span>
+     <button class="sec" onclick="nextPage()">▶</button>
+   </div>
   </div>
  </main>
 </div>
@@ -395,23 +401,36 @@ async function uploadImg(){ const f=$('imgfile').files[0]; if(!f) return;
       $('imgprev').src=r.result; $('imgprev').style.display='block'; toast('✓ Imagen subida'); }
     catch(e){ toast('Error al subir',true); } }; r.readAsDataURL(f); }
 async function loadQueue(){ const q=await api('/api/queue'); $('q_b').textContent=q.broadcast; $('q_d').textContent=q.dlq; }
-let EXCLUDED=new Set(), DEST=[];
-async function loadSubs(){ const [d,c]=await Promise.all([api('/api/subscribers'),api('/api/config')]);
-  DEST=d.subscribers||[]; EXCLUDED=new Set((c.excluded_ids||[]).map(String));
-  const t=$('subs'); t.innerHTML=''; $('subsempty').style.display=DEST.length?'none':'block'; $('selall').checked=false;
-  DEST.forEach(s=>{ const ex=EXCLUDED.has(String(s.chatId)); const label=s.name||s.status||'—'; const tr=document.createElement('tr');
+let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0;
+const PAGE_SIZE=50;
+function filtered(){ if(!FILTER) return DEST; const q=FILTER.toLowerCase();
+  return DEST.filter(s=> (s.name||s.status||'').toLowerCase().includes(q) || String(s.chatId).includes(q)); }
+function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
+  if(PAGE>=pages) PAGE=pages-1; if(PAGE<0) PAGE=0;
+  const slice=f.slice(PAGE*PAGE_SIZE,(PAGE+1)*PAGE_SIZE);
+  const t=$('subs'); t.innerHTML=''; $('selall').checked=false;
+  $('subsempty').style.display=DEST.length?'none':'block';
+  $('subcount').textContent = DEST.length ? `· ${f.length}${FILTER?' filtrados':''} de ${DEST.length} (${EXCLUDED.size} excluidos)` : '';
+  $('pageinfo').textContent = f.length ? `página ${PAGE+1} de ${pages}` : 'sin resultados';
+  slice.forEach(s=>{ const ex=EXCLUDED.has(String(s.chatId)); const label=s.name||s.status||'—'; const tr=document.createElement('tr');
     tr.innerHTML=`<td><input type="checkbox" class="selrow" data-id="${s.chatId}"></td>`+
       `<td><b>${label}</b><div class="hint">${s.chatId}</div></td>`+
       `<td><span class="pill ${ex?'inactive':'active'}">${ex?'Excluido':'Incluido'}</span></td>`;
     t.appendChild(tr); }); }
+async function loadSubs(){ const [d,c]=await Promise.all([api('/api/subscribers'),api('/api/config')]);
+  DEST=d.subscribers||[]; EXCLUDED=new Set((c.excluded_ids||[]).map(String)); render(); }
+function onSearch(){ FILTER=$('subsearch').value.trim(); PAGE=0; render(); }
+function prevPage(){ PAGE--; render(); }
+function nextPage(){ PAGE++; render(); }
 function toggleAll(v){ document.querySelectorAll('.selrow').forEach(c=>c.checked=v); $('selall').checked=v; }
 function selectedIds(){ return [...document.querySelectorAll('.selrow:checked')].map(c=>String(c.dataset.id)); }
-async function persistExcluded(){ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({excluded_ids:[...EXCLUDED]})}); }
-async function bulk(accion){ const ids=selectedIds(); if(!ids.length){ toast('Marca al menos un contacto',true); return; }
+async function persistExcluded(){ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({excluded_ids:[...EXCLUDED]})}); render(); loadCfg(); }
+async function bulk(accion){ const ids=selectedIds(); if(!ids.length){ toast('Marca al menos un contacto (visible)',true); return; }
   ids.forEach(id=> accion==='excluir'?EXCLUDED.add(id):EXCLUDED.delete(id));
-  await persistExcluded(); toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); loadSubs(); loadCfg(); }
-async function bulkAll(accion){ EXCLUDED = accion==='excluir' ? new Set(DEST.map(s=>String(s.chatId))) : new Set();
-  await persistExcluded(); toast(accion==='excluir'?'✓ Todos excluidos':'✓ Todos incluidos'); loadSubs(); loadCfg(); }
+  await persistExcluded(); toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); }
+async function bulkFiltered(accion){ const ids=filtered().map(s=>String(s.chatId)); if(!ids.length){ toast('Sin contactos que coincidan',true); return; }
+  ids.forEach(id=> accion==='excluir'?EXCLUDED.add(id):EXCLUDED.delete(id));
+  await persistExcluded(); toast('✓ '+ids.length+(FILTER?' filtrados ':' ')+(accion==='excluir'?'excluidos':'incluidos')); }
 function boot(){ loadCfg(); loadQueue(); loadSubs(); }
 if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } }).catch(()=>{}); }
 </script></body></html>"""
