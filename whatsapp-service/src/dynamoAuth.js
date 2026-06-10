@@ -1,6 +1,6 @@
 // Estado de autenticación de Baileys persistido en DynamoDB (un item por clave),
 // para que la sesión de WhatsApp sobreviva reinicios/spin-down sin re-escanear el QR.
-import { DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand } from '@aws-sdk/client-dynamodb'
+import { DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand, ScanCommand } from '@aws-sdk/client-dynamodb'
 import { initAuthCreds, BufferJSON, proto } from '@whiskeysockets/baileys'
 
 export async function useDynamoAuthState(table, sessionId, region) {
@@ -22,9 +22,30 @@ export async function useDynamoAuthState(table, sessionId, region) {
     await ddb.send(new DeleteItemCommand({ TableName: table, Key: { id: { S: pk(k) } } }))
   }
 
+  // Borra TODOS los items de esta sesión (creds + keys). Se usa al cerrar sesión
+  // (loggedOut) para poder re-vincular sin borrar nada a mano en DynamoDB.
+  const clearAll = async () => {
+    const prefix = `${sessionId}::`
+    let startKey
+    do {
+      const r = await ddb.send(new ScanCommand({
+        TableName: table,
+        ProjectionExpression: 'id',
+        FilterExpression: 'begins_with(id, :p)',
+        ExpressionAttributeValues: { ':p': { S: prefix } },
+        ExclusiveStartKey: startKey,
+      }))
+      for (const it of r.Items || []) {
+        await ddb.send(new DeleteItemCommand({ TableName: table, Key: { id: it.id } }))
+      }
+      startKey = r.LastEvaluatedKey
+    } while (startKey)
+  }
+
   const creds = (await read('creds')) || initAuthCreds()
 
   return {
+    clearAll,
     state: {
       creds,
       keys: {

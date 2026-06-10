@@ -26,3 +26,6 @@ packaged/
 # OS
 .DS_Store
 Thumbs.db
+
+# QR generado localmente al vincular WhatsApp
+wa-qr.png

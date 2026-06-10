@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:22-slim
 WORKDIR /app
 # Baileys depende de libsignal vía una URL de git (ssh://git@github.com/...). Necesitamos
 # git + ca-certificates y reescribir esas URLs SSH a HTTPS para poder clonar el repo
