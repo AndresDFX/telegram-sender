@@ -342,6 +342,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if sub == "/api/plans" and method == "GET":
             return _json({"plans": _planes_con_progreso()})
         if sub == "/api/plans/cancel" and method == "POST":
+            pid = str(_body(event).get("pid", "")).strip()
+            if pid:  # cancelar un envío puntual (en tiempo real)
+                plan_store.cancelar(pid)
+                return _json({"ok": True, "canceled": 1, "pid": pid})
             return _json({"ok": True, "canceled": plan_store.cancelar_pendientes()})
         if sub == "/api/telegram/me" and method == "GET":
             return _telegram_api("getMe", {})  # verifica el token + muestra el bot
@@ -1548,12 +1552,22 @@ function plCard(p){
   const tgI=(p.tg&&p.tg.total)?`✈️ ${p.tg.next|0}/${p.tg.batches|0} lotes`:'';
   const waI=(p.wa&&p.wa.enabled)?`🟢 ${p.wa.next|0}/${p.wa.batches|0} lotes`+(!p.wa.resolved?' (resolviendo…)':''):'';
   const lines=(p.log||[]).map(plBatchLine).join('') || '<div class="hint" style="margin-top:6px">Aún sin lotes despachados (esperando ventana/turno).</div>';
+  const activo=(st==='pending'||st==='running');
+  const cancelBtn=activo?`<button class="ghost" style="padding:6px 12px" onclick="cancelPlan('${p.pid}')">🛑 Cancelar este envío</button>`:'';
+  // Mensaje EXACTO que se envía (ya procesado: markup, sin IPRO PARTS, footer). Scrollable para revisar.
   return `<div class="card" style="margin-bottom:12px;background:var(--elev);padding:16px">`+
     `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center">`+
-      `<b style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${bcEsc(txt)}</b>`+
-      `<span class="pill ${pill}">${lab}</span></div>`+
-    `<div class="bc-meta" style="margin:6px 0 4px">${bcFmtTime(p.created_at)} · lote ${p.batch_size|0} ${tgI?'· '+tgI:''} ${waI?'· '+waI:''}</div>`+
+      `<span class="pill ${pill}">${lab}</span>${cancelBtn}</div>`+
+    `<div class="bc-meta" style="margin:6px 0">${bcFmtTime(p.created_at)} · lote ${p.batch_size|0} ${tgI?'· '+tgI:''} ${waI?'· '+waI:''}</div>`+
+    `<div style="margin:6px 0;padding:10px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;max-height:170px;overflow:auto;white-space:pre-wrap;font-size:12px;color:var(--tx2);line-height:1.5">${bcEsc(txt)}</div>`+
+    `<div class="hint" style="margin:8px 0 2px">Progreso por lote:</div>`+
     lines+`</div>`;
+}
+async function cancelPlan(pid){
+  if(!confirm('¿Cancelar ESTE envío? Los lotes que falten NO se enviarán (los ya enviados no se pueden retirar).')) return;
+  try{ await api('/api/plans/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pid:pid})});
+    toast('✓ Envío cancelado'); loadPlans(); loadQueue(); }
+  catch(e){ toast('Error al cancelar',true); }
 }
 async function loadPlans(){
   try{

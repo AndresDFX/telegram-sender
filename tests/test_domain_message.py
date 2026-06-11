@@ -35,9 +35,16 @@ class ComponerMensajeTests(unittest.TestCase):
         footer = "📲 Pedidos WhatsApp: +57 300 000 0000"
         out = componer_mensaje(LISTA, markup_percentage=15, footer=footer)
         self.assertNotIn("UBICADOS", out)             # ubicación fuera
+        self.assertNotIn("IPRO PARTS", out)           # marca del canal fuente fuera
         self.assertIn("A06 4-64GB $374.000", out)     # markup aplicado
         self.assertNotIn("$325.000", out)
         self.assertTrue(out.endswith(footer))         # footer al final
+
+    def test_quita_marca_ipro_parts(self):
+        for variante in ("🔥 IPRO PARTS 🔥\nA06 $100.000", "IPROPARTS\nA06 $100.000", "ipro parts\nA06 $100.000"):
+            out = componer_mensaje(variante, markup_percentage=0, footer="")
+            self.assertNotIn("PARTS", out.upper())
+            self.assertIn("A06", out)
 
     def test_sin_footer(self):
         out = componer_mensaje("A06 $100.000", markup_percentage=15, strip_patterns=(), footer="")

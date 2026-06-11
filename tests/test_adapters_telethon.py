@@ -33,7 +33,7 @@ class TelethonUserSenderTests(unittest.TestCase):
         self.assertTrue(r.ok)
         s._client.send_message.assert_called_once_with(123, "hola")
 
-    def test_enviar_foto_descarga_y_envia(self):
+    def test_enviar_foto_como_foto_con_nombre(self):
         s = self._sender()
         with patch("requests.get") as get:
             get.return_value.content = b"IMG"
@@ -41,7 +41,10 @@ class TelethonUserSenderTests(unittest.TestCase):
         self.assertTrue(r.ok)
         args, kwargs = s._client.send_file.call_args
         self.assertEqual(args[0], 123)
-        self.assertEqual(args[1], b"IMG")
+        # Se envía un BytesIO CON nombre .jpg y force_document=False => foto, no 'unnamed'
+        self.assertEqual(args[1].name, "lista.jpg")
+        self.assertEqual(args[1].read(), b"IMG")
+        self.assertIs(kwargs["force_document"], False)
         self.assertEqual(kwargs["caption"], "cap")
 
     def test_error_generico_se_propaga(self):

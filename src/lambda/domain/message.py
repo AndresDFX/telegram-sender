@@ -11,8 +11,9 @@ from collections.abc import Sequence
 
 from domain.markup import DEFAULT_CURRENCY_SYMBOLS, DEFAULT_MARKUP_PERCENTAGE, aplicar_markup
 
-# Patrones por defecto para quitar el bloque de ubicación/horario del canal fuente.
+# Patrones por defecto para quitar líneas del canal fuente: marca/branding + ubicación/horario.
 DEFAULT_LOCATION_PATTERNS = (
+    r"ipro\s*parts",    # marca del canal fuente ("🔥 IPRO PARTS 🔥") — no reenviarla
     r"ubicad",          # UBICADOS EN EL C.C ...
     r"s[oó]tano",       # SÓTANO LOCAL C1-C4
     r"local\s+c\d",     # LOCAL C1-C4

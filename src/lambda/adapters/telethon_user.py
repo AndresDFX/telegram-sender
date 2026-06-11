@@ -86,10 +86,22 @@ class TelethonUserSender(_TelethonBase, MessageSender):
         return self._ejecutar(lambda: self._c().send_message(self._entidad(chat_id), text))
 
     def enviar_foto(self, chat_id: str, image_url: str, caption: str = "") -> SendResult:
+        import io
+
         import requests
 
         data = requests.get(image_url, timeout=20).content
-        return self._ejecutar(lambda: self._c().send_file(self._entidad(chat_id), data, caption=caption or None))
+
+        def _enviar():
+            # BytesIO CON nombre+extensión => Telegram lo trata como FOTO (no como documento
+            # 'unnamed'). Se recrea por intento porque BytesIO se consume al leerse (reintentos).
+            archivo = io.BytesIO(data)
+            archivo.name = "lista.jpg"
+            return self._c().send_file(
+                self._entidad(chat_id), archivo, caption=caption or None, force_document=False
+            )
+
+        return self._ejecutar(_enviar)
 
 
 class TelethonContacts(_TelethonBase):

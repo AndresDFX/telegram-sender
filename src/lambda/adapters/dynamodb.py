@@ -347,7 +347,7 @@ class DynamoDbBroadcastStore:
             Item={
                 "id": broadcast_id,
                 "created_at": now,
-                "text": (text or "")[:280],
+                "text": (text or "")[:600],  # solo display (el envío usa el texto del plan)
                 "source": source,
                 "channels": list(channels),
                 "tg_total": int(tg_total),
@@ -525,7 +525,10 @@ class DynamoDbPlanStore:
             "status": "pending",
             "created_at": now,
             "broadcast_id": broadcast_id,
-            "text": (text or "")[:280],
+            # OJO: este 'text' es el que SE ENVÍA (dispatch lo pasa a encolar_uno). Debe ser el
+            # mensaje COMPLETO procesado, no un resumen: por eso el tope es 4096 (límite Telegram),
+            # no 280. Truncarlo a 280 cortaba los envíos a la mitad de la lista.
+            "text": (text or "")[:4096],
             "batch_size": int(batch_size),
             "tg_total": sum(len(l) for l in tg_lotes),
             "tg_batches": len(tg_lotes),
@@ -686,6 +689,12 @@ class DynamoDbPlanStore:
         if not item:
             return True  # plan inexistente (borrado): descartar
         return str(item.get("status", "")) == "canceled"
+
+    def cancelar(self, plan_id: str) -> bool:
+        """Cancela UN envío puntual (para frenar en tiempo real algo que va mal) sin tocar
+        los demás. El dispatcher dejará de despacharlo y el worker descartará su lote en vuelo."""
+        self.finalizar(plan_id, status="canceled")
+        return True
 
     def cancelar_pendientes(self) -> int:
         """Marca como 'canceled' todos los planes pendientes/en curso para que el dispatcher
