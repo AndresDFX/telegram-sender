@@ -128,6 +128,9 @@ class WhatsAppForwarder(ABC):
         """Cuántos contactos resolvería el servicio (para fraccionar). Default 0 (no-op)."""
         return 0
 
+    def ping(self) -> None:
+        """Keep-alive best-effort al servicio (mantiene Render despierto). Default no-op."""
+
 
 class ImageStore(ABC):
     @abstractmethod

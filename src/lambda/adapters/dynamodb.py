@@ -117,6 +117,13 @@ class DynamoDbDedupStore(DedupStore):
     def borrar(self, key: str) -> None:
         self._t().delete_item(Key={"updateId": str(key)})
 
+    def procesado(self, key: str) -> bool:
+        """True si la clave ya está marcada (para idempotencia: no reprocesar/reenviar)."""
+        try:
+            return bool(self._t().get_item(Key={"updateId": str(key)}).get("Item"))
+        except Exception:
+            return False  # ante duda no bloquear el envío
+
 
 class DynamoDbHighWaterMarkStore(HighWaterMarkStore):
     _PREFIX = "__hwm__"
@@ -306,6 +313,34 @@ class DynamoDbConfigStore(ConfigStore):
         "wa_delay_max",
         "window_tz",
     )
+
+    def incr_ban_strikes(self) -> int:
+        """Suma 1 al contador de lotes fallidos consecutivos (auto-pausa anti-baneo).
+        Devuelve el nuevo valor. Atributo interno (no en _CAMPOS, no se expone)."""
+        from decimal import Decimal
+
+        try:
+            resp = self._t().update_item(
+                Key={"configId": self._id},
+                UpdateExpression="ADD ban_strikes :one",
+                ExpressionAttributeValues={":one": Decimal(1)},
+                ReturnValues="UPDATED_NEW",
+            )
+            return int(resp.get("Attributes", {}).get("ban_strikes", 0))
+        except Exception:
+            return 0
+
+    def reset_ban_strikes(self) -> None:
+        from decimal import Decimal
+
+        try:
+            self._t().update_item(
+                Key={"configId": self._id},
+                UpdateExpression="SET ban_strikes = :z",
+                ExpressionAttributeValues={":z": Decimal(0)},
+            )
+        except Exception:
+            pass
 
     def set(self, cambios: dict) -> dict:
         from decimal import Decimal

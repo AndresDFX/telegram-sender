@@ -182,10 +182,18 @@ Parameters:
     Default: lambda/telegram-broadcaster.zip
     Description: Key del zip de la Lambda en S3.
 
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: >
+      Email para recibir alarmas (DLQ no vacía, errores de Lambda). Vacío = no se suscribe nadie
+      (las alarmas y el tópico SNS se crean igual; puedes suscribir un endpoint luego).
+
 Conditions:
   # Solo aplica concurrencia reservada al worker si es > 0 (ver WorkerReservedConcurrency).
   HasWorkerReservedConcurrency: !Not [!Equals [!Ref WorkerReservedConcurrency, 0]]
   HasDispatcherReservedConcurrency: !Not [!Equals [!Ref DispatcherReservedConcurrency, 0]]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
 
 Resources:
   SubscribersTable:
@@ -193,6 +201,8 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectName}-${EnvironmentName}-subscribers"
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: chatId
           AttributeType: S
@@ -220,6 +230,8 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectName}-${EnvironmentName}-processed-updates"
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: updateId
           AttributeType: S
@@ -241,6 +253,8 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectName}-${EnvironmentName}-config"
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: configId
           AttributeType: S
@@ -259,6 +273,8 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectName}-${EnvironmentName}-whatsapp-auth"
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
@@ -277,6 +293,8 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectName}-${EnvironmentName}-broadcasts"
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
@@ -299,6 +317,8 @@ Resources:
     Properties:
       TableName: !Sub "${ProjectName}-${EnvironmentName}-plans"
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: pid
           AttributeType: S
@@ -344,6 +364,97 @@ Resources:
           Value: !Ref ProjectName
         - Key: Environment
           Value: !Ref EnvironmentName
+
+  # --- Monitoreo: SNS + alarmas CloudWatch ------------------------------------
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-${EnvironmentName}-alerts"
+
+  AlertsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # DLQ con mensajes = envíos fallidos sin procesar -> avisar.
+  DlqNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-dlq-no-vacia"
+      AlarmDescription: Hay mensajes en la DLQ de broadcast (lotes que agotaron reintentos).
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt BroadcastDLQ.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  WorkerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-worker-errores"
+      AlarmDescription: El worker (envío Telegram) está registrando errores.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WorkerFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  DispatcherErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-dispatcher-errores"
+      AlarmDescription: El dispatcher (liberación de lotes) está fallando.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref DispatcherFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  PollerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-poller-errores"
+      AlarmDescription: El poller (ingesta del canal) está fallando.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PollerFunction
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
 
   # --- IAM: receptor (parsea + consulta + encola) ------------------------------
   ReceiverExecutionRole:
@@ -426,6 +537,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem # leer config en runtime (modo de envío, credenciales, delays)
+                  - dynamodb:UpdateItem # auto-pausa anti-baneo (sending_enabled / ban_strikes)
                 Resource:
                   - !GetAtt ConfigTable.Arn
               - Effect: Allow
@@ -438,6 +550,12 @@ Resources:
                   - dynamodb:GetItem # ¿el plan fue cancelado? -> descartar lote en vuelo
                 Resource:
                   - !GetAtt PlansTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem # idempotencia: ¿lote ya entregado?
+                  - dynamodb:PutItem # marcar lote entregado
+                Resource:
+                  - !GetAtt ProcessedUpdatesTable.Arn
               - Effect: Allow
                 Action:
                   - sqs:ReceiveMessage
@@ -775,6 +893,9 @@ Resources:
                 Action:
                   - sqs:GetQueueAttributes # profundidad de cola/DLQ
                   - sqs:SendMessage # encolar envío manual
+                  - sqs:ReceiveMessage # inspeccionar muestra de la DLQ en el panel
+                  - sqs:StartMessageMoveTask # redrive de la DLQ a la cola
+                  - sqs:PurgeQueue # descartar la DLQ
                 Resource:
                   - !GetAtt BroadcastQueue.Arn
                   - !GetAtt BroadcastDLQ.Arn
@@ -898,6 +1019,11 @@ Resources:
       ApiId: !Ref HttpApi
       StageName: !Ref EnvironmentName
       AutoDeploy: true
+      # Throttling a nivel de API (independiente del contenedor) como freno de fuerza bruta
+      # distribuida contra /admin y de abuso del webhook. Holgado para el uso normal (bajo tráfico).
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 40
+        ThrottlingRateLimit: 20
 
   LambdaInvokePermission:
     Type: AWS::Lambda::Permission

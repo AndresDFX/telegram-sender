@@ -25,12 +25,15 @@ def _stats(total, sent=0, failed=0):
 
 class WorkerTests(unittest.TestCase):
     def setUp(self):
-        # Inyectamos config_store y plans para ejercitar el gate real (no la rama fail-open
-        # por falta de AWS). Por defecto: envíos ACTIVOS y planes no descartables.
+        # Inyectamos config_store/plans/dedup para ejercitar el gate real (no la rama fail-open
+        # por falta de AWS). Por defecto: envíos ACTIVOS, planes no descartables, nada deduplicado.
         worker.config_store = MagicMock()
         worker.config_store.get.return_value = {"sending_enabled": True}
+        worker.config_store.incr_ban_strikes.return_value = 1
         worker.plans = MagicMock()
         worker.plans.descartar.return_value = False
+        worker.dedup = MagicMock()
+        worker.dedup.procesado.return_value = False
 
     def tearDown(self):
         worker.deliver = None
@@ -38,6 +41,7 @@ class WorkerTests(unittest.TestCase):
         worker.broadcasts = None
         worker.config_store = None
         worker.plans = None
+        worker.dedup = None
 
     def test_lote_exitoso(self):
         worker.deliver = MagicMock(return_value=_stats(2, sent=2))
@@ -59,6 +63,28 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [])  # ack, no envía
         worker.deliver.assert_not_called()
         worker.plans.descartar.assert_called_once_with("b-xyz")
+
+    def test_dedup_omite_lote_ya_entregado(self):
+        worker.dedup.procesado.return_value = True  # ya entregado antes
+        worker.deliver = MagicMock()
+        event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1", "2"], "batch_id": "abc"})]}
+        self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [])
+        worker.deliver.assert_not_called()  # no reenvía
+
+    def test_marca_dedup_tras_exito(self):
+        worker.deliver = MagicMock(return_value=_stats(2, sent=2))
+        event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1", "2"], "batch_id": "abc"})]}
+        worker.lambda_handler(event, None)
+        worker.dedup.marcar.assert_called_once_with("abc")          # marca entregado
+        worker.config_store.reset_ban_strikes.assert_called_once()  # hubo envíos -> reinicia strikes
+
+    def test_auto_pausa_tras_fallos_totales(self):
+        worker.config_store.incr_ban_strikes.return_value = 2  # alcanza el umbral
+        worker.deliver = MagicMock(return_value=_stats(2, failed=2))  # fallo total
+        event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1", "2"]})]}
+        res = worker.lambda_handler(event, None)
+        self.assertEqual(res["batchItemFailures"], [{"itemIdentifier": "m1"}])  # reencola
+        worker.config_store.set.assert_called_once_with({"sending_enabled": False})  # AUTO-PAUSA
 
     def test_fallo_sistemico_reporta(self):
         worker.deliver = MagicMock(return_value=_stats(2, failed=2))

@@ -56,6 +56,13 @@ class DispatchCampaigns:
         if not planes:
             return {"planes": 0}
 
+        # Keep-alive: hay trabajo activo -> mantenemos despierto el servicio de WhatsApp
+        # (Render Free duerme a los 15 min y el primer envío tras dormir podría expirar).
+        try:
+            self._whatsapp.ping()
+        except Exception:
+            pass
+
         plan = planes[0]  # secuencial GLOBAL: el más antiguo primero
         pid = plan["pid"]
         bid = plan.get("broadcast_id")

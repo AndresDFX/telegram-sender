@@ -42,8 +42,23 @@ class FakeSubs:
 
 
 class FakeQueueStats:
+    def __init__(self):
+        self.redriven = False
+        self.purged = False
+
     def profundidades(self):
         return {"broadcast": 3, "dlq": 1}
+
+    def dlq_muestra(self, n=5):
+        return [{"broadcast_id": "b1", "batch_index": 0, "chat_ids": 2, "text": "hola"}]
+
+    def dlq_redrive(self):
+        self.redriven = True
+        return {"ok": True, "redrive": "iniciado"}
+
+    def dlq_purgar(self):
+        self.purged = True
+        return {"ok": True, "purged": True}
 
 
 class FakeImageStore:
@@ -141,6 +156,38 @@ class AdminTests(unittest.TestCase):
     def test_get_queue(self):
         resp = admin.lambda_handler(_event("GET", "/admin/api/queue"), None)
         self.assertEqual(json.loads(resp["body"]), {"broadcast": 3, "dlq": 1})
+
+    def test_preview_process_aplica_markup(self):
+        resp = admin.lambda_handler(
+            _event("POST", "/admin/api/preview/process", {"text": "A06 4-64GB $325.000"}), None
+        )
+        self.assertEqual(resp["statusCode"], 200)
+        # markup 15% aplicado (config fake: 15%, símbolo $)
+        self.assertIn("$374.000", json.loads(resp["body"])["processed"])
+
+    def test_dlq_get_y_acciones(self):
+        g = admin.lambda_handler(_event("GET", "/admin/api/dlq"), None)
+        self.assertEqual(g["statusCode"], 200)
+        self.assertEqual(json.loads(g["body"])["depth"], 1)
+        admin.lambda_handler(_event("POST", "/admin/api/dlq/redrive", {}), None)
+        self.assertTrue(admin.queue_stats.redriven)
+        admin.lambda_handler(_event("POST", "/admin/api/dlq/purge", {}), None)
+        self.assertTrue(admin.queue_stats.purged)
+
+    def test_lockout_tras_muchos_fallos(self):
+        from unittest.mock import patch
+
+        admin._AUTH["fails"] = 0
+        admin._AUTH["locked_until"] = 0.0
+        ev = _event("GET", "/admin/api/config", auth=False)
+        ev["headers"]["authorization"] = "Basic " + base64.b64encode(b"admin:mala").decode()
+        with patch("entrypoints.admin.time.sleep"):  # sin retardos reales en el test
+            for _ in range(admin._AUTH_MAX_FAILS):
+                self.assertEqual(admin.lambda_handler(ev, None)["statusCode"], 401)
+            # ahora bloqueado: incluso con credenciales correctas, rechaza durante el cooldown
+            self.assertEqual(admin.lambda_handler(_event("GET", "/admin/api/config"), None)["statusCode"], 401)
+        admin._AUTH["fails"] = 0
+        admin._AUTH["locked_until"] = 0.0  # limpiar para no afectar otros tests
 
     def test_config_enmascara_sesion(self):
         admin.config.cfg["telethon_session"] = "SECRETO_TOTAL"

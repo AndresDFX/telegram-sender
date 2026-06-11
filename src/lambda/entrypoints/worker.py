@@ -24,10 +24,15 @@ image_store = None  # S3ImageStore; inyectable en tests
 broadcasts = None  # DynamoDbBroadcastStore; inyectable en tests
 config_store = None  # DynamoDbConfigStore; inyectable en tests
 plans = None  # DynamoDbPlanStore; inyectable en tests
+dedup = None  # DynamoDbDedupStore; idempotencia de lotes (no reenviar)
+
+# Tras N lotes TOTALMENTE fallidos seguidos asumimos baneo/rate-limit sistémico y AUTO-PAUSAMOS
+# los envíos (sending_enabled=False) para proteger la cuenta/número. Se reinicia al primer éxito.
+_BAN_STRIKES_UMBRAL = 2
 
 
 def _ensure() -> None:
-    global deliver, image_store, broadcasts, config_store, plans
+    global deliver, image_store, broadcasts, config_store, plans, dedup
     if deliver is None:
         deliver = wiring.build_deliver_batch()
     if image_store is None:
@@ -38,6 +43,19 @@ def _ensure() -> None:
         config_store = wiring.build_config_store()
     if plans is None:
         plans = wiring.build_plan_store()
+    if dedup is None:
+        dedup = wiring.build_dedup()
+
+
+def _detectar_baneo() -> None:
+    """Un lote falló por completo: cuenta el strike y auto-pausa si se alcanza el umbral."""
+    try:
+        strikes = config_store.incr_ban_strikes()
+        if strikes >= _BAN_STRIKES_UMBRAL:
+            config_store.set({"sending_enabled": False})
+            logger.warning("AUTO-PAUSA anti-baneo: %d lotes fallaron consecutivamente; envíos desactivados.", strikes)
+    except Exception:
+        logger.exception("No se pudo registrar strike / auto-pausar")
 
 
 def _resolver_imagen(body: dict) -> str | None:
@@ -68,6 +86,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         message_id = record.get("messageId")
         try:
             body = json.loads(record["body"])
+            # IDEMPOTENCIA: si este lote ya se entregó (reentrega SQS espuria), no reenviar.
+            batch_id = body.get("batch_id")
+            if batch_id and dedup.procesado(batch_id):
+                logger.info("Lote %s ya entregado (dedup); se omite para no duplicar", batch_id)
+                continue
             # Si el plan fue CANCELADO tras encolar este lote, se descarta sin enviar
             # (honra 'cancelar pendientes' para lotes ya en vuelo en SQS). Ack, no reencola.
             pid = body.get("pid")
@@ -86,7 +109,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             # aquí se reaplicaría en cada reintento SQS e inflaría los contadores.
             if bid and not fallo_total:
                 broadcasts.incr_telegram(bid, sent=stats.sent, failed=stats.failed + stats.blocked)
-            if fallo_total:
+            if not fallo_total:
+                if batch_id:
+                    dedup.marcar(batch_id)  # marca entregado (idempotencia ante reentrega)
+                if stats.sent > 0:
+                    config_store.reset_ban_strikes()  # hubo entregas: reinicia el contador anti-baneo
+            else:
+                _detectar_baneo()  # fallo total: cuenta strike y auto-pausa si procede
                 raise RuntimeError(f"Todos los envíos del lote {message_id} fallaron")
         except Exception:
             logger.exception("Fallo procesando el mensaje SQS %s", message_id)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from typing import Callable, Iterator, Sequence
 
 from application.ports import BroadcastQueue, PartialEnqueueError, QueueStats
@@ -105,6 +106,7 @@ class SqsBroadcastQueue(BroadcastQueue):
                 "image_key": image_key,
                 "broadcast_id": broadcast_id,
                 "pid": pid,
+                "batch_id": uuid.uuid4().hex,  # idempotencia: el worker no reenvía un lote ya entregado
             }
         )
         self._client().send_message(QueueUrl=self._url, MessageBody=body)
@@ -152,3 +154,44 @@ class SqsQueueStats(QueueStats):
             return int(resp["Attributes"].get("ApproximateNumberOfMessages", 0))
 
         return {"broadcast": depth(self._url), "dlq": depth(self._dlq)}
+
+    def dlq_muestra(self, n: int = 5) -> list[dict]:
+        """Muestra (sin borrar) hasta n mensajes de la DLQ para inspección en el panel."""
+        if not self._dlq:
+            return []
+        client = self._client()
+        resp = client.receive_message(
+            QueueUrl=self._dlq, MaxNumberOfMessages=min(max(int(n), 1), 10), VisibilityTimeout=1
+        )
+        out = []
+        for m in resp.get("Messages", []):
+            try:
+                b = json.loads(m.get("Body", "{}"))
+            except Exception:
+                b = {}
+            out.append(
+                {
+                    "broadcast_id": b.get("broadcast_id"),
+                    "pid": b.get("pid"),
+                    "batch_index": b.get("batch_index"),
+                    "chat_ids": len(b.get("chat_ids", [])),
+                    "text": (b.get("text") or "")[:80],
+                }
+            )
+        return out
+
+    def dlq_redrive(self) -> dict:
+        """Reprocesa la DLQ devolviéndola a la cola principal (start-message-move-task)."""
+        if not self._dlq:
+            return {"error": "sin DLQ"}
+        client = self._client()
+        arn = client.get_queue_attributes(QueueUrl=self._dlq, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
+        client.start_message_move_task(SourceArn=arn)
+        return {"ok": True, "redrive": "iniciado"}
+
+    def dlq_purgar(self) -> dict:
+        """Vacía la DLQ (descarta los mensajes fallidos)."""
+        if not self._dlq:
+            return {"error": "sin DLQ"}
+        self._client().purge_queue(QueueUrl=self._dlq)
+        return {"ok": True, "purged": True}

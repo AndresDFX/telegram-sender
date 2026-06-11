@@ -72,6 +72,18 @@ class HttpWhatsAppForwarder(WhatsAppForwarder):
         )
         return int(resp.get("count", 0))
 
+    def ping(self) -> None:
+        """Keep-alive: GET /health con timeout corto para mantener despierto el servicio
+        (Render Free duerme a los 15 min). Best-effort: nunca lanza."""
+        if not self._url:
+            return
+        try:
+            req = urllib.request.Request(f"{self._url}/health", method="GET")
+            with urllib.request.urlopen(req, timeout=5):
+                pass
+        except Exception:
+            pass
+
     def _post(self, path: str, payload: dict) -> dict:
         data = json.dumps(payload).encode()
         req = urllib.request.Request(

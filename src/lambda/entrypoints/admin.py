@@ -17,11 +17,21 @@ import logging
 import os
 from typing import Any
 
+import time
+
 import wiring
 from adapters.config import admin_user
+from domain.message import componer_mensaje
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Anti-fuerza-bruta del Basic Auth (en memoria, por contenedor): tras N fallos consecutivos se
+# bloquea por una ventana corta y cada fallo añade un pequeño retardo. Mitigación; el endurecimiento
+# real (WAF/dominio/multiusuario) es Fase 1. Best-effort entre contenedores (admin = baja concurrencia).
+_AUTH = {"fails": 0, "locked_until": 0.0}
+_AUTH_MAX_FAILS = 5
+_AUTH_LOCK_SECS = 300
 
 config = None
 subscribers = None
@@ -111,7 +121,23 @@ def _planes_con_progreso() -> list[dict]:
 
 # --- auth -------------------------------------------------------------------
 
+def _auth_bloqueado() -> bool:
+    return _AUTH["locked_until"] > time.time()
+
+
+def _auth_fallo() -> None:
+    _AUTH["fails"] += 1
+    if _AUTH["fails"] >= _AUTH_MAX_FAILS:
+        _AUTH["locked_until"] = time.time() + _AUTH_LOCK_SECS
+    try:
+        time.sleep(min(_AUTH["fails"] * 0.5, 3))  # retardo creciente: frena la fuerza bruta
+    except Exception:
+        pass
+
+
 def _autorizado(event: dict[str, Any]) -> bool:
+    if _auth_bloqueado():
+        return False  # en cooldown tras demasiados intentos fallidos
     password = os.environ.get("ADMIN_PASSWORD")
     if not password:
         return False  # fail-closed
@@ -122,8 +148,15 @@ def _autorizado(event: dict[str, Any]) -> bool:
     try:
         usuario, _, clave = base64.b64decode(auth[6:]).decode("utf-8").partition(":")
     except (binascii.Error, UnicodeDecodeError):
+        _auth_fallo()
         return False
-    return hmac.compare_digest(usuario, admin_user()) and hmac.compare_digest(clave, password)
+    ok = hmac.compare_digest(usuario, admin_user()) and hmac.compare_digest(clave, password)
+    if ok:
+        _AUTH["fails"] = 0
+        _AUTH["locked_until"] = 0.0
+    else:
+        _auth_fallo()
+    return ok
 
 
 # --- helpers ----------------------------------------------------------------
@@ -337,6 +370,23 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json({"ok": True})
         if sub == "/api/queue" and method == "GET":
             return _json(queue_stats.profundidades())
+        if sub == "/api/preview/process" and method == "POST":
+            cfg = config.get()
+            texto = str(_body(event).get("text", ""))
+            procesado = componer_mensaje(
+                texto,
+                markup_percentage=cfg["markup_percentage"],
+                currency_symbols=cfg["currency_symbols"],
+                strip_patterns=cfg.get("strip_patterns", []),
+                footer=cfg.get("whatsapp_footer", ""),
+            )
+            return _json({"processed": procesado})
+        if sub == "/api/dlq" and method == "GET":
+            return _json({"sample": queue_stats.dlq_muestra(5), "depth": queue_stats.profundidades().get("dlq", 0)})
+        if sub == "/api/dlq/redrive" and method == "POST":
+            return _json(queue_stats.dlq_redrive())
+        if sub == "/api/dlq/purge" and method == "POST":
+            return _json(queue_stats.dlq_purgar())
         if sub == "/api/broadcasts" and method == "GET":
             return _json({"broadcasts": broadcast_store.listar()})
         if sub == "/api/plans" and method == "GET":
@@ -906,7 +956,7 @@ img.preview{box-shadow:var(--sh-sm)}
 </div></div>
 
 <div id="app">
- <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span>
+ <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="conn_tg" class="pill" title="Estado del bot de Telegram" style="margin-right:6px"></span><span id="conn_wa" class="pill" title="Estado del servicio WhatsApp" style="margin-right:6px"></span><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span>
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
  <nav class="nav">
    <button data-tab="msg" onclick="showTab('msg')">📝 Mensaje</button>
@@ -981,6 +1031,13 @@ img.preview{box-shadow:var(--sh-sm)}
    <label>Patrones a quitar (ubicación), uno por línea</label><textarea id="strip_patterns"></textarea>
    <button onclick="saveCfg()">Guardar cambios</button>
   </div>
+  <div class="card" data-tab="msg"><h2>Probar procesamiento del mensaje</h2>
+   <div class="hint">Pega un mensaje tal como lo publica el canal y mira cómo quedará <b>ya procesado</b> (markup aplicado, sin ubicación/marca/teléfonos, con footer). Así verificas las reglas antes de enviar.</div>
+   <textarea id="pp_in" style="min-height:90px;margin-top:10px" placeholder="Pega aquí el texto original del canal..."></textarea>
+   <button class="sec" style="margin-top:8px" onclick="probarProcesado()">Procesar</button>
+   <div class="hint" style="margin-top:10px">Resultado (lo que se enviaría):</div>
+   <div id="pp_out" style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-top:4px;min-height:40px;font-size:13px;color:var(--tx2)">—</div>
+  </div>
   <div class="card" data-tab="msg"><h2>Imagen de la lista</h2>
    <div class="hint">Se envía como foto antes de cada lista. Sube un archivo o pega una URL.</div>
    <input type="file" id="imgfile" accept="image/*" style="margin-top:10px" onchange="uploadImg()">
@@ -994,6 +1051,15 @@ img.preview{box-shadow:var(--sh-sm)}
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
    <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>⏱️ Programación</b>.</div>
    <button class="sec" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
+  </div>
+  <div class="card" data-tab="estado"><h2>Cola de fallidos (DLQ) <span id="dlq_n" class="hint"></span></h2>
+   <div class="hint">Lotes que agotaron reintentos. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
+   <div id="dlq_list" style="margin-top:10px"></div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+     <button class="sec" onclick="loadDlq()">Ver / refrescar</button>
+     <button class="sec" onclick="dlqRedrive()">↩ Reintentar todo</button>
+     <button class="ghost" onclick="dlqPurge()">🗑 Descartar todo</button>
+   </div>
   </div>
   <div class="card" data-tab="telegram"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
@@ -1159,9 +1225,9 @@ function toast(m,v){ const t=$('toast'); t.textContent=m;
   const cls = v===true ? 'err' : (typeof v==='string' && v ? v : '');  // true=err (compat); 'info'/'warn'/'err'
   t.className='toast show'+(cls?' '+cls:''); setTimeout(()=>t.className='toast',2200); }
 async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':'+p);
-  try{ await fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{if(!r.ok)throw 0;}); sessionStorage.setItem('cred',CRED);
+  try{ await fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{if(!r.ok)throw 0;}); sessionStorage.setItem('cred',CRED); sessionStorage.setItem('cred_ts',String(Date.now()));
     $('login').style.display='none'; $('app').style.display='block'; $('who').textContent=u; boot(); }
-  catch(e){ $('lerr').textContent='Usuario o contraseña incorrectos'; } }
+  catch(e){ $('lerr').textContent='Usuario o contraseña incorrectos (tras varios intentos se bloquea unos minutos)'; } }
 function logout(){ sessionStorage.removeItem('cred'); CRED=''; $('app').style.display='none'; $('login').style.display='flex'; }
 async function loadCfg(){ const c=await api('/api/config');
   ['source_channel','markup_percentage','currency_symbols','whatsapp_footer','image_url','telethon_api_id','telethon_api_hash'].forEach(k=>$(k).value=c[k]??'');
@@ -1263,6 +1329,46 @@ function qStartPolling(){
     const vis=document.querySelector('main>.card[data-tab="estado"]')?.classList.contains('show');
     if(vis) loadQueue(); }, BC_POLL);
 }
+// --- Probar procesamiento del mensaje (preview ya procesado) ---
+async function probarProcesado(){
+  const t=$('pp_in').value; $('pp_out').textContent='procesando...';
+  try{ const r=await api('/api/preview/process',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t})});
+    $('pp_out').textContent=r.processed||'(vacío)'; }
+  catch(e){ $('pp_out').textContent='error procesando'; }
+}
+// --- DLQ (cola de fallidos) ---
+async function loadDlq(){
+  try{ const r=await api('/api/dlq'); const n=r.depth||0; $('dlq_n').textContent='· '+n+' fallido(s)';
+    const L=$('dlq_list'); const s=r.sample||[];
+    L.innerHTML = n? (s.map(m=>`<div class="bc-meta" style="padding:6px 0;border-bottom:1px solid var(--bd)">lote ${m.batch_index??'?'} · ${m.chat_ids||0} dest · ${bcEsc((m.text||'').slice(0,50))}</div>`).join('') + (n>s.length?`<div class="hint">…y ${n-s.length} más</div>`:'')) : '<div class="hint">Sin mensajes fallidos. 🎉</div>';
+  }catch(e){ $('dlq_n').textContent='· error'; }
+}
+async function dlqRedrive(){
+  if(!confirm('¿Reintentar todos los fallidos? Volverán a la cola para procesarse.')) return;
+  try{ await api('/api/dlq/redrive',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ Reintento iniciado'); setTimeout(loadDlq,1500); }
+  catch(e){ toast('Error al reintentar',true); }
+}
+async function dlqPurge(){
+  if(!confirm('¿Descartar TODOS los mensajes fallidos? No se podrán recuperar.')) return;
+  try{ await api('/api/dlq/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ DLQ descartada'); setTimeout(loadDlq,1500); }
+  catch(e){ toast('Error al descartar',true); }
+}
+// --- Estado de conexiones (Telegram bot + WhatsApp) en el header ---
+async function refreshConn(){
+  const tg=$('conn_tg'), wa=$('conn_wa');
+  try{ const r=await api('/api/telegram/me'); const ok=r&&(r.ok&&r.result);
+    if(tg){ tg.className='pill '+(ok?'active':'failed'); tg.textContent=ok?('✈️ @'+(r.result.username||'bot')):'✈️ bot ✕'; } }
+  catch(e){ if(tg){ tg.className='pill failed'; tg.textContent='✈️ ✕'; } }
+  try{ const s=await api('/api/whatsapp/status'); const ok=s&&s.connected;
+    if(wa){ wa.className='pill '+(ok?'active':'failed'); wa.textContent=ok?'🟢 WhatsApp':'🟢 WA ✕'; wa.title=ok?('conectado'+(s.contacts?(' · '+s.contacts+' contactos'):'')):('desconectado'+(s.lastCloseMsg?(' · '+s.lastCloseMsg):'')); } }
+  catch(e){ if(wa){ wa.className='pill inactive'; wa.textContent='🟢 WA ?'; wa.title='servicio no configurado o inaccesible'; } }
+}
+let CONN_TIMER=null;
+function connStartPolling(){ if(CONN_TIMER) return; refreshConn();
+  CONN_TIMER=setInterval(()=>{ if(CRED && !document.hidden) refreshConn(); }, 60000); }
+// --- Expiración de sesión (cliente): re-login tras 8h o inactividad larga ---
+const SESSION_MAX_MS=8*3600*1000;
+function sessionFresca(){ try{ const t=parseInt(sessionStorage.getItem('cred_ts')||'0',10); return t && (Date.now()-t)<SESSION_MAX_MS; }catch(e){ return true; } }
 let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0;
 const PAGE_SIZE=50;
 function filtered(){ if(!FILTER) return DEST; const q=FILTER.toLowerCase();
@@ -1353,8 +1459,9 @@ function showTab(t){
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===t));
   try{ localStorage.setItem('tab',t); }catch(e){}
   window.scrollTo(0,0); }
-function boot(){ showTab((()=>{try{return localStorage.getItem('tab')}catch(e){return null}})()||'msg'); loadCfg(); loadQueue(); loadSubs(); }
-if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } }).catch(()=>{}); }
+function boot(){ showTab((()=>{try{return localStorage.getItem('tab')}catch(e){return null}})()||'msg'); loadCfg(); loadQueue(); loadSubs(); loadDlq(); connStartPolling(); }
+if(CRED && !sessionFresca()){ logout(); }
+else if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } else { logout(); } }).catch(()=>{}); }
 
 // ===== Componer y enviar (POST /api/broadcast) =====
 let BC_IMG_URL = '';           // URL devuelta tras subir un archivo a /api/image
@@ -1586,7 +1693,7 @@ function plStartPolling(){
     if(vis) loadPlans(); }, BC_POLL);
 }
 (function(){ const _s=window.showTab;
-  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='prog') loadPlans(); if(t==='estado') loadQueue(); }; }
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='prog') loadPlans(); if(t==='estado'){ loadQueue(); loadDlq(); } }; }
   const start=()=>{ if(CRED){ plStartPolling(); qStartPolling(); } };
   if(document.readyState!=='loading') start();
   else document.addEventListener('DOMContentLoaded', start);
