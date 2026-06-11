@@ -1,242 +1,178 @@
-# Telegram → Telegram Sync
+# Sender — difusión de listas (Telegram + WhatsApp)
 
-Sincronización serverless 1:1: cuando el canal fuente publica una lista, AWS la detecta, aplica markup del 15% a los precios y la distribuye por mensaje directo a cada suscriptor.
+**Sender** mirrorea un **canal de precios de Telegram** hacia tus contactos/suscriptores: detecta cada
+lista publicada, le aplica un **markup configurable** a los precios, quita el bloque de ubicación, añade
+tu footer/imagen, y la **difunde** por **Telegram** (bot a suscriptores **o** userbot a tus contactos) y
+por **WhatsApp** (cuenta personal vía Baileys). Todo se gestiona desde un **panel web** y los envíos
+tienen **estados** (encolado→enviando→enviado/parcial/fallido) con ritmo **anti-baneo**.
 
-## Arquitectura (desacoplada por SQS)
+> Documento de contexto del proyecto: arquitectura, componentes, despliegue, uso y estado actual.
 
-La **ingesta** del canal fuente es por **sondeo del preview público** (`https://t.me/s/<canal>`): el
-canal de precios no es nuestro y el bot no puede ser admin, así que un Lambda en cron (EventBridge) lo
-lee, detecta publicaciones nuevas (por `message_id`, con high-water mark) y las encola. El **onboarding**
-(`/start`·`/stop`) sigue por el webhook del bot.
+---
 
-```
-EventBridge (cron) ──► Lambda poller ──┐
-   (lee t.me/s/canal, HWM)             │
-                                       ▼
-Telegram (DM al bot) ─► API Gateway ─► Lambda receptor ──► SQS broadcast ─► Lambda worker ─► Telegram (DM)
-   /start /stop                        (secret, dedup,         │           (envío 403/429,
-                                        markup, encola)        ▼            concurrencia≤1)
-                                       responde 200 rápido   SQS DLQ (lotes que agotan reintentos)
-```
+## 1. Qué hace (visión)
 
-El worker hace el broadcast desde la cola: sobrevive a fallos parciales (reintentos + DLQ) y escala más
-allá del timeout de Lambda. La concurrencia reservada del worker (=1, donde el límite de cuenta lo
-permita) más el delay por envío mantienen el ritmo global bajo 30 msg/s.
+- **Ingesta** del canal fuente (ajeno) por **sondeo del preview público** `https://t.me/s/<canal>`
+  (el bot no puede ser admin de un canal de terceros), con **high-water mark** por `message_id`.
+- **Composición** del mensaje: quita ubicación (patrones), aplica **markup** (solo precios con `$`/`💸`/`💲`,
+  formato colombiano, redondeo al mil ↑: `$325.000` +15% → `$374.000`; no toca modelos como `A06 4-64GB`),
+  añade footer WhatsApp e **imagen** opcional.
+- **Difusión** desacoplada por **SQS** → worker, con **listas de distribución** (whitelist/blacklist) por canal.
+- **Telegram**: modo **bot** (a quienes dan `/start`) o **userbot** (Telethon, desde tu cuenta a tus contactos).
+- **WhatsApp**: servicio Node (Baileys) que reenvía las mismas listas a tus contactos.
+- **Envío manual**: componer un mensaje propio (no del canal) y enviarlo por los canales/listas elegidos.
+- **Estados + anti-baneo**: cada difusión es un *job* con progreso por canal; envío con delay para reducir baneos.
 
-> **Composición del mensaje** ([`domain/message.py`](src/lambda/domain/message.py)): a cada lista se le
-> (1) **quita el bloque de ubicación** (patrones configurables), (2) aplica **markup** a los precios y
-> (3) añade un **footer de WhatsApp** opcional. El markup solo toca números con símbolo de moneda
-> (`$`, `💸`, `💲`) en formato colombiano y redondea al **mil hacia arriba** (`$325.000` +15% →
-> `$374.000`), sin tocar modelos/specs (`A06 4-64GB`). Si hay **imagen** configurada, se envía como
-> foto antes de la lista. Todo es editable en runtime desde la [interfaz admin](#interfaz-de-administración).
+---
 
-## Estructura (Clean Architecture)
-
-La dependencia apunta hacia adentro: `domain` no conoce nada externo; `application`
-depende de `domain` y de **puertos** (interfaces); `adapters` implementa esos puertos
-con infraestructura concreta; `entrypoints` son los handlers Lambda finos; `wiring.py`
-es el composition root que lo cablea todo.
+## 2. Arquitectura
 
 ```
-TelegramSender/
-├── docker/                 # Entorno local (DynamoDB + webhook dev en modo inline)
-├── infra/cloudformation/   # Stack AWS (API Gateway, Lambdas, SQS+DLQ, DynamoDB, EventBridge)
-├── scripts/                # Empaquetado de Lambda (build en Linux) + smoke test
-├── specs/                  # Especificaciones por fase
-└── src/lambda/             # Clean Architecture:
-    ├── domain/             #   entidades + reglas puras (markup, models) — sin I/O
-    ├── application/        #   casos de uso + ports (broadcasting, deliver_batch, onboarding, poll_channel)
-    ├── adapters/           #   infraestructura: dynamodb, sqs, telegram, tme, config
-    ├── entrypoints/        #   handlers Lambda (receiver, poller, worker)
-    └── wiring.py           #   composition root
+EventBridge (cron) ─► Lambda poller ─┐  lee t.me/s/<canal>, HWM, markup, crea job
+                                     ▼
+Telegram (/start /stop) ─► API GW ─► Lambda receptor ─► SQS broadcast ─► Lambda worker ─► Telegram DM
+                                     (secret, dedup)        │  (bot/userbot, 403/429, delay, +estado)
+Panel admin (/admin) ────► Lambda admin ────────────────────┤
+   config, listas, envío manual, estados                    ▼
+                                                          SQS DLQ
+WhatsApp: Lambda(broadcasting) ─HTTP─► whatsapp-service (Baileys, Render) ─► WhatsApp
+   (forward texto+imagen, mode+listas)     sesión+contactos en DynamoDB, reporta progreso del job
 ```
 
-## Requisitos
+- **Clean Architecture** en `src/lambda/`: `domain` (puro) → `application` (casos de uso + *ports*) →
+  `adapters` (infra) → `entrypoints` (handlers) → `wiring.py` (composition root).
+- **Desacople SQS**: el worker sobrevive a fallos parciales (reintentos + DLQ) y escala más allá del
+  timeout de Lambda. Concurrencia reservada del worker + delay mantienen el ritmo anti-baneo.
 
-- Docker Desktop
-- AWS CLI v2 (para despliegue)
-- Python 3.12 (para empaquetar Lambda fuera de Docker)
+### Estructura
 
-## Desarrollo local
+```
+src/lambda/
+├── domain/         markup.py, message.py, recipients.py (listas: all/only/except), models.py
+├── application/    broadcasting.py (canal + envío manual), deliver_batch.py, onboarding.py,
+│                   poll_channel.py, ports.py (interfaces)
+├── adapters/       dynamodb.py (subs, dedup, HWM, config, BroadcastStore), sqs.py, telegram.py,
+│                   telethon_user.py (userbot), tme.py (scrape), whatsapp.py (forwarder), s3.py, config.py
+├── entrypoints/    receiver.py, poller.py, worker.py, admin.py (panel + API)
+└── wiring.py
+whatsapp-service/   servicio Node/Baileys (Docker) — ver su README
+infra/cloudformation/template.yaml   stack AWS completo
+scripts/            package-lambda.ps1, deploy.ps1, vincular-whatsapp-local.ps1, generar_sesion.py
+specs/              especificaciones por fase
+```
 
-1. Copia variables de entorno:
+---
 
-   ```powershell
-   Copy-Item .env.example .env
-   ```
+## 3. Despliegue AWS
 
-2. Edita `.env` con tu `TELEGRAM_BOT_TOKEN`.
-
-3. Levanta el stack local:
-
-   ```powershell
-   docker compose -f docker/docker-compose.yml up --build
-   ```
-
-4. Servicios disponibles:
-
-   | Servicio        | URL                          |
-   |-----------------|------------------------------|
-   | Webhook local   | http://localhost:8080/webhook/telegram |
-   | Health check    | http://localhost:8080/health |
-   | DynamoDB Local  | http://localhost:8000        |
-
-5. Prueba manual del webhook:
-
-   ```powershell
-   curl -X POST http://localhost:8080/webhook/telegram `
-     -H "Content-Type: application/json" `
-     -d '{"channel_post":{"chat":{"id":"-100123"},"text":"Producto A $100.00"}}'
-   ```
-
-6. Insertar suscriptor de prueba en DynamoDB Local:
-
-   ```powershell
-   aws dynamodb put-item `
-     --table-name SubscriptoresTelegram `
-     --item '{\"chatId\":{\"S\":\"123456789\"},\"status\":{\"S\":\"active\"}}' `
-     --endpoint-url http://localhost:8000 `
-     --region us-east-1
-   ```
-
-### Runtime Lambda en contenedor (opcional)
-
-Para probar la imagen compatible con AWS Lambda Runtime Interface:
+Requisitos: Docker Desktop, AWS CLI v2, Python 3.12. Credenciales AWS en `.env.aws` y secretos en
+`.env.deploy` (ambos **gitignored**).
 
 ```powershell
-docker compose -f docker/docker-compose.yml --profile lambda up --build lambda-runtime
+# 1) Empaquetar la Lambda (build en Linux dentro de Docker -> .build/telegram-broadcaster.zip)
+./scripts/package-lambda.ps1
+
+# 2) Desplegar (lee .env.aws + .env.deploy, sube el zip con key hasheada, deploy CFN con todos los params)
+./scripts/deploy.ps1
 ```
 
-Invocación local vía RIE en `http://localhost:9000/2015-03-31/functions/function/invocations`.
+`deploy.ps1` pasa: `SendMode` (bot|userbot), `Telethon*`, `Admin*`, tokens, `WorkerReservedConcurrency`.
+Output `AdminUrl` = panel. Stack actual: `telegram-sync-dev` (us-east-1).
 
-## Despliegue AWS (CloudFormation)
+### Recursos AWS
 
-### 1. Empaquetar Lambda
+| Recurso | Descripción |
+|---|---|
+| DynamoDB `subscribers` (+GSI StatusIndex) | suscriptores (modo bot) |
+| DynamoDB `processed-updates` (TTL) | dedup `update_id` + high-water mark del poller |
+| DynamoDB `config` | configuración editable en runtime + caché de contactos del userbot |
+| DynamoDB `whatsapp-auth` | sesión Baileys (persistida por el servicio) |
+| DynamoDB `broadcasts` (TTL) | **estados** de cada envío (progreso por canal) |
+| Lambda poller / receiver / worker / admin | sondeo, onboarding, envío, panel |
+| SQS broadcast + DLQ | cola de difusión con reintentos |
+| EventBridge | cron del poller (default 5 min) |
+| API Gateway HTTP API | `POST /webhook/telegram`, `GET /admin`, `ANY /admin/{proxy+}` |
+
+### Telegram
+
+- **Bot**: registra el webhook con `setWebhook?url=<WebhookUrl>&secret_token=<WEBHOOK_SECRET_TOKEN>`. Suscriptores con `/start`·`/stop`.
+- **Userbot** (envía desde tu cuenta a tus contactos): genera la sesión con `scripts/generar_sesion.py`
+  (my.telegram.org → API_ID/HASH → StringSession en `.env.deploy`), deploy con `SendMode=userbot`.
+  ⚠️ Automatizar tu cuenta personal puede implicar baneo; el usuario aceptó el riesgo.
+
+### WhatsApp (servicio Baileys)
+
+Servicio Node portable (Render free) en `whatsapp-service/`. La sesión y los contactos viven en DynamoDB
+(sobreviven reinicios/spin-down). **Vincular** (una vez) desde tu IP residencial — WhatsApp bloquea el
+linking desde IPs de datacenter:
 
 ```powershell
-.\scripts\package-lambda.ps1
+./scripts/vincular-whatsapp-local.ps1            # QR en vivo (o -Pair <num> para código de 8 dígitos)
 ```
 
-Genera `.build/telegram-broadcaster.zip`.
+Escaneas, la sesión queda en DynamoDB, paras el local y Render la reutiliza (`POST /reconnect`). Detalles
+y endpoints (`/status`, `/qr`, `/pair`, `/reset`, `/reconnect`, `/sync`, `/send`) en `whatsapp-service/README.md`.
 
-### 2. Subir artefacto a S3
+---
+
+## 4. Panel de administración
+
+`AdminUrl` (HTTP Basic Auth: `AdminUser`/`AdminPassword`). Pestañas:
+
+- **📝 Mensaje**: markup %, canal fuente, símbolos, footer, patrones de ubicación, imagen.
+- **✈️ Telegram**: cuenta (bot/userbot), destinatarios (buscador+paginación), **listas de distribución**
+  (whitelist/blacklist), exclusiones.
+- **🟢 WhatsApp**: conectar (URL/token, QR/código, estado), destinatarios, listas, exclusiones.
+- **📨 Enviar**: **Componer y enviar** (texto + imagen + canales + **selector de lista "Enviar a"** +
+  **previsualización** de destinatarios) y **Envíos** (estado + barras de progreso por canal, "en vivo").
+- **📊 Estado**: profundidad de cola/DLQ.
+
+API (Basic Auth): `GET|POST /admin/api/config`, `/api/subscribers`, `/api/queue`, `/api/image`,
+`/api/whatsapp/{status,contacts,pair,reset,reconnect,sync}`, `/api/broadcast` (envío manual),
+`/api/broadcast/preview`, `/api/broadcasts` (estados).
+
+---
+
+## 5. Listas de distribución y estados
+
+- **Listas con nombre** por canal (`telegram_lists`/`whatsapp_lists`) + **modo** (`telegram_target`/
+  `whatsapp_target`): `all` (todos), `only` (solo listas activas = whitelist), `except` (excluir = blacklist).
+  Regla pura en `domain/recipients.py`. El envío manual a WhatsApp **exige** una lista (no manda a todos por error).
+- **Estados** (`adapters/dynamodb.py:DynamoDbBroadcastStore`): contadores atómicos por canal; estado
+  **derivado** (`queued/sending/done/partial/failed`, con cierre por antigüedad). El worker (Telegram) y el
+  servicio (WhatsApp) reportan progreso vía `broadcast_id`.
+
+---
+
+## 6. Desarrollo local y pruebas
 
 ```powershell
-aws s3 cp .build/telegram-broadcaster.zip s3://TU-BUCKET/lambda/telegram-broadcaster.zip
+docker compose -f docker/docker-compose.yml up --build     # stack local (DynamoDB + webhook inline)
+python -m unittest discover -s tests                        # 113 tests (sin AWS; boto3 perezoso + fakes)
 ```
 
-### 3. Desplegar stack
+Los tests cubren markup, composición, recipients/listas, cliente Telegram (403/429/5xx), envío por lote,
+SQS, receptor, worker (parcial + estados), onboarding, WhatsApp forwarder, BroadcastStore (estados) y
+envío manual. Validación JS del servicio: `node --check whatsapp-service/src/index.js`.
 
-```powershell
-aws cloudformation deploy `
-  --template-file infra/cloudformation/template.yaml `
-  --stack-name telegram-sync-dev `
-  --parameter-overrides `
-    ProjectName=telegram-sync `
-    EnvironmentName=dev `
-    TelegramBotToken="TU_TOKEN" `
-    WebhookSecretToken="UN_SECRETO_ALEATORIO" `
-    LambdaCodeS3Bucket=TU-BUCKET `
-    LambdaCodeS3Key=lambda/telegram-broadcaster.zip `
-  --capabilities CAPABILITY_NAMED_IAM
-```
+---
 
-> Genera el secreto con, p.ej., `[guid]::NewGuid().ToString("N")`. Debe ser el **mismo** valor que
-> pasas a `setWebhook` abajo: así el receptor rechaza cualquier `POST` que no venga de Telegram.
+## 7. Variables de entorno (resumen)
 
-### 4. Registrar webhook en Telegram
+`TELEGRAM_BOT_TOKEN`, `WEBHOOK_SECRET_TOKEN`, `SOURCE_CHANNEL_USERNAME`, `MARKUP_PERCENTAGE`,
+`SEND_DELAY_SECONDS`, `SEND_MODE`(bot|userbot), `TELETHON_API_ID|HASH|SESSION`, `BROADCAST_QUEUE_URL`,
+`BROADCAST_BATCH_SIZE`, `SUBSCRIBERS_TABLE`, `CONFIG_TABLE`, `PROCESSED_UPDATES_TABLE`, `BROADCASTS_TABLE`,
+`IMAGES_BUCKET`, `ADMIN_USER`, `ADMIN_PASSWORD`. Servicio WhatsApp: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`,
+`BROADCASTS_TABLE`, `AWS_*`, `SEND_DELAY_MS`.
 
-Tras el deploy, toma la URL del output `WebhookUrl`:
+---
 
-```powershell
-aws cloudformation describe-stacks `
-  --stack-name telegram-sync-dev `
-  --query "Stacks[0].Outputs[?OutputKey=='WebhookUrl'].OutputValue" `
-  --output text
-```
+## 8. Estado actual y pendientes
 
-Regístrala con la Bot API **incluyendo el `secret_token`**:
+- ✅ Telegram (bot+userbot), WhatsApp (Baileys), listas, estados, envío manual, panel moderno — desplegado y verificado.
+- ✅ Despliegue reproducible (`deploy.ps1`); 113 tests.
+- ⏳ CI/CD auto-deploy en push a `main` (diferido).
+- ⏳ Secretos en SSM/Secrets Manager; alarmas CloudWatch (DLQ, errores).
+- ⚠️ WhatsApp/userbot: riesgo de baneo por envío masivo — usar listas pequeñas y delays altos.
 
-```text
-https://api.telegram.org/bot<TOKEN>/setWebhook?url=<WebhookUrl>&secret_token=<MISMO_SECRETO>
-```
-
-### 5. Alta de suscriptores
-
-Los usuarios se suscriben escribiéndole `/start` al bot por privado (esto es además requisito de
-Telegram para que el bot pueda enviarles DMs). `/stop` los da de baja. El receptor responde la
-confirmación y mantiene su `status` en DynamoDB.
-
-## Interfaz de administración
-
-Panel web en la misma URL pública, protegido con **usuario/contraseña** (HTTP Basic Auth):
-
-```
-https://<api-id>.execute-api.<region>.amazonaws.com/<env>/admin      (output AdminUrl)
-```
-
-Credenciales: parámetros `AdminUser` (default `admin`) y `AdminPassword` (obligatorio en el deploy).
-Permite, en runtime (sin redeploy):
-
-- **Cambiar el canal fuente** que sondea el poller (y markup, símbolos, footer WhatsApp, URL de imagen).
-- **Ver la cola**: profundidad de la cola de broadcast y de la DLQ.
-- **Ver/gestionar suscriptores**: lista con estado y botón activar/desactivar.
-
-Endpoints (todos bajo Basic Auth): `GET /admin` (página), `GET|POST /admin/api/config`,
-`GET /admin/api/subscribers`, `POST /admin/api/subscribers`, `GET /admin/api/queue`.
-
-> Nota: un bot de Telegram **no puede leer los contactos de tu cuenta personal** (limitación de la
-> plataforma). Los destinatarios son quienes le dan `/start` al bot; el panel gestiona esa lista.
-
-## Recursos AWS creados
-
-| Recurso          | Descripción                                              |
-|------------------|----------------------------------------------------------|
-| DynamoDB         | Tabla de suscriptores con GSI `StatusIndex`              |
-| DynamoDB (dedup) | `ProcessedUpdates` (TTL): dedup `update_id` + high-water mark del poller |
-| Lambda poller    | Sondea `t.me/s/<canal>`, detecta posts nuevos (HWM), markup, encola |
-| EventBridge      | Regla cron que dispara el poller (default cada 5 min)    |
-| Lambda receptor  | Valida secret, deduplica, rutea `/start`·`/stop`, encola |
-| SQS + DLQ        | Cola de broadcast con reintentos; DLQ para lotes fallidos|
-| Lambda worker    | Consume la cola y envía por DM (403/429), concurrencia ≤1 |
-| API Gateway      | HTTP API `POST /webhook/telegram` (onboarding)          |
-| IAM Roles        | Poller, receptor y worker, permisos mínimos por función  |
-
-## Variables de entorno
-
-| Variable                   | Función  | Descripción                                  |
-|----------------------------|----------|----------------------------------------------|
-| `TELEGRAM_BOT_TOKEN`       | ambos    | Token del bot (worker envía; receptor responde /start) |
-| `WEBHOOK_SECRET_TOKEN`     | receptor | Secreto del header de Telegram. Vacío ⇒ sin validar (dev) |
-| `SOURCE_CHANNEL_USERNAME`  | poller   | Username del canal público a sondear (sin @, default `iproparts`) |
-| `SOURCE_CHANNEL_ID`        | receptor | Filtra `channel_post` si el bot fuera admin del canal |
-| `MARKUP_PERCENTAGE`        | poller/receptor | Markup sobre precios (default 15)     |
-| `SEND_DELAY_SECONDS`       | worker   | Delay entre envíos (default 0.05)            |
-| `BROADCAST_QUEUE_URL`      | receptor | URL de la cola SQS. Vacío ⇒ envío inline (dev)|
-| `BROADCAST_BATCH_SIZE`     | receptor | Chat IDs por mensaje SQS (default 100)       |
-| `SUBSCRIBERS_TABLE`        | ambos    | Nombre tabla DynamoDB de suscriptores        |
-| `SUBSCRIBERS_STATUS_INDEX` | receptor | GSI para query de activos                    |
-| `PROCESSED_UPDATES_TABLE`  | receptor | Tabla de dedup de `update_id`                |
-| `DEDUP_TTL_SECONDS`        | receptor | TTL del registro de dedup (default 86400)    |
-
-> En desarrollo local el servidor Flask no usa SQS: si `BROADCAST_QUEUE_URL` está vacío, el receptor
-> hace el broadcast **inline** invocando la misma lógica del worker.
-
-## Pruebas
-
-```powershell
-python -m unittest discover -s tests -v
-```
-
-63 tests cubren markup, cliente Telegram (403/429/5xx), envío por lote, encolado SQS, enrutado del
-receptor (`text`/`caption`/`edited_channel_post`), respuesta parcial del worker, validación de
-`secret_token` (fail-closed + tiempo constante), parseo seguro del body, dedup de `update_id` (con
-compensación acotada e idempotencia del inline) y comandos `/start`/`/stop`. No requieren AWS: los
-imports de boto3 son perezosos y las fronteras se mockean.
-
-## Próximos pasos
-
-- Bot token en SSM/Secrets Manager; alarmas CloudWatch (fallos, profundidad de DLQ)
-- CI/CD con empaquetado y deploy automatizado
-- Test de integración end-to-end contra dynamodb-local + SQS local
-- Comandos de gestión adicionales (`/status`, panel admin) y precisión del markup
+Ver también `ROADMAP.md`, `specs/` y la guía del servicio en `whatsapp-service/README.md`.
