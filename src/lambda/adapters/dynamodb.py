@@ -305,11 +305,20 @@ class DynamoDbBroadcastStore:
     def set_whatsapp_total(self, broadcast_id: str, total: int) -> None:
         from decimal import Decimal
 
-        self._t().update_item(
-            Key={"id": broadcast_id},
-            UpdateExpression="SET wa_total = :t, wa_started = :b",
-            ExpressionAttributeValues={":t": Decimal(int(total)), ":b": True},
-        )
+        try:
+            self._t().update_item(
+                Key={"id": broadcast_id},
+                UpdateExpression="SET wa_total = :t, wa_started = :b",
+                ConditionExpression="attribute_exists(id)",  # no fabricar items fantasma
+                ExpressionAttributeValues={":t": Decimal(int(total)), ":b": True},
+            )
+        except Exception:
+            pass
+
+    def marcar_whatsapp_fallido(self, broadcast_id: str) -> None:
+        """El reenvío a WhatsApp no llegó al servicio: cierra el canal para que el job no
+        quede 'enviando' eterno. Marca wa_started=True con total 0 (no había progreso real)."""
+        self.set_whatsapp_total(broadcast_id, 0)
 
     def incr_whatsapp(self, broadcast_id: str, sent: int = 0, failed: int = 0) -> None:
         self._add(broadcast_id, "ADD wa_sent :s, wa_failed :f", {":s": int(sent), ":f": int(failed)})
@@ -321,27 +330,45 @@ class DynamoDbBroadcastStore:
             self._t().update_item(
                 Key={"id": broadcast_id},
                 UpdateExpression=expr,
+                ConditionExpression="attribute_exists(id)",  # solo si el job existe (no upsert fantasma)
                 ExpressionAttributeValues={k: Decimal(v) for k, v in values.items()},
             )
         except Exception:
             pass  # el tracking de estado nunca debe romper el envío
 
+    # Tras esta antigüedad (s) un job aún incompleto se considera terminal (incrementos
+    # perdidos o un canal que nunca arrancó), para no quedar 'enviando' indefinidamente.
+    _EDAD_TERMINAL = 3600
+
     @staticmethod
     def _estado(j: dict) -> str:
         chans = j.get("channels", []) or []
-        tg_total, tg_done = int(j.get("tg_total", 0)), int(j.get("tg_sent", 0)) + int(j.get("tg_failed", 0))
-        wa_total, wa_done = int(j.get("wa_total", 0)), int(j.get("wa_sent", 0)) + int(j.get("wa_failed", 0))
+        tg_sent, tg_failed = int(j.get("tg_sent", 0)), int(j.get("tg_failed", 0))
+        wa_sent, wa_failed = int(j.get("wa_sent", 0)), int(j.get("wa_failed", 0))
+        total = int(j.get("tg_total", 0)) + int(j.get("wa_total", 0))
         wa_pendiente = ("whatsapp" in chans) and not j.get("wa_started")
-        total, done = tg_total + wa_total, tg_done + wa_done
-        failed = int(j.get("tg_failed", 0)) + int(j.get("wa_failed", 0))
-        if done == 0 and not wa_pendiente:
-            return "queued"
-        if wa_pendiente or total == 0 or done < total:
-            return "sending"
-        return "partial" if failed > 0 else "done"
+        done = tg_sent + tg_failed + wa_sent + wa_failed
+        sent = tg_sent + wa_sent
+        failed = tg_failed + wa_failed
+        if total == 0 and not wa_pendiente:
+            return "done"  # sin destinatarios reales / canal ya cerrado: terminal
+        if wa_pendiente or done < total:
+            base = "queued" if (done == 0 and not wa_pendiente) else "sending"
+            created = int(j.get("created_at", 0))
+            if created and (int(time.time()) - created) > DynamoDbBroadcastStore._EDAD_TERMINAL:
+                return "failed" if sent == 0 else "partial"  # viejo y aún pendiente: cerrar
+            return base
+        return "failed" if sent == 0 else ("partial" if failed > 0 else "done")
 
     def listar(self, limit: int = 30) -> list[dict]:
-        items = self._t().scan().get("Items", [])
+        items, start = [], None
+        while True:  # paginar para no perder los más recientes si la tabla supera 1MB
+            kwargs = {"ExclusiveStartKey": start} if start else {}
+            resp = self._t().scan(**kwargs)
+            items.extend(resp.get("Items", []))
+            start = resp.get("LastEvaluatedKey")
+            if not start:
+                break
         items.sort(key=lambda j: int(j.get("created_at", 0)), reverse=True)
         salida = []
         for j in items[:limit]:

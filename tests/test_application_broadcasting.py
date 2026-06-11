@@ -154,7 +154,12 @@ class BroadcastListTests(unittest.TestCase):
                 self.jobs.append({"id": broadcast_id, "source": source, "channels": list(channels), "tg_total": tg_total})
 
         queue, wa, store = FakeQueue(), FakeWa(), FakeBroadcasts()
-        bl = BroadcastList(FakeSubs(["1", "2"]), queue, FakeConfig(), whatsapp=wa, broadcasts=store)
+        # WhatsApp manual exige una lista activa en modo "only" (seguridad anti-mando-a-todos)
+        cfg = FakeConfig(
+            whatsapp_lists=[{"name": "clientes", "ids": ["57300@s.whatsapp.net"]}],
+            whatsapp_target={"mode": "only", "lists": ["clientes"]},
+        )
+        bl = BroadcastList(FakeSubs(["1", "2"]), queue, cfg, whatsapp=wa, broadcasts=store)
         res = bl.enviar_manual("Hola mundo $100.000", telegram=True, whatsapp=True)
 
         # texto CRUDO (sin markup ni footer)
@@ -166,6 +171,12 @@ class BroadcastListTests(unittest.TestCase):
         self.assertEqual(store.jobs[0]["channels"], ["telegram", "whatsapp"])
         self.assertEqual(res["broadcast_id"], store.jobs[0]["id"])
         self.assertEqual(wa.calls[0][1], res["broadcast_id"])
+
+    def test_envio_manual_whatsapp_sin_lista_es_rechazado(self):
+        # Sin lista activa de WhatsApp en modo "only", el envío manual a WhatsApp se rechaza.
+        bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), FakeConfig(), whatsapp=object(), broadcasts=None)
+        with self.assertRaises(ValueError):
+            bl.enviar_manual("hola", telegram=False, whatsapp=True)
 
     def test_no_reenvia_whatsapp_si_desactivado(self):
         class FakeWa:

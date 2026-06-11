@@ -51,6 +51,13 @@ class EstadoTests(unittest.TestCase):
         j = job(channels=["telegram", "whatsapp"], tg_total=5, tg_sent=5, wa_total=3, wa_sent=1, wa_started=True)
         self.assertEqual(E(j), "sending")
 
+    def test_sin_destinatarios_es_done_no_queued(self):
+        # job solo-telegram con 0 destinatarios: terminal (no atascado en queued)
+        self.assertEqual(E(job(channels=["telegram"], tg_total=0)), "done")
+
+    def test_todo_fallido_es_failed(self):
+        self.assertEqual(E(job(channels=["telegram"], tg_total=5, tg_failed=5, tg_sent=0)), "failed")
+
 
 if __name__ == "__main__":
     unittest.main()

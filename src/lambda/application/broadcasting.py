@@ -77,6 +77,7 @@ class BroadcastList:
 
     def _forward_whatsapp(self, cfg: dict, mensaje: str, image_url: str | None, broadcast_id: str) -> None:
         wa_target = cfg.get("whatsapp_target", {})
+        aceptado = False
         try:
             resultado = self._whatsapp.forward(
                 mensaje,
@@ -88,8 +89,15 @@ class BroadcastList:
                 broadcasts_table=self._broadcasts_table(),
             )
             logger.info("WhatsApp forward: %s", resultado)
+            aceptado = isinstance(resultado, dict) and bool(resultado.get("accepted"))
         except Exception:
             logger.exception("Fallo reenviando a WhatsApp (no afecta el broadcast de Telegram)")
+        # Si el servicio no aceptó el envío, cierra el canal WhatsApp del job (evita 'enviando' eterno).
+        if not aceptado and self._broadcasts:
+            try:
+                self._broadcasts.marcar_whatsapp_fallido(broadcast_id)
+            except Exception:
+                logger.exception("No se pudo marcar WhatsApp fallido en el job %s", broadcast_id)
 
     # --- difusión desde el canal (con markup/footer) ---------------------------
 
@@ -126,9 +134,21 @@ class BroadcastList:
         self, text: str, image_url: str | None = None, telegram: bool = True, whatsapp: bool = False
     ) -> dict:
         """Envía un mensaje compuesto por el usuario (texto tal cual, sin markup), por los
-        canales elegidos, respetando las listas de distribución configuradas."""
+        canales elegidos, respetando las listas de distribución configuradas.
+
+        Seguridad: por WhatsApp manual EXIGE una lista activa (modo 'Solo estas listas'),
+        para no difundir a TODA la agenda por error (riesgo de baneo). Lanza ValueError si no.
+        """
         cfg = self._config.get()
         wa_on = bool(whatsapp and self._whatsapp)
+        if wa_on:
+            wa_target = cfg.get("whatsapp_target", {})
+            wa_ids = ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_target)
+            if wa_target.get("mode") != "only" or not wa_ids:
+                raise ValueError(
+                    "Para enviar por WhatsApp manualmente configura una lista activa en modo "
+                    "'Solo estas listas' (evita mandar a todos por error)."
+                )
         channels = (["telegram"] if telegram else []) + (["whatsapp"] if wa_on else [])
         clientes = self._destinatarios_telegram(cfg) if telegram else []
         bid = self._nuevo_id()

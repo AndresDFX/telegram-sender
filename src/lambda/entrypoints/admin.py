@@ -258,13 +258,21 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             texto = str(cuerpo.get("text", "")).strip()
             a_tg = bool(cuerpo.get("telegram"))
             a_wa = bool(cuerpo.get("whatsapp"))
+            img = str(cuerpo.get("image_url", "")).strip()
             if not texto:
                 return _json({"error": "texto requerido"}, 400)
+            if len(texto) > 4096:  # límite de Telegram; evita que falle en cada destinatario
+                return _json({"error": "el mensaje supera 4096 caracteres"}, 400)
             if not (a_tg or a_wa):
                 return _json({"error": "elige al menos un canal"}, 400)
-            res = wiring.build_broadcast_list().enviar_manual(
-                texto, image_url=str(cuerpo.get("image_url", "")).strip() or None, telegram=a_tg, whatsapp=a_wa
-            )
+            if img and not img.startswith("https://"):
+                return _json({"error": "la imagen debe ser una URL https:// (o súbela)"}, 400)
+            try:
+                res = wiring.build_broadcast_list().enviar_manual(
+                    texto, image_url=img or None, telegram=a_tg, whatsapp=a_wa
+                )
+            except ValueError as e:
+                return _json({"error": str(e)}, 400)
             return _json({"ok": True, **res})
         if sub == "/api/whatsapp/status" and method == "GET":
             return _whatsapp_proxy("/status")

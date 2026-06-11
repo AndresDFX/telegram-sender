@@ -55,9 +55,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             stats = deliver(body["text"], body.get("chat_ids", []), _resolver_imagen(body))
             logger.info("Lote %s procesado: %s", body.get("batch_index"), stats.resumen())
             bid = body.get("broadcast_id")
-            if bid:
+            fallo_total = stats.total > 0 and stats.failed == stats.total
+            # Solo contamos si el lote NO se va a reencolar: si reencola (fallo total), un ADD
+            # aquí se reaplicaría en cada reintento SQS e inflaría los contadores.
+            if bid and not fallo_total:
                 broadcasts.incr_telegram(bid, sent=stats.sent, failed=stats.failed + stats.blocked)
-            if stats.total > 0 and stats.failed == stats.total:
+            if fallo_total:
                 raise RuntimeError(f"Todos los envíos del lote {message_id} fallaron")
         except Exception:
             logger.exception("Fallo procesando el mensaje SQS %s", message_id)

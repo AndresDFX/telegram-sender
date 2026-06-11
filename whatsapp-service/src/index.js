@@ -407,15 +407,23 @@ function resolverTargets(mode, list_ids, exclude) {
 // Reporte de progreso del job (estado) al store de broadcasts en DynamoDB. Best-effort:
 // nunca debe romper el envío. El nombre de la tabla y el id llegan en el payload de /send.
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
+// Tabla de estados: preferimos la del entorno; si llega en el payload solo la aceptamos si
+// tiene el sufijo esperado (no escribir a una tabla arbitraria dirigida desde fuera).
+function bcTable(fromPayload) {
+  if (process.env.BROADCASTS_TABLE) return process.env.BROADCASTS_TABLE
+  if (typeof fromPayload === 'string' && /-broadcasts$/.test(fromPayload)) return fromPayload
+  return null
+}
 async function bcSetTotal(table, id, total) {
   if (!table || !id) return
   try {
     await ddb.send(new UpdateItemCommand({
       TableName: table, Key: { id: { S: id } },
       UpdateExpression: 'SET wa_total = :t, wa_started = :b',
+      ConditionExpression: 'attribute_exists(id)', // no crear items fantasma
       ExpressionAttributeValues: { ':t': { N: String(total) }, ':b': { BOOL: true } },
     }))
-  } catch (e) { log.error({ err: String(e) }, 'bcSetTotal falló') }
+  } catch (e) { if (e.name !== 'ConditionalCheckFailedException') log.error({ err: String(e) }, 'bcSetTotal falló') }
 }
 async function bcIncr(table, id, sent, failed) {
   if (!table || !id || (!sent && !failed)) return
@@ -423,9 +431,10 @@ async function bcIncr(table, id, sent, failed) {
     await ddb.send(new UpdateItemCommand({
       TableName: table, Key: { id: { S: id } },
       UpdateExpression: 'ADD wa_sent :s, wa_failed :f',
+      ConditionExpression: 'attribute_exists(id)',
       ExpressionAttributeValues: { ':s': { N: String(sent) }, ':f': { N: String(failed) } },
     }))
-  } catch (e) { log.error({ err: String(e) }, 'bcIncr falló') }
+  } catch (e) { if (e.name !== 'ConditionalCheckFailedException') log.error({ err: String(e) }, 'bcIncr falló') }
 }
 
 async function enviarLote(text, image_url, targets, track) {
@@ -461,7 +470,7 @@ app.post('/send', auth, (req, res) => {
   const { text = '', image_url = null, exclude = [], mode = 'all', list_ids = [], broadcast_id = null, broadcasts_table = null } = req.body || {}
   const targets = resolverTargets(mode, list_ids, exclude)
   res.status(202).json({ accepted: true, targets: targets.length, mode })
-  enviarLote(text, image_url, targets, { table: broadcasts_table, id: broadcast_id }).catch((e) =>
+  enviarLote(text, image_url, targets, { table: bcTable(broadcasts_table), id: broadcast_id }).catch((e) =>
     log.error({ err: String(e) }, 'enviarLote falló')
   )
 })
