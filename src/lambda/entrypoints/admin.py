@@ -269,11 +269,26 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 return _json({"error": "la imagen debe ser una URL https:// (o súbela)"}, 400)
             try:
                 res = wiring.build_broadcast_list().enviar_manual(
-                    texto, image_url=img or None, telegram=a_tg, whatsapp=a_wa
+                    texto,
+                    image_url=img or None,
+                    telegram=a_tg,
+                    whatsapp=a_wa,
+                    telegram_list=str(cuerpo.get("telegram_list", "")).strip() or None,
+                    whatsapp_list=str(cuerpo.get("whatsapp_list", "")).strip() or None,
                 )
             except ValueError as e:
                 return _json({"error": str(e)}, 400)
             return _json({"ok": True, **res})
+        if sub == "/api/broadcast/preview" and method == "POST":
+            cuerpo = _body(event)
+            return _json(
+                wiring.build_broadcast_list().previsualizar(
+                    telegram=bool(cuerpo.get("telegram")),
+                    whatsapp=bool(cuerpo.get("whatsapp")),
+                    telegram_list=str(cuerpo.get("telegram_list", "")).strip() or None,
+                    whatsapp_list=str(cuerpo.get("whatsapp_list", "")).strip() or None,
+                )
+            )
         if sub == "/api/whatsapp/status" and method == "GET":
             return _whatsapp_proxy("/status")
         if sub == "/api/whatsapp/contacts" and method == "GET":
@@ -711,6 +726,15 @@ main>.card.show{display:block}
    </div>
    <div class="hint">⚠️ El envío masivo por WhatsApp puede banear tu número. El sistema lo hace con ritmo lento (anti-baneo); úsalo con listas pequeñas.</div>
 
+   <label style="margin-top:16px">Enviar a</label>
+   <div class="row">
+     <div id="bc_tg_wrap"><div class="hint" style="margin-top:0">Telegram</div>
+       <select id="bc_tg_list" onchange="bcPrev()"><option value="">Según configuración (modo actual)</option></select></div>
+     <div id="bc_wa_wrap" style="display:none"><div class="hint" style="margin-top:0">WhatsApp (elige una lista)</div>
+       <select id="bc_wa_list" onchange="bcPrev()"><option value="">— elige una lista —</option></select></div>
+   </div>
+   <div class="hint" id="bc_preview" style="margin-top:10px">—</div>
+
    <div class="compose-actions">
      <button id="bc_send" onclick="sendBroadcast()">Enviar ahora</button>
      <button class="ghost" onclick="bcClear()">Limpiar</button>
@@ -879,8 +903,36 @@ if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').s
 let BC_IMG_URL = '';           // URL devuelta tras subir un archivo a /api/image
 function bcCount(){ const n=$('bc_text').value.length; $('bc_count').textContent=n+(n===1?' carácter':' caracteres'); }
 function bcChan(){
-  $('bc_chan_tg').classList.toggle('on', $('bc_telegram').checked);
-  $('bc_chan_wa').classList.toggle('on', $('bc_whatsapp').checked);
+  const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked;
+  $('bc_chan_tg').classList.toggle('on', tg);
+  $('bc_chan_wa').classList.toggle('on', wa);
+  $('bc_tg_wrap').style.display = tg ? 'block':'none';
+  $('bc_wa_wrap').style.display = wa ? 'block':'none';
+  bcPrev();
+}
+// Rellena los selectores "Enviar a" con las listas configuradas (conserva selección).
+function bcFillLists(){
+  const fill=(sel,arr,first)=>{ const cur=sel.value;
+    sel.innerHTML='<option value="">'+first+'</option>'+ (arr||[]).map(l=>`<option value="${bcEsc(l.name)}">${bcEsc(l.name)} (${(l.ids||[]).length})</option>`).join('');
+    sel.value=cur; };
+  fill($('bc_tg_list'), (LISTS&&LISTS.telegram)||[], 'Según configuración (modo actual)');
+  fill($('bc_wa_list'), (LISTS&&LISTS.whatsapp)||[], '— elige una lista —');
+}
+let BC_PREV_T=null;
+async function bcPrev(){
+  clearTimeout(BC_PREV_T);
+  const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked, out=$('bc_preview');
+  if(!tg && !wa){ out.textContent='—'; return; }
+  out.textContent='calculando destinatarios…';
+  BC_PREV_T=setTimeout(async()=>{
+    const body={ telegram:tg, whatsapp:wa, telegram_list:$('bc_tg_list').value, whatsapp_list:$('bc_wa_list').value };
+    try{ const r=await api('/api/broadcast/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const parts=[];
+      if(tg) parts.push('✈️ Telegram: <b>'+(r.telegram??0)+'</b>');
+      if(wa) parts.push('🟢 WhatsApp: <b>'+(r.whatsapp??0)+'</b>');
+      out.innerHTML='Se enviará a → '+parts.join(' · ');
+    }catch(e){ out.textContent='no se pudo calcular la previsualización'; }
+  }, 300);
 }
 function bcEffectiveUrl(){ return ($('bc_image_url').value || '').trim() || BC_IMG_URL || ''; }
 function bcPreview(){
@@ -914,7 +966,7 @@ async function sendBroadcast(){
   let msg='¿Enviar este mensaje ahora?';
   if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
   if(!confirm(msg)) return;
-  const body={ text, telegram:tg, whatsapp:wa };
+  const body={ text, telegram:tg, whatsapp:wa, telegram_list:$('bc_tg_list').value, whatsapp_list:$('bc_wa_list').value };
   const url=bcEffectiveUrl(); if(url) body.image_url=url;
   const btn=$('bc_send'); btn.disabled=true; $('bc_status').textContent='encolando...';
   try{
@@ -926,6 +978,10 @@ async function sendBroadcast(){
   }catch(e){ $('bc_status').textContent=''; toast('Error al encolar',true); }
   finally{ btn.disabled=false; }
 }
+// Al abrir la pestaña Enviar: rellenar listas + previsualizar (hook aditivo sobre showTab).
+(function(){ const _s=window.showTab;
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='enviar'){ try{ bcFillLists(); bcChan(); }catch(e){} } }; }
+})();
 // ===== Envíos: listado + polling (GET /api/broadcasts) =====
 let BC_TIMER=null;
 const BC_POLL=4000;

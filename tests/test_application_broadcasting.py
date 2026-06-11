@@ -172,6 +172,32 @@ class BroadcastListTests(unittest.TestCase):
         self.assertEqual(res["broadcast_id"], store.jobs[0]["id"])
         self.assertEqual(wa.calls[0][1], res["broadcast_id"])
 
+    def test_envio_manual_whatsapp_con_lista_elegida(self):
+        # Elegir una lista en el compositor permite el envío aunque el target global sea "all".
+        class FakeWa:
+            def __init__(self):
+                self.calls = []
+
+            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None):
+                self.calls.append((mode, list(list_ids or [])))
+                return {"accepted": True}
+
+        wa = FakeWa()
+        cfg = FakeConfig(whatsapp_lists=[{"name": "Prueba", "ids": ["57300@s.whatsapp.net"]}])  # target global "all" por defecto
+        bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, whatsapp=wa)
+        bl.enviar_manual("hola", telegram=False, whatsapp=True, whatsapp_list="Prueba")
+        self.assertEqual(wa.calls[0], ("only", ["57300@s.whatsapp.net"]))
+
+    def test_previsualizar_cuenta_destinatarios(self):
+        cfg = FakeConfig(
+            telegram_lists=[{"name": "VIP", "ids": ["1", "3"]}],
+            whatsapp_lists=[{"name": "Prueba", "ids": ["57300@s.whatsapp.net", "57301@s.whatsapp.net"]}],
+        )
+        bl = BroadcastList(FakeSubs(["1", "2", "3", "4"]), FakeQueue(), cfg, whatsapp=object())
+        prev = bl.previsualizar(telegram=True, whatsapp=True, telegram_list="VIP", whatsapp_list="Prueba")
+        self.assertEqual(prev["telegram"], 2)  # 1 y 3 (VIP ∩ contactos)
+        self.assertEqual(prev["whatsapp"], 2)
+
     def test_envio_manual_whatsapp_sin_lista_es_rechazado(self):
         # Sin lista activa de WhatsApp en modo "only", el envío manual a WhatsApp se rechaza.
         bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), FakeConfig(), whatsapp=object(), broadcasts=None)

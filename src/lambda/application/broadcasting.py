@@ -67,16 +67,18 @@ class BroadcastList:
                 logger.exception("No se pudo firmar la imagen para WhatsApp")
         return None
 
-    def _destinatarios_telegram(self, cfg: dict) -> list:
+    def _destinatarios_telegram(self, cfg: dict, target: dict | None = None) -> list:
         return filtrar_destinatarios(
             self._subscribers.listar_activos(),
             cfg.get("telegram_lists", []),
-            cfg.get("telegram_target", {}),
+            target if target is not None else cfg.get("telegram_target", {}),
             excluidos=cfg.get("excluded_ids", []),
         )
 
-    def _forward_whatsapp(self, cfg: dict, mensaje: str, image_url: str | None, broadcast_id: str) -> None:
-        wa_target = cfg.get("whatsapp_target", {})
+    def _forward_whatsapp(
+        self, cfg: dict, mensaje: str, image_url: str | None, broadcast_id: str, wa_target: dict | None = None
+    ) -> None:
+        wa_target = wa_target if wa_target is not None else cfg.get("whatsapp_target", {})
         aceptado = False
         try:
             resultado = self._whatsapp.forward(
@@ -130,32 +132,61 @@ class BroadcastList:
 
     # --- envío manual (mensaje propio, no capturado del canal) -----------------
 
+    def _target_para(self, cfg: dict, canal: str, lista: str | None) -> dict:
+        """Target efectivo de un canal: si se eligió una lista en el compositor, esa lista en
+        modo 'only'; si no, el target configurado del canal."""
+        if lista:
+            return {"mode": "only", "lists": [lista]}
+        return cfg.get(f"{canal}_target", {})
+
+    def previsualizar(
+        self, telegram: bool, whatsapp: bool, telegram_list: str | None = None, whatsapp_list: str | None = None
+    ) -> dict:
+        """Cuántos destinatarios recibirían (sin enviar). WhatsApp se aproxima por los ids de
+        la lista (el servicio tiene los contactos reales)."""
+        cfg = self._config.get()
+        out: dict = {}
+        if telegram:
+            out["telegram"] = len(self._destinatarios_telegram(cfg, self._target_para(cfg, "telegram", telegram_list)))
+        if whatsapp:
+            wa_t = self._target_para(cfg, "whatsapp", whatsapp_list)
+            out["whatsapp"] = len(ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_t))
+        return out
+
     def enviar_manual(
-        self, text: str, image_url: str | None = None, telegram: bool = True, whatsapp: bool = False
+        self,
+        text: str,
+        image_url: str | None = None,
+        telegram: bool = True,
+        whatsapp: bool = False,
+        telegram_list: str | None = None,
+        whatsapp_list: str | None = None,
     ) -> dict:
         """Envía un mensaje compuesto por el usuario (texto tal cual, sin markup), por los
-        canales elegidos, respetando las listas de distribución configuradas.
+        canales elegidos. Puede dirigirse a una lista concreta (telegram_list/whatsapp_list);
+        si no, usa el target configurado del canal.
 
-        Seguridad: por WhatsApp manual EXIGE una lista activa (modo 'Solo estas listas'),
-        para no difundir a TODA la agenda por error (riesgo de baneo). Lanza ValueError si no.
+        Seguridad: por WhatsApp manual EXIGE una lista con destinatarios (no difunde a TODA la
+        agenda por error). Lanza ValueError si no hay a quién enviar.
         """
         cfg = self._config.get()
         wa_on = bool(whatsapp and self._whatsapp)
+        wa_target = self._target_para(cfg, "whatsapp", whatsapp_list)
         if wa_on:
-            wa_target = cfg.get("whatsapp_target", {})
             wa_ids = ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_target)
             if wa_target.get("mode") != "only" or not wa_ids:
                 raise ValueError(
-                    "Para enviar por WhatsApp manualmente configura una lista activa en modo "
-                    "'Solo estas listas' (evita mandar a todos por error)."
+                    "Elige una lista de WhatsApp con destinatarios en 'Enviar a' (evita mandar a "
+                    "todos por error). Crea/activa una lista en la pestaña WhatsApp."
                 )
+        tg_target = self._target_para(cfg, "telegram", telegram_list)
         channels = (["telegram"] if telegram else []) + (["whatsapp"] if wa_on else [])
-        clientes = self._destinatarios_telegram(cfg) if telegram else []
+        clientes = self._destinatarios_telegram(cfg, tg_target) if telegram else []
         bid = self._nuevo_id()
         self._registrar(bid, text, "manual", channels, len(clientes))
 
         if telegram:
             self._queue.encolar(text, clientes, image_url=image_url or None, image_key=None, broadcast_id=bid)
         if wa_on:
-            self._forward_whatsapp(cfg, text, image_url or None, bid)
+            self._forward_whatsapp(cfg, text, image_url or None, bid, wa_target)
         return {"broadcast_id": bid, "channels": channels, "telegram_total": len(clientes)}
