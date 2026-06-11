@@ -261,6 +261,14 @@ class SchedulerPathTests(unittest.TestCase):
         self.assertTrue(plan["wa_resolved"])
         self.assertEqual(plan["wa_total"], 7)
 
+    def test_manual_programado_guarda_not_before(self):
+        plans = FakePlans()
+        cfg = FakeConfig(scheduling_enabled=True)
+        bl = BroadcastList(FakeSubs(["1", "2"]), FakeQueue(), cfg, plans=plans)
+        res = bl.enviar_manual("hola", telegram=True, whatsapp=False, scheduled_at=1750000000)
+        self.assertTrue(res["scheduled"])
+        self.assertEqual(plans.creados[0]["not_before"], 1750000000)
+
     def test_fallback_legacy_si_no_hay_plans(self):
         # scheduling_enabled pero sin store de planes -> envío inmediato (compatibilidad)
         queue = FakeQueue()

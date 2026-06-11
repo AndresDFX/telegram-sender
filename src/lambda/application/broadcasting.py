@@ -82,6 +82,7 @@ class BroadcastList:
         wa_list_ids,
         wa_text: str,
         wa_image_url: str | None,
+        not_before: int = 0,
     ) -> None:
         bs = int(cfg.get("batch_size", 150))
         tg_lotes = self._chunk(clientes, bs) if tg_on else []
@@ -103,6 +104,7 @@ class BroadcastList:
             wa_exclude=wa_exclude,
             wa_text=wa_text,
             wa_image_url=wa_image_url,
+            not_before=int(not_before or 0),
         )
 
     @staticmethod
@@ -257,6 +259,7 @@ class BroadcastList:
         whatsapp_list: str | None = None,
         telegram_ids=None,
         whatsapp_ids=None,
+        scheduled_at: int | None = None,
     ) -> dict:
         """Envía un mensaje propio (texto tal cual) por los canales elegidos. Destinatarios:
         contactos ad-hoc elegidos (telegram_ids/whatsapp_ids) > lista (telegram_list/whatsapp_list)
@@ -279,9 +282,10 @@ class BroadcastList:
             self._crear_plan(
                 bid, cfg=cfg, text=text, image_url=image_url or None, image_key=None,
                 clientes=clientes, tg_on=bool(telegram), wa_on=wa_on, wa_mode=wa_mode, wa_list_ids=wa_ids,
-                wa_text=text, wa_image_url=image_url or None,
+                wa_text=text, wa_image_url=image_url or None, not_before=int(scheduled_at or 0),
             )
-            return {"scheduled": True, "broadcast_id": bid, "channels": channels, "telegram_total": len(clientes)}
+            return {"scheduled": True, "broadcast_id": bid, "channels": channels,
+                    "telegram_total": len(clientes), "not_before": int(scheduled_at or 0)}
 
         if telegram:
             self._queue.encolar(text, clientes, image_url=image_url or None, image_key=None, broadcast_id=bid)

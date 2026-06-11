@@ -471,7 +471,7 @@ class DynamoDbBroadcastStore:
             return base
         return "failed" if sent == 0 else ("partial" if failed > 0 else "done")
 
-    def listar(self, limit: int = 30) -> list[dict]:
+    def _scan_todo(self) -> list[dict]:
         items, start = [], None
         while True:  # paginar para no perder los más recientes si la tabla supera 1MB
             kwargs = {"ExclusiveStartKey": start} if start else {}
@@ -480,6 +480,40 @@ class DynamoDbBroadcastStore:
             start = resp.get("LastEvaluatedKey")
             if not start:
                 break
+        return items
+
+    def metricas(self, dias: int = 30) -> dict:
+        """Agregado de entrega de los últimos N días: enviados/fallidos totales y por canal,
+        tasa de éxito y serie diaria (para el dashboard). Deriva de los contadores de cada job."""
+        from collections import defaultdict
+
+        desde = int(time.time()) - int(dias) * 86400
+        por_dia: dict[str, dict] = defaultdict(lambda: {"sent": 0, "failed": 0})
+        tot = {"tg_s": 0, "tg_f": 0, "wa_s": 0, "wa_f": 0, "jobs": 0}
+        for j in self._scan_todo():
+            c = int(j.get("created_at", 0))
+            if c < desde:
+                continue
+            ts, tf = int(j.get("tg_sent", 0)), int(j.get("tg_failed", 0))
+            ws, wf = int(j.get("wa_sent", 0)), int(j.get("wa_failed", 0))
+            tot["tg_s"] += ts; tot["tg_f"] += tf; tot["wa_s"] += ws; tot["wa_f"] += wf; tot["jobs"] += 1
+            dia = datetime.fromtimestamp(c, timezone.utc).strftime("%Y-%m-%d")
+            por_dia[dia]["sent"] += ts + ws
+            por_dia[dia]["failed"] += tf + wf
+        env, fail = tot["tg_s"] + tot["wa_s"], tot["tg_f"] + tot["wa_f"]
+        return {
+            "dias": int(dias),
+            "jobs": tot["jobs"],
+            "enviados": env,
+            "fallidos": fail,
+            "tasa_exito": round(env / (env + fail) * 100, 1) if (env + fail) else 100.0,
+            "telegram": {"enviados": tot["tg_s"], "fallidos": tot["tg_f"]},
+            "whatsapp": {"enviados": tot["wa_s"], "fallidos": tot["wa_f"]},
+            "serie": [{"dia": d, **por_dia[d]} for d in sorted(por_dia)],
+        }
+
+    def listar(self, limit: int = 30) -> list[dict]:
+        items = self._scan_todo()
         items.sort(key=lambda j: int(j.get("created_at", 0)), reverse=True)
         salida = []
         for j in items[:limit]:
@@ -548,6 +582,7 @@ class DynamoDbPlanStore:
         wa_exclude: list[str] | None = None,
         wa_text: str | None = None,
         wa_image_url: str | None = None,
+        not_before: int = 0,
         ttl_days: int = 30,
     ) -> None:
         from domain.scheduling import total_lotes
@@ -559,6 +594,7 @@ class DynamoDbPlanStore:
             "sk": self._META,
             "status": "pending",
             "created_at": now,
+            "not_before": int(not_before or 0),  # 0 = ya; >0 = programado para esa hora (epoch)
             "broadcast_id": broadcast_id,
             # OJO: este 'text' es el que SE ENVÍA (dispatch lo pasa a encolar_uno). Debe ser el
             # mensaje COMPLETO procesado, no un resumen: por eso el tope es 4096 (límite Telegram),
@@ -774,6 +810,7 @@ class DynamoDbPlanStore:
                     "broadcast_id": p.get("broadcast_id"),
                     "status": p.get("status"),
                     "created_at": int(p.get("created_at", 0)),
+                    "not_before": int(p.get("not_before", 0)),
                     "text": p.get("text", ""),
                     "batch_size": int(p.get("batch_size", 0)),
                     "tg": {"total": int(p.get("tg_total", 0)), "batches": int(p.get("tg_batches", 0)),

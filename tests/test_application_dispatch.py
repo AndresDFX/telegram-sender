@@ -112,6 +112,13 @@ class DispatchTests(unittest.TestCase):
     def test_sin_planes(self):
         self.assertEqual(_disp(FakePlans(None))(), {"planes": 0})
 
+    def test_plan_programado_a_futuro_se_difiere(self):
+        plans, queue = FakePlans(_plan(not_before=999999)), FakeQueue()
+        res = _disp(plans, queue=queue, now=1000)()  # not_before 999999 > now 1000
+        self.assertTrue(res.get("diferido_horario"))
+        self.assertEqual(queue.calls, [])
+        self.assertEqual(plans.dispatched, [])
+
     def test_pausado_no_despacha(self):
         plans, queue = FakePlans(_plan()), FakeQueue()
         res = _disp(plans, queue=queue, config=FakeConfig(sending_enabled=False))()

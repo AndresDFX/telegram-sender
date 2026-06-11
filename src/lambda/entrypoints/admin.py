@@ -389,6 +389,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json(queue_stats.dlq_purgar())
         if sub == "/api/broadcasts" and method == "GET":
             return _json({"broadcasts": broadcast_store.listar()})
+        if sub == "/api/metrics" and method == "GET":
+            return _json(broadcast_store.metricas(30))
         if sub == "/api/plans" and method == "GET":
             return _json({"plans": _planes_con_progreso()})
         if sub == "/api/plans/cancel" and method == "POST":
@@ -422,6 +424,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 return [str(x) for x in v if str(x).strip()] if isinstance(v, list) else None
 
             try:
+                sched = int(cuerpo.get("scheduled_at") or 0)  # epoch s; 0/ausente = enviar ya
+            except (TypeError, ValueError):
+                sched = 0
+            try:
                 res = wiring.build_broadcast_list().enviar_manual(
                     texto,
                     image_url=img or None,
@@ -431,6 +437,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     whatsapp_list=str(cuerpo.get("whatsapp_list", "")).strip() or None,
                     telegram_ids=_ids("telegram_ids"),
                     whatsapp_ids=_ids("whatsapp_ids"),
+                    scheduled_at=sched or None,
                 )
             except ValueError as e:
                 return _json({"error": str(e)}, 400)
@@ -959,6 +966,7 @@ img.preview{box-shadow:var(--sh-sm)}
  <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="conn_tg" class="pill" title="Estado del bot de Telegram" style="margin-right:6px"></span><span id="conn_wa" class="pill" title="Estado del servicio WhatsApp" style="margin-right:6px"></span><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span>
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
  <nav class="nav">
+   <button data-tab="inicio" onclick="showTab('inicio')">🏠 Inicio</button>
    <button data-tab="msg" onclick="showTab('msg')">📝 Mensaje</button>
    <button data-tab="telegram" onclick="showTab('telegram')">✈️ Telegram</button>
    <button data-tab="whatsapp" onclick="showTab('whatsapp')">🟢 WhatsApp</button>
@@ -967,6 +975,22 @@ img.preview{box-shadow:var(--sh-sm)}
    <button data-tab="enviar" onclick="showTab('enviar')">📨 Enviar</button>
  </nav>
  <main>
+  <div class="card accent" data-tab="inicio"><h2>Resumen</h2>
+   <div id="dash_estado" class="callout">cargando…</div>
+   <div class="stats" style="margin-top:14px">
+     <div class="stat"><b id="k_sent">–</b><span>enviados (30 días)</span></div>
+     <div class="stat"><b id="k_rate">–</b><span>tasa de éxito</span></div>
+     <div class="stat"><b id="k_pend">–</b><span>lotes pendientes</span></div>
+     <div class="stat"><b id="k_dlq">–</b><span>en DLQ</span></div>
+   </div>
+   <div id="dash_serie" style="margin-top:16px"></div>
+   <div id="dash_last" class="hint" style="margin-top:14px"></div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+     <button onclick="showTab('enviar')">📨 Componer y enviar</button>
+     <button class="sec" onclick="showTab('prog')">⏱️ Programación</button>
+     <button class="sec" onclick="loadDashboard()">Refrescar</button>
+   </div>
+  </div>
   <div class="card" data-tab="msg"><h2>Aumento (markup)</h2>
    <div class="markup"><input id="markup_percentage" type="number" step="0.1"><div>
      <div style="font-size:13px">% que se suma a cada precio</div>
@@ -1151,8 +1175,12 @@ img.preview{box-shadow:var(--sh-sm)}
    </div>
    <div class="hint" id="bc_preview" style="margin-top:10px">—</div>
 
+   <label style="margin-top:16px">Programar (opcional)</label>
+   <input type="datetime-local" id="bc_sched" style="max-width:260px">
+   <div class="hint">Vacío = enviar ya (fraccionado). Con fecha/hora = se difiere hasta entonces y luego se gotea por lotes.</div>
+
    <div class="compose-actions">
-     <button id="bc_send" onclick="sendBroadcast()">Enviar ahora</button>
+     <button id="bc_send" onclick="sendBroadcast()">Enviar</button>
      <button class="ghost" onclick="bcClear()">Limpiar</button>
      <span class="grow"></span>
      <span id="bc_status" class="hint" style="margin-top:0"></span>
@@ -1369,6 +1397,26 @@ function connStartPolling(){ if(CONN_TIMER) return; refreshConn();
 // --- Expiración de sesión (cliente): re-login tras 8h o inactividad larga ---
 const SESSION_MAX_MS=8*3600*1000;
 function sessionFresca(){ try{ const t=parseInt(sessionStorage.getItem('cred_ts')||'0',10); return t && (Date.now()-t)<SESSION_MAX_MS; }catch(e){ return true; } }
+// --- Dashboard / Inicio (KPIs + estado de un vistazo) ---
+async function loadDashboard(){
+  try{
+    const [m,c,pl,q]=await Promise.all([api('/api/metrics'),api('/api/config'),api('/api/plans'),api('/api/queue')]);
+    if($('k_sent')) $('k_sent').textContent=m.enviados;
+    if($('k_rate')) $('k_rate').textContent=(m.tasa_exito!=null?m.tasa_exito:100)+'%';
+    let pend=0; (pl.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running') pend+=Math.max(0,(p.tg.batches|0)-(p.tg.next|0))+Math.max(0,((p.wa&&p.wa.batches)|0)-((p.wa&&p.wa.next)|0)); });
+    if($('k_pend')) $('k_pend').textContent=pend;
+    if($('k_dlq')) $('k_dlq').textContent=q.dlq;
+    const on=c.sending_enabled!==false; const de=$('dash_estado');
+    if(de){ de.className='callout '+(on?'ok':'warn');
+      de.innerHTML='Envíos: <b>'+(on?'ACTIVOS':'PAUSADOS')+'</b> · '+(c.window_enabled?('ventana '+c.window_start+'–'+c.window_end):'24 h')+' · WhatsApp '+(c.whatsapp_enabled?'activo':'desactivado')+' · lote '+(c.batch_size|0); }
+    const s=(m.serie||[]).slice(-14); const max=Math.max(1,...s.map(d=>(d.sent|0)+(d.failed|0)));
+    if($('dash_serie')) $('dash_serie').innerHTML='<div class="hint" style="margin-top:0">Actividad (últimos '+s.length+' días con envíos)</div>'+
+      '<div style="display:flex;gap:3px;align-items:flex-end;height:56px;margin-top:6px">'+
+      (s.length? s.map(d=>`<div title="${d.dia}: ${d.sent} enviados, ${d.failed} fallidos" style="flex:1;background:linear-gradient(180deg,var(--ac),var(--ac2));height:${Math.round(((d.sent|0)+(d.failed|0))/max*100)}%;min-height:2px;border-radius:3px 3px 0 0"></div>`).join('') : '<div class="hint">sin actividad aún</div>')+'</div>';
+    try{ const last=((await api('/api/broadcasts')).broadcasts||[])[0];
+      if($('dash_last')) $('dash_last').innerHTML = last? ('Último envío: <b>'+bcEsc((last.text||'(imagen)').slice(0,48))+'</b> — '+(BC_STATUS[last.status]||last.status)+' · '+bcFmtTime(last.created_at)) : 'Aún no hay envíos.'; }catch(e){}
+  }catch(e){ if($('dash_estado')) $('dash_estado').textContent='no se pudo cargar el resumen'; }
+}
 let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0;
 const PAGE_SIZE=50;
 function filtered(){ if(!FILTER) return DEST; const q=FILTER.toLowerCase();
@@ -1459,7 +1507,7 @@ function showTab(t){
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===t));
   try{ localStorage.setItem('tab',t); }catch(e){}
   window.scrollTo(0,0); }
-function boot(){ showTab((()=>{try{return localStorage.getItem('tab')}catch(e){return null}})()||'msg'); loadCfg(); loadQueue(); loadSubs(); loadDlq(); connStartPolling(); }
+function boot(){ showTab((()=>{try{return localStorage.getItem('tab')}catch(e){return null}})()||'inicio'); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
 if(CRED && !sessionFresca()){ logout(); }
 else if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } else { logout(); } }).catch(()=>{}); }
 
@@ -1548,6 +1596,7 @@ function bcClear(){
   $('bc_imgfile').value=''; $('bc_imgprev').style.display='none'; $('bc_imgprev').removeAttribute('src');
   BC_TG_SEL.clear(); BC_WA_SEL.clear();
   $('bc_tg_search').value=''; $('bc_wa_search').value=''; $('bc_tg_list').value=''; $('bc_wa_list').value='';
+  if($('bc_sched')) $('bc_sched').value='';
   bcRenderPick('tg'); bcRenderPick('wa');
   $('bc_status').textContent=''; bcCount(); bcPrev();
 }
@@ -1556,21 +1605,23 @@ async function sendBroadcast(){
   const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked;
   if(!text && !bcEffectiveUrl()){ toast('Escribe un mensaje o adjunta una imagen',true); return; }
   if(!tg && !wa){ toast('Elige al menos un canal',true); return; }
-  let msg='¿Enviar este mensaje ahora?';
-  if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
-  if(!confirm(msg)) return;
   const body=bcBody({ text });
   const url=bcEffectiveUrl(); if(url) body.image_url=url;
-  const btn=$('bc_send'); btn.disabled=true; $('bc_status').textContent='encolando...';
+  // Programación opcional: datetime-local -> epoch (s). Vacío = enviar ya.
+  let ep=0; const sv=$('bc_sched')?$('bc_sched').value:'';
+  if(sv){ ep=Math.floor(new Date(sv).getTime()/1000); if(ep>Math.floor(Date.now()/1000)) body.scheduled_at=ep; else { toast('La fecha programada debe ser futura',true); return; } }
+  let msg = body.scheduled_at ? ('¿Programar este envío para '+new Date(sv).toLocaleString('es')+'?') : '¿Enviar este mensaje ahora?';
+  if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
+  if(!confirm(msg)) return;
+  const btn=$('bc_send'); btn.disabled=true; $('bc_status').textContent='guardando...';
   try{
     await api('/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    // OJO: "programado" != "entregado". El envío se fracciona y la ENTREGA real se
-    // confirma abajo en la tabla de Envíos (queda en cola → enviando → completado).
-    toast('✓ Programado — la entrega se confirma abajo en Envíos','info'); $('bc_status').textContent='';
+    // "programado" != "entregado": el envío se fracciona y la ENTREGA real se confirma abajo en Envíos.
+    toast(body.scheduled_at?'✓ Programado para más tarde':'✓ Programado — la entrega se confirma abajo en Envíos','info'); $('bc_status').textContent='';
     bcClear();
-    showTab('enviar');          // ambas tarjetas viven en la pestaña "enviar"
-    loadBroadcasts();           // refresca la tabla de Envíos de inmediato
-  }catch(e){ $('bc_status').textContent=''; toast('Error al encolar',true); }
+    showTab('enviar');
+    loadBroadcasts();
+  }catch(e){ $('bc_status').textContent=''; toast('Error al programar',true); }
   finally{ btn.disabled=false; }
 }
 // Al abrir la pestaña Enviar: rellenar listas + previsualizar (hook aditivo sobre showTab).
@@ -1693,7 +1744,7 @@ function plStartPolling(){
     if(vis) loadPlans(); }, BC_POLL);
 }
 (function(){ const _s=window.showTab;
-  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='prog') loadPlans(); if(t==='estado'){ loadQueue(); loadDlq(); } }; }
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='inicio') loadDashboard(); if(t==='prog') loadPlans(); if(t==='estado'){ loadQueue(); loadDlq(); } }; }
   const start=()=>{ if(CRED){ plStartPolling(); qStartPolling(); } };
   if(document.readyState!=='loading') start();
   else document.addEventListener('DOMContentLoaded', start);

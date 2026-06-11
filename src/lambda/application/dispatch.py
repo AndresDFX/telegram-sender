@@ -56,14 +56,19 @@ class DispatchCampaigns:
         if not planes:
             return {"planes": 0}
 
-        # Keep-alive: hay trabajo activo -> mantenemos despierto el servicio de WhatsApp
+        # Programación a hora exacta: solo despachamos planes cuyo not_before ya pasó.
+        listos = [p for p in planes if int(p.get("not_before", 0)) <= now]
+        if not listos:
+            return {"planes": len(planes), "diferido_horario": True}
+
+        # Keep-alive: hay trabajo LISTO -> mantenemos despierto el servicio de WhatsApp
         # (Render Free duerme a los 15 min y el primer envío tras dormir podría expirar).
         try:
             self._whatsapp.ping()
         except Exception:
             pass
 
-        plan = planes[0]  # secuencial GLOBAL: el más antiguo primero
+        plan = listos[0]  # secuencial GLOBAL: el plan LISTO más antiguo primero
         pid = plan["pid"]
         bid = plan.get("broadcast_id")
 

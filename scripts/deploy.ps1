@@ -46,6 +46,7 @@ $params = @(
   "LambdaCodeS3Key=$key",
   "WorkerReservedConcurrency=0",
   "BroadcastBatchSize=150",
+  "AlertEmail=castano.julian@correounivalle.edu.co",
   "AdminUser=admin",
   "AdminPassword=$($dep['ADMIN_PASSWORD'])",
   "SendMode=userbot",

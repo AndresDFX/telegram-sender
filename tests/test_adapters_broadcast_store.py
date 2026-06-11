@@ -59,5 +59,26 @@ class EstadoTests(unittest.TestCase):
         self.assertEqual(E(job(channels=["telegram"], tg_total=5, tg_failed=5, tg_sent=0)), "failed")
 
 
+class MetricasTests(unittest.TestCase):
+    def test_agrega_enviados_fallidos_y_tasa(self):
+        import time as _t
+
+        store = DynamoDbBroadcastStore(table_name="x")
+        now = int(_t.time())
+        store._scan_todo = lambda: [
+            {"created_at": now, "tg_sent": 8, "tg_failed": 2, "wa_sent": 5, "wa_failed": 0},
+            {"created_at": now - 86400, "tg_sent": 10, "tg_failed": 0, "wa_sent": 0, "wa_failed": 0},
+            {"created_at": now - 40 * 86400, "tg_sent": 99, "tg_failed": 99},  # fuera de los 30 días
+        ]
+        m = store.metricas(30)
+        self.assertEqual(m["jobs"], 2)                 # el viejo se excluye
+        self.assertEqual(m["enviados"], 8 + 5 + 10)    # 23
+        self.assertEqual(m["fallidos"], 2)
+        self.assertEqual(m["tasa_exito"], round(23 / 25 * 100, 1))
+        self.assertEqual(m["telegram"]["enviados"], 18)
+        self.assertEqual(m["whatsapp"]["enviados"], 5)
+        self.assertEqual(len(m["serie"]), 2)           # dos días distintos
+
+
 if __name__ == "__main__":
     unittest.main()
