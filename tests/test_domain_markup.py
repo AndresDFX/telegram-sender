@@ -47,6 +47,60 @@ class MarkupTests(unittest.TestCase):
         self.assertEqual(aplicar_markup("$100.000"), "$115.000")  # default 15%
         self.assertEqual(aplicar_markup("sin precios"), "sin precios")
 
+    # --- robustez: el original no siempre llega igual ---
+    def test_apostrofo_miles(self):
+        self.assertEqual(aplicar_markup("$1'150.000", 15), "$1.323.000")   # apóstrofo recto
+        self.assertEqual(aplicar_markup("$1’150.000", 15), "$1.323.000")   # apóstrofo tipográfico
+        self.assertEqual(aplicar_markup("$1'150'000", 15), "$1.323.000")   # apóstrofo en ambos grupos
+
+    def test_sin_separador_de_miles(self):
+        self.assertEqual(aplicar_markup("$325000", 15), "$374.000")
+
+    def test_palabra_cop(self):
+        self.assertEqual(aplicar_markup("COP 325.000", 15), "$374.000")
+        self.assertEqual(aplicar_markup("COP $325.000", 15), "$374.000")
+        self.assertEqual(aplicar_markup("325.000 COP", 15), "$374.000")
+        self.assertEqual(aplicar_markup("cop 1.150.000", 15), "$1.323.000")
+
+    def test_simbolo_despues_del_numero(self):
+        self.assertEqual(aplicar_markup("325.000$", 15), "$374.000")
+
+    def test_conserva_simbolo_emoji_lider(self):
+        billete = "\U0001F4B8"
+        self.assertEqual(aplicar_markup(billete + " 1.000.000", 15), billete + "1.150.000")
+
+    def test_no_confunde_cop_dentro_de_palabra(self):
+        # 'COP' dentro de otra palabra (SCOPE) no debe activarse como moneda
+        self.assertEqual(aplicar_markup("SCOPE 8-256GB", 15), "SCOPE 8-256GB")
+
+    def test_no_marca_telefono_con_puntos_sin_moneda(self):
+        for original in ("320.123.456", "320.123.4567", "Cra 50 # 30-20", "01.02.2026"):
+            self.assertEqual(aplicar_markup(original, 15), original)
+
+    def test_simbolo_no_cruza_salto_de_linea(self):
+        # "325.000" (sin símbolo) seguido de línea con "$400.000": el símbolo-después NO debe
+        # cruzar el \n y robar el "$" de la línea siguiente (dejaría 400.000 sin markup).
+        out = aplicar_markup("A06 325.000\n$400.000", 15)
+        self.assertIn("$460.000", out)            # 400.000 SÍ recibe markup
+        self.assertIn("325.000", out)             # 325.000 sin moneda queda igual
+        self.assertNotIn("$374.000", out)         # no se reinterpretó 325.000 como precio
+
+    def test_coma_de_miles_formato_us(self):
+        self.assertEqual(aplicar_markup("$325,000", 15), "$374.000")
+        self.assertEqual(aplicar_markup("$1,150,000", 15), "$1.323.000")
+
+    def test_no_corrompe_precio_con_cero_a_la_izquierda(self):
+        # precio mal formado: se deja intacto en vez de producir un valor erróneo
+        self.assertEqual(aplicar_markup("$0325.000", 15), "$0325.000")
+        self.assertEqual(aplicar_markup("$00325.000", 15), "$00325.000")
+
+    def test_lista_realista_mixta(self):
+        src = "IPHONE 15 $5'600.000\nA06 4-64GB 325.000$\nCOP 1.150.000"
+        out = aplicar_markup(src, 15)
+        self.assertIn("$6.440.000", out)
+        self.assertIn("$374.000", out)
+        self.assertIn("$1.323.000", out)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,14 +12,28 @@ from collections.abc import Sequence
 from domain.markup import DEFAULT_CURRENCY_SYMBOLS, DEFAULT_MARKUP_PERCENTAGE, aplicar_markup
 
 # Patrones por defecto para quitar líneas del canal fuente: marca/branding + ubicación/horario.
+# Robusto a variantes (el formato del origen no siempre es el mismo). Se aplica por LÍNEA
+# (case-insensitive); los patrones de dirección exigen un número para no tocar líneas de
+# producto. NO marcan precios (eso lo hace el markup aparte).
 DEFAULT_LOCATION_PATTERNS = (
-    r"ipro\s*parts",    # marca del canal fuente ("🔥 IPRO PARTS 🔥") — no reenviarla
-    r"ubicad",          # UBICADOS EN EL C.C ...
-    r"s[oó]tano",       # SÓTANO LOCAL C1-C4
-    r"local\s+c\d",     # LOCAL C1-C4
-    r"horario",         # HORARIO: 8:30AM ...
-    r"c\.c\b",          # C.C
-    r"fortuna",         # CENTRO COMERCIAL LA FORTUNA
+    r"ipro[\s_\-]*parts",                  # marca: IPRO PARTS / IPROPARTS / ipro_parts / ipro-parts
+    r"@?\s*iproparts",                     # handle del canal (@iproparts)
+    r"ubicad",                             # UBICADOS EN ...
+    r"direcci[oó]n",                       # Dirección: ...
+    r"estamos\s+en",                       # "Estamos en ..."
+    r"centro\s+comercial",                 # Centro Comercial ...
+    r"\bc\.?\s?c\b",                       # C.C / CC
+    r"fortuna",                            # C.C. La Fortuna
+    r"s[oó]tano",                          # SÓTANO
+    r"\blocal\s+[a-z]?\.?-?\s?\d",         # LOCAL C1-C4 / LOCAL 5
+    r"\bpiso\s+\d",                        # PISO 2
+    r"\btorre\s+(?:\d+|[a-z])\b",          # TORRE A / TORRE 3 (no "S24 TORRE Edition")
+    r"horario",                            # HORARIO: 8:30AM ...
+    # Direcciones con número (carrera/calle/avenida/... + opcional cardinal + dígito). Solo
+    # palabras/abreviaturas inequívocas (evita 2-letras ambiguas como "av"/"cl" que serían specs);
+    # el dígito adyacente evita borrar líneas de producto que solo mencionen la palabra.
+    r"\b(?:carrera|cra|calle|cll|avenida|diagonal|transversal|autopista)\b"
+    r"(?:\s+(?:norte|sur|este|oeste|nte|occidente|oriente))?\.?\s*#?\s*\d",
 )
 
 
