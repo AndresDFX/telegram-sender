@@ -151,6 +151,7 @@ class DynamoDbConfigStore(ConfigStore):
         "image_key",
         "excluded_ids",
         "send_mode",
+        "bot_token",
         "telethon_api_id",
         "telethon_api_hash",
         "telethon_session",
@@ -184,6 +185,7 @@ class DynamoDbConfigStore(ConfigStore):
             "image_key": "",  # objeto subido en S3 (tiene prioridad sobre image_url)
             "excluded_ids": [],  # chat IDs a excluir del envío
             "send_mode": os.environ.get("SEND_MODE", "bot"),
+            "bot_token": os.environ.get("TELEGRAM_BOT_TOKEN", ""),  # editable: usar otro bot sin redeploy
             "telethon_api_id": os.environ.get("TELETHON_API_ID", ""),
             "telethon_api_hash": os.environ.get("TELETHON_API_HASH", ""),
             "telethon_session": os.environ.get("TELETHON_SESSION", ""),

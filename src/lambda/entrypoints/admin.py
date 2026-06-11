@@ -38,6 +38,7 @@ _CAMPOS_EDITABLES = (
     "image_url",
     "excluded_ids",
     "send_mode",
+    "bot_token",
     "telethon_api_id",
     "telethon_api_hash",
     "telethon_session",
@@ -54,7 +55,7 @@ _LISTAS = ("strip_patterns", "excluded_ids", "whatsapp_excluded")
 _LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
 _TARGETS = ("telegram_target", "whatsapp_target")
 # Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
-_NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token")
+_NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token", "bot_token")
 
 
 def _ensure() -> None:
@@ -167,6 +168,8 @@ def _config_publico() -> dict:
     cfg["telethon_session"] = ""
     cfg["whatsapp_token_set"] = bool(cfg.get("whatsapp_token"))
     cfg["whatsapp_token"] = ""
+    cfg["bot_token_set"] = bool(cfg.get("bot_token"))
+    cfg["bot_token"] = ""
     return cfg
 
 
@@ -197,6 +200,38 @@ def _whatsapp_proxy(path: str, timeout: float = 20.0, body: dict | None = None) 
     except Exception as error:
         logger.exception("Proxy WhatsApp %s falló", path)
         return _json({"error": "whatsapp_inaccesible", "detalle": str(error)}, 502)
+
+
+def _telegram_api(metodo: str, params: dict) -> dict:
+    """Llama a la Bot API con el token de la config (o env). Para registrar/ver el webhook
+    del bot conectado a la plataforma."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    token = (config.get().get("bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    if not token:
+        return _json({"error": "sin_token", "detalle": "Configura primero el token del bot."}, 400)
+    url = f"https://api.telegram.org/bot{token}/{metodo}?" + urllib.parse.urlencode(params)
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            return {"statusCode": resp.status, "headers": {"Content-Type": "application/json"}, "body": resp.read().decode()}
+    except urllib.error.HTTPError as error:
+        return {"statusCode": error.code, "headers": {"Content-Type": "application/json"}, "body": error.read().decode()}
+    except Exception as error:
+        return _json({"error": "telegram_inaccesible", "detalle": str(error)}, 502)
+
+
+def _registrar_webhook() -> dict:
+    """Registra el webhook del bot configurado (para que /start·/stop lleguen a la plataforma)."""
+    wh = os.environ.get("WEBHOOK_URL", "").strip()
+    secret = os.environ.get("WEBHOOK_SECRET_TOKEN", "").strip()
+    if not wh:
+        return _json({"error": "sin_webhook_url", "detalle": "WEBHOOK_URL no configurado en el stack."}, 500)
+    params = {"url": wh}
+    if secret:
+        params["secret_token"] = secret
+    return _telegram_api("setWebhook", params)
 
 
 # --- dispatcher -------------------------------------------------------------
@@ -253,6 +288,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json(queue_stats.profundidades())
         if sub == "/api/broadcasts" and method == "GET":
             return _json({"broadcasts": broadcast_store.listar()})
+        if sub == "/api/telegram/me" and method == "GET":
+            return _telegram_api("getMe", {})  # verifica el token + muestra el bot
+        if sub == "/api/telegram/webhook" and method == "GET":
+            return _telegram_api("getWebhookInfo", {})
+        if sub == "/api/telegram/webhook" and method == "POST":
+            return _registrar_webhook()
         if sub == "/api/broadcast" and method == "POST":
             cuerpo = _body(event)
             texto = str(cuerpo.get("text", "")).strip()
@@ -821,16 +862,28 @@ img.preview{box-shadow:var(--sh-sm)}
      <div style="font-size:13px">% que se suma a cada precio</div>
      <div class="hint">Ej: $325.000 + 15% → $374.000 (redondeo al mil ↑)</div></div></div>
   </div>
-  <div class="card" data-tab="telegram"><h2>Cuenta de Telegram</h2>
+  <div class="card accent" data-tab="telegram"><h2>Cuenta de Telegram</h2>
    <label>Modo de envío</label>
    <select id="send_mode"><option value="bot">Bot — a suscriptores que dan /start</option><option value="userbot">Userbot — desde mi cuenta a mis contactos</option></select>
+
+   <div class="section-label">Bot (crea o usa otro bot)</div>
+   <label>Token del bot <span id="bot_status" class="hint"></span></label>
+   <input id="bot_token" type="password" placeholder="(pega el token de @BotFather)">
+   <div class="hint">Crea un bot en <code>@BotFather</code> (<code>/newbot</code>), pega su token, pulsa <b>Guardar cuenta</b> y luego <b>Registrar webhook</b> para conectarlo a la plataforma.</div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+     <button class="sec" onclick="tgVerify()">Verificar bot</button>
+     <button class="sec" onclick="tgWebhook()">Registrar webhook</button>
+     <span id="tg_state" class="hint" style="margin-top:0"></span>
+   </div>
+
+   <div class="section-label">Userbot (unir otra cuenta de Telegram)</div>
    <div class="row">
      <div><label>API ID</label><input id="telethon_api_id"></div>
      <div><label>API Hash</label><input id="telethon_api_hash"></div>
    </div>
    <label>StringSession <span id="sess_status" class="hint"></span></label>
-   <input id="telethon_session" type="password" placeholder="(pegar solo si quieres cambiar la cuenta)">
-   <div class="hint">Genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a tu cuenta: trátala como secreto.</div>
+   <input id="telethon_session" type="password" placeholder="(pega para unir/cambiar la cuenta)">
+   <div class="hint">Genérala con <code>scripts/generar_sesion.py</code> usando la cuenta que quieras unir. Da acceso total a esa cuenta: trátala como secreto.</div>
    <button onclick="saveAccount()">Guardar cuenta</button>
   </div>
   <div class="card" data-tab="whatsapp"><h2>WhatsApp (reenvío)</h2>
@@ -1007,6 +1060,7 @@ async function loadCfg(){ const c=await api('/api/config');
   ['source_channel','markup_percentage','currency_symbols','whatsapp_footer','image_url','telethon_api_id','telethon_api_hash'].forEach(k=>$(k).value=c[k]??'');
   $('send_mode').value=c.send_mode||'bot';
   $('sess_status').textContent = c.telethon_session_set ? '· conectada ✓' : '· no configurada';
+  $('bot_status').textContent = c.bot_token_set ? '· configurado ✓' : '· no configurado';
   $('strip_patterns').value=(c.strip_patterns||[]).join('\n');
   $('whatsapp_enabled').checked=!!c.whatsapp_enabled; $('whatsapp_service_url').value=c.whatsapp_service_url||'';
   $('wa_tok_status').textContent = c.whatsapp_token_set ? '· configurado ✓' : '· no configurado';
@@ -1035,8 +1089,16 @@ async function waPair(){ const num=$('wa_pair_num').value.replace(/[^0-9]/g,'');
   catch(e){ out.textContent='Error: el servicio no respondió (¿ya conectado? ¿URL/token?)'; } }
 async function saveAccount(){ const b={ send_mode:$('send_mode').value, telethon_api_id:$('telethon_api_id').value,
    telethon_api_hash:$('telethon_api_hash').value, telethon_session:$('telethon_session').value };
+  const bt=$('bot_token').value.trim(); if(bt) b.bot_token=bt;
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
-    toast('✓ Cuenta guardada'); $('telethon_session').value=''; loadCfg(); loadSubs(); } catch(e){ toast('Error',true); } }
+    toast('✓ Cuenta guardada'); $('telethon_session').value=''; $('bot_token').value=''; loadCfg(); loadSubs(); } catch(e){ toast('Error',true); } }
+async function tgVerify(){ $('tg_state').textContent='verificando...';
+  try{ const r=await api('/api/telegram/me'); $('tg_state').textContent = (r.ok && r.result) ? ('bot ✓ @'+(r.result.username||r.result.id)) : ('error: '+(r.description||'token inválido')); }
+  catch(e){ $('tg_state').textContent='error verificando (¿token guardado?)'; } }
+async function tgWebhook(){ $('tg_state').textContent='registrando webhook...';
+  try{ const r=await api('/api/telegram/webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    $('tg_state').textContent = (r.ok || r.result===true) ? 'webhook registrado ✓ (el bot ya recibe /start)' : ('error: '+(r.description||r.detalle||r.error||'desconocido')); }
+  catch(e){ $('tg_state').textContent='error registrando webhook'; } }
 async function saveCfg(){ const b={ source_channel:$('source_channel').value, markup_percentage:parseFloat($('markup_percentage').value),
    currency_symbols:$('currency_symbols').value, whatsapp_footer:$('whatsapp_footer').value, image_url:$('image_url').value,
    strip_patterns:$('strip_patterns').value };

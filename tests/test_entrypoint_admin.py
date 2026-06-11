@@ -144,10 +144,13 @@ class AdminTests(unittest.TestCase):
 
     def test_config_enmascara_sesion(self):
         admin.config.cfg["telethon_session"] = "SECRETO_TOTAL"
+        admin.config.cfg["bot_token"] = "123:SECRETO_BOT"
         resp = admin.lambda_handler(_event("GET", "/admin/api/config"), None)
         body = json.loads(resp["body"])
         self.assertEqual(body["telethon_session"], "")          # nunca se expone
         self.assertTrue(body["telethon_session_set"])           # pero se indica que está
+        self.assertEqual(body["bot_token"], "")                 # el token del bot tampoco se expone
+        self.assertTrue(body["bot_token_set"])
 
     def test_post_cuenta_userbot(self):
         body = {"send_mode": "userbot", "telethon_api_id": "123", "telethon_api_hash": "abc", "telethon_session": "SESS"}

@@ -646,6 +646,9 @@ Resources:
           IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
           ADMIN_USER: !Ref AdminUser
           ADMIN_PASSWORD: !Ref AdminPassword
+          TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
+          WEBHOOK_SECRET_TOKEN: !Ref WebhookSecretToken
+          WEBHOOK_URL: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}/webhook/telegram"
           SEND_MODE: !Ref SendMode
           TELETHON_API_ID: !Ref TelethonApiId
           TELETHON_API_HASH: !Ref TelethonApiHash

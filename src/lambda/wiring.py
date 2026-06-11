@@ -43,6 +43,11 @@ def _telethon_contacts(cfg: dict) -> TelethonContacts:
     )
 
 
+def _bot_token(cfg: dict) -> str | None:
+    """Token del bot: el de la config (editable desde el panel) o el de entorno."""
+    return (cfg.get("bot_token") or "").strip() or config.bot_token()
+
+
 def _sender(cfg: dict):
     if _es_userbot(cfg):
         return TelethonUserSender(
@@ -50,7 +55,7 @@ def _sender(cfg: dict):
             api_hash=cfg.get("telethon_api_hash") or None,
             session=cfg.get("telethon_session") or None,
         )
-    return TelegramSender(bot_token=config.bot_token())
+    return TelegramSender(bot_token=_bot_token(cfg))
 
 
 def _recipients(cfg: dict):
@@ -104,7 +109,8 @@ def build_contacts_source() -> TelethonContacts | None:
 
 
 def build_handle_command() -> HandleCommand:
-    return HandleCommand(DynamoDbSubscriberRepository(), TelegramSender(bot_token=config.bot_token()))
+    cfg = build_config_store().get()
+    return HandleCommand(DynamoDbSubscriberRepository(), TelegramSender(bot_token=_bot_token(cfg)))
 
 
 def build_deliver_batch() -> DeliverBatch:
