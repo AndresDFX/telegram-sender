@@ -122,13 +122,12 @@ async function doStart() {
   try {
     const { state, saveCreds, loadContacts, saveContacts } = await useDynamoAuthState(TABLE, SESSION_ID)
     persistContactsFn = saveContacts
-    // Carga los contactos persistidos (solo si el mapa está vacío: en reconexiones ya están en memoria).
-    if (Object.keys(contacts).length === 0) {
-      try {
-        Object.assign(contacts, await loadContacts())
-      } catch (e) {
-        log.error({ err: String(e) }, 'cargar contactos falló')
-      }
+    // Carga y FUSIONA los contactos persistidos en cada arranque (también en /reconnect):
+    // así un host que retoma la sesión obtiene los contactos guardados por otro host.
+    try {
+      Object.assign(contacts, await loadContacts())
+    } catch (e) {
+      log.error({ err: String(e) }, 'cargar contactos falló')
     }
     // fetchLatestBaileysVersion es una llamada de red SIN timeout; si se cuelga, bloquearía
     // toda la cadena de arranques. La acotamos y caemos a la versión por defecto de Baileys.
