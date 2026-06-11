@@ -34,6 +34,15 @@ def send_delay_seconds() -> float:
     return float(os.environ.get("SEND_DELAY_SECONDS", "0.05"))
 
 
+def batch_size_default() -> int:
+    """Tamaño de lote por defecto (contactos por lote). Tope anti-baneo: 150."""
+    return int(os.environ.get("BROADCAST_BATCH_SIZE", "150"))
+
+
+def plans_table() -> str | None:
+    return os.environ.get("PLANS_TABLE")
+
+
 def source_channel_username() -> str:
     return os.environ.get("SOURCE_CHANNEL_USERNAME", "iproparts")
 

@@ -70,6 +70,15 @@ class DeliverBatchTests(unittest.TestCase):
         deliver("x", ["1", "2"])
         self.assertEqual(sleeps, [0.05, 0.05])
 
+    def test_delay_aleatorio_en_rango(self):
+        sleeps = []
+        deliver = DeliverBatch(FakeSender(), FakeSubscribers(), delay_min=1.0, delay_max=4.0, sleep=sleeps.append)
+        deliver("x", ["1", "2", "3"])
+        self.assertEqual(len(sleeps), 3)
+        for s in sleeps:
+            self.assertGreaterEqual(s, 1.0)
+            self.assertLessEqual(s, 4.0)
+
     def test_envia_foto_y_texto_cuando_hay_imagen(self):
         sender = FakeSender()
         deliver = DeliverBatch(sender, FakeSubscribers(), delay=0)

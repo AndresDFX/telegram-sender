@@ -27,7 +27,7 @@ class SqsBroadcastQueue(BroadcastQueue):
         sleep: Callable[[float], None] = time.sleep,
     ):
         self._url = queue_url or os.environ.get("BROADCAST_QUEUE_URL")
-        self._size = batch_size or int(os.environ.get("BROADCAST_BATCH_SIZE", "100"))
+        self._size = batch_size or int(os.environ.get("BROADCAST_BATCH_SIZE", "150"))
         self._max_retries = max_retries
         self._endpoint = endpoint or os.environ.get("SQS_ENDPOINT")
         self._sleep = sleep
@@ -80,6 +80,31 @@ class SqsBroadcastQueue(BroadcastQueue):
                     self._sleep(min(2 ** (attempt - 1), 4))
 
         return enqueued
+
+    def encolar_uno(
+        self,
+        text: str,
+        chat_ids: Sequence[str],
+        image_url: str | None = None,
+        image_key: str | None = None,
+        broadcast_id: str | None = None,
+        batch_index: int = 0,
+    ) -> None:
+        """Encola UN lote ya formado (sin trocear). Lo usa el dispatcher para liberar
+        exactamente un lote por tick (envío fraccionado y secuencial)."""
+        if not self._url:
+            raise RuntimeError("BROADCAST_QUEUE_URL no configurado")
+        body = json.dumps(
+            {
+                "text": text,
+                "chat_ids": list(chat_ids),
+                "batch_index": batch_index,
+                "image_url": image_url,
+                "image_key": image_key,
+                "broadcast_id": broadcast_id,
+            }
+        )
+        self._client().send_message(QueueUrl=self._url, MessageBody=body)
 
 
 class InlineBroadcastQueue(BroadcastQueue):

@@ -395,13 +395,28 @@ function resolverTargets(mode, list_ids, exclude) {
   const ex = new Set((exclude || []).map(String))
   const sel = new Set((list_ids || []).map(String))
   const enSeleccion = (id) => sel.has(id) || sel.has(id.split('@')[0])
-  return Object.keys(contacts).filter((id) => {
-    if (!id.endsWith('@s.whatsapp.net')) return false
-    if (ex.has(id) || ex.has(id.split('@')[0])) return false
-    if (mode === 'only') return enSeleccion(id)
-    if (mode === 'except') return !enSeleccion(id)
-    return true
-  })
+  // .sort() -> orden ESTABLE: el conteo y los slices [offset,limit) del envío fraccionado
+  // se mantienen coherentes entre llamadas aunque cambie el orden de inserción.
+  return Object.keys(contacts)
+    .filter((id) => {
+      if (!id.endsWith('@s.whatsapp.net')) return false
+      if (ex.has(id) || ex.has(id.split('@')[0])) return false
+      if (mode === 'only') return enSeleccion(id)
+      if (mode === 'except') return !enSeleccion(id)
+      return true
+    })
+    .sort()
+}
+
+// Delay ALEATORIO en [lo, hi] ms entre mensajes (evita patrones predecibles / anti-baneo).
+function delayAleatorio(lo, hi) {
+  let a = Number(lo), b = Number(hi)
+  if (!Number.isFinite(a)) a = SEND_DELAY_MS
+  if (!Number.isFinite(b)) b = SEND_DELAY_MS
+  if (b < a) { const t = a; a = b; b = t }
+  if (b <= 0) return 0
+  if (a < 0) a = 0
+  return Math.floor(a + Math.random() * (b - a))
 }
 
 // Reporte de progreso del job (estado) al store de broadcasts en DynamoDB. Best-effort:
@@ -438,8 +453,9 @@ async function bcIncr(table, id, sent, failed) {
 }
 
 async function enviarLote(text, image_url, targets, track) {
-  const { table, id } = track || {}
-  await bcSetTotal(table, id, targets.length)
+  const { table, id, bcTotal, delayMin, delayMax } = track || {}
+  // En envío fraccionado, el total del JOB lo fija el llamador (bcTotal), no el del slice.
+  await bcSetTotal(table, id, bcTotal != null ? bcTotal : targets.length)
   let sent = 0, failed = 0, sentDelta = 0, failedDelta = 0
   for (const jid of targets) {
     try {
@@ -450,7 +466,7 @@ async function enviarLote(text, image_url, targets, track) {
         await sock.sendMessage(jid, { text })
       }
       sent++; sentDelta++
-      await new Promise((r) => setTimeout(r, SEND_DELAY_MS)) // anti-baneo
+      await new Promise((r) => setTimeout(r, delayAleatorio(delayMin, delayMax))) // anti-baneo (jitter)
     } catch (e) {
       failed++; failedDelta++
       log.error({ jid, err: String(e) }, 'fallo enviando')
@@ -465,14 +481,31 @@ async function enviarLote(text, image_url, targets, track) {
 
 // Fire-and-forget: responde de inmediato y envía en segundo plano (el envío a muchos
 // contactos con delay tarda minutos; el backend no debe esperar).
+//
+// Soporta envío FRACCIONADO: el dispatcher resuelve el set completo aquí y pide solo el
+// slice [offset, offset+limit). count_only devuelve cuántos resolvería (para planificar).
 app.post('/send', auth, (req, res) => {
+  const {
+    text = '', image_url = null, exclude = [], mode = 'all', list_ids = [],
+    broadcast_id = null, broadcasts_table = null,
+    count_only = false, offset = null, limit = null, bc_total = null,
+    delay_min_ms = null, delay_max_ms = null,
+  } = req.body || {}
+  const all = resolverTargets(mode, list_ids, exclude) // orden estable
+  if (count_only) return res.json({ count: all.length, mode })
   if (!connected || !sock) return res.status(409).json({ error: 'whatsapp_no_conectado' })
-  const { text = '', image_url = null, exclude = [], mode = 'all', list_ids = [], broadcast_id = null, broadcasts_table = null } = req.body || {}
-  const targets = resolverTargets(mode, list_ids, exclude)
-  res.status(202).json({ accepted: true, targets: targets.length, mode })
-  enviarLote(text, image_url, targets, { table: bcTable(broadcasts_table), id: broadcast_id }).catch((e) =>
-    log.error({ err: String(e) }, 'enviarLote falló')
-  )
+  const off = Number(offset) || 0
+  const slice = offset != null || limit != null
+    ? all.slice(off, limit != null ? off + Number(limit) : undefined)
+    : all
+  res.status(202).json({ accepted: true, targets: slice.length, total: all.length, mode })
+  enviarLote(text, image_url, slice, {
+    table: bcTable(broadcasts_table),
+    id: broadcast_id,
+    bcTotal: bc_total != null ? Number(bc_total) : null,
+    delayMin: delay_min_ms != null ? Number(delay_min_ms) : null,
+    delayMax: delay_max_ms != null ? Number(delay_max_ms) : null,
+  }).catch((e) => log.error({ err: String(e) }, 'enviarLote falló'))
 })
 
 app.listen(PORT, () => log.info(`whatsapp-service en :${PORT}`))

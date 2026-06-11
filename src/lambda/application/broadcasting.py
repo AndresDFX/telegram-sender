@@ -31,6 +31,7 @@ class BroadcastList:
         whatsapp: WhatsAppForwarder | None = None,
         image_store: ImageStore | None = None,
         broadcasts=None,
+        plans=None,
     ) -> None:
         self._subscribers = subscribers
         self._queue = queue
@@ -38,12 +39,71 @@ class BroadcastList:
         self._whatsapp = whatsapp
         self._image_store = image_store
         self._broadcasts = broadcasts
+        self._plans = plans
 
     # --- helpers ---------------------------------------------------------------
 
     @staticmethod
     def _nuevo_id() -> str:
         return "b-" + uuid.uuid4().hex[:16]
+
+    @staticmethod
+    def _chunk(items, size: int) -> list[list]:
+        size = max(1, int(size))
+        return [list(items[i : i + size]) for i in range(0, len(items), size)]
+
+    def _usar_scheduler(self, cfg: dict) -> bool:
+        """Fracciona y secuencia (un lote a la vez) si está activo y hay store de planes.
+        Si falta el store (p.ej. tests) cae al envío inmediato (compatibilidad)."""
+        return bool(cfg.get("scheduling_enabled")) and self._plans is not None
+
+    def _resolver_wa_total(self, wa_on: bool, mode: str, list_ids, exclude) -> tuple[int, bool]:
+        """(total, resuelto). Si el servicio no responde, el dispatcher lo resolverá luego."""
+        if not (wa_on and self._whatsapp):
+            return 0, True
+        try:
+            return int(self._whatsapp.contar(mode=mode, list_ids=list(list_ids or []), exclude=list(exclude or []))), True
+        except Exception:
+            logger.exception("No se pudo contar WhatsApp al crear el plan; el dispatcher lo resolverá")
+            return 0, False
+
+    def _crear_plan(
+        self,
+        bid: str,
+        *,
+        cfg: dict,
+        text: str,
+        image_url: str | None,
+        image_key: str | None,
+        clientes: list,
+        tg_on: bool,
+        wa_on: bool,
+        wa_mode: str,
+        wa_list_ids,
+        wa_text: str,
+        wa_image_url: str | None,
+    ) -> None:
+        bs = int(cfg.get("batch_size", 150))
+        tg_lotes = self._chunk(clientes, bs) if tg_on else []
+        wa_exclude = cfg.get("whatsapp_excluded", []) if wa_on else []
+        wa_total, wa_resolved = self._resolver_wa_total(wa_on, wa_mode, wa_list_ids, wa_exclude)
+        self._plans.crear(
+            bid,
+            broadcast_id=bid,
+            text=text,
+            image_url=image_url,
+            image_key=image_key,
+            batch_size=bs,
+            tg_lotes=tg_lotes,
+            wa_enabled=wa_on,
+            wa_total=wa_total,
+            wa_resolved=wa_resolved,
+            wa_mode=wa_mode,
+            wa_list_ids=list(wa_list_ids or []),
+            wa_exclude=wa_exclude,
+            wa_text=wa_text,
+            wa_image_url=wa_image_url,
+        )
 
     @staticmethod
     def _broadcasts_table() -> str | None:
@@ -117,6 +177,21 @@ class BroadcastList:
         bid = self._nuevo_id()
         self._registrar(bid, mensaje, "channel", channels, len(clientes))
 
+        wa_t = cfg.get("whatsapp_target", {})
+        wa_mode = wa_t.get("mode", "all")
+        wa_list_ids = ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_t)
+
+        if self._usar_scheduler(cfg):
+            # Envío fraccionado: se crea el plan y el dispatcher gotea un lote a la vez.
+            self._crear_plan(
+                bid, cfg=cfg, text=mensaje,
+                image_url=cfg.get("image_url") or None, image_key=cfg.get("image_key") or None,
+                clientes=clientes, tg_on=True, wa_on=wa_on, wa_mode=wa_mode, wa_list_ids=wa_list_ids,
+                wa_text=mensaje, wa_image_url=self._image_url_para_whatsapp(cfg),
+            )
+            logger.info("Difusión %s PROGRAMADA (fraccionada) para %d clientes", bid, len(clientes))
+            return {"scheduled": True, "subscribers": len(clientes), "broadcast_id": bid}
+
         lotes = self._queue.encolar(
             mensaje,
             clientes,
@@ -126,15 +201,7 @@ class BroadcastList:
         )
         logger.info("Difusión %s: %d lotes para %d clientes", bid, lotes, len(clientes))
         if wa_on:
-            wa_t = cfg.get("whatsapp_target", {})
-            self._forward_whatsapp(
-                cfg,
-                mensaje,
-                self._image_url_para_whatsapp(cfg),
-                bid,
-                wa_t.get("mode", "all"),
-                ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_t),
-            )
+            self._forward_whatsapp(cfg, mensaje, self._image_url_para_whatsapp(cfg), bid, wa_mode, wa_list_ids)
         return {"batches": lotes, "subscribers": len(clientes), "broadcast_id": bid}
 
     # --- envío manual (mensaje propio, no capturado del canal) -----------------
@@ -202,6 +269,14 @@ class BroadcastList:
         channels = (["telegram"] if telegram else []) + (["whatsapp"] if wa_on else [])
         bid = self._nuevo_id()
         self._registrar(bid, text, "manual", channels, len(clientes))
+
+        if self._usar_scheduler(cfg):
+            self._crear_plan(
+                bid, cfg=cfg, text=text, image_url=image_url or None, image_key=None,
+                clientes=clientes, tg_on=bool(telegram), wa_on=wa_on, wa_mode=wa_mode, wa_list_ids=wa_ids,
+                wa_text=text, wa_image_url=image_url or None,
+            )
+            return {"scheduled": True, "broadcast_id": bid, "channels": channels, "telegram_total": len(clientes)}
 
         if telegram:
             self._queue.encolar(text, clientes, image_url=image_url or None, image_key=None, broadcast_id=bid)

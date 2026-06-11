@@ -13,6 +13,7 @@ from adapters.dynamodb import (
     DynamoDbConfigStore,
     DynamoDbDedupStore,
     DynamoDbHighWaterMarkStore,
+    DynamoDbPlanStore,
     DynamoDbSubscriberRepository,
 )
 from adapters.s3 import S3ImageStore
@@ -23,6 +24,7 @@ from adapters.tme import TmePreviewChannelReader
 from adapters.whatsapp import HttpWhatsAppForwarder
 from application.broadcasting import BroadcastList
 from application.deliver_batch import DeliverBatch
+from application.dispatch import DispatchCampaigns
 from application.onboarding import HandleCommand
 from application.poll_channel import PollChannel
 
@@ -72,13 +74,21 @@ def _broadcast_list() -> BroadcastList:
         deliver = DeliverBatch(_sender(cfg), recipients, delay=config.send_delay_seconds())
         queue = InlineBroadcastQueue(lambda text, ids, image_url=None: deliver(text, ids, image_url))
     whatsapp = HttpWhatsAppForwarder(cfg.get("whatsapp_service_url", ""), cfg.get("whatsapp_token", ""))
+    # El scheduler (planes en DynamoDB) solo aplica con SQS real (AWS); en inline (dev) se
+    # envía de inmediato. Así el envío fraccionado/secuencial no depende de tablas en local.
+    plans = build_plan_store() if config.broadcast_queue_url() else None
     return BroadcastList(
-        recipients, queue, store, whatsapp=whatsapp, image_store=S3ImageStore(), broadcasts=build_broadcast_store()
+        recipients, queue, store, whatsapp=whatsapp, image_store=S3ImageStore(),
+        broadcasts=build_broadcast_store(), plans=plans,
     )
 
 
 def build_broadcast_store() -> DynamoDbBroadcastStore:
     return DynamoDbBroadcastStore()
+
+
+def build_plan_store() -> DynamoDbPlanStore:
+    return DynamoDbPlanStore()
 
 
 def build_dedup() -> DynamoDbDedupStore:
@@ -115,11 +125,30 @@ def build_handle_command() -> HandleCommand:
 
 def build_deliver_batch() -> DeliverBatch:
     cfg = build_config_store().get()
-    return DeliverBatch(_sender(cfg), _recipients(cfg), delay=config.send_delay_seconds())
+    fijo = config.send_delay_seconds()
+    return DeliverBatch(
+        _sender(cfg),
+        _recipients(cfg),
+        delay_min=cfg.get("tg_delay_min", fijo),
+        delay_max=cfg.get("tg_delay_max", fijo),
+    )
 
 
 def build_broadcast_list() -> BroadcastList:
     return _broadcast_list()
+
+
+def build_dispatch_campaigns() -> DispatchCampaigns:
+    store = build_config_store()
+    cfg = store.get()
+    whatsapp = HttpWhatsAppForwarder(cfg.get("whatsapp_service_url", ""), cfg.get("whatsapp_token", ""))
+    return DispatchCampaigns(
+        plans=build_plan_store(),
+        broadcasts=build_broadcast_store(),
+        queue=SqsBroadcastQueue(),
+        whatsapp=whatsapp,
+        config=store,
+    )
 
 
 def build_poll_channel() -> PollChannel:

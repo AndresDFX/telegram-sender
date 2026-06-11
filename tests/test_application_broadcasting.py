@@ -218,5 +218,56 @@ class BroadcastListTests(unittest.TestCase):
         self.assertEqual(wa.calls, [])
 
 
+class FakePlans:
+    def __init__(self):
+        self.creados = []
+
+    def crear(self, plan_id, **kw):
+        self.creados.append({"id": plan_id, **kw})
+
+
+class SchedulerPathTests(unittest.TestCase):
+    """Con scheduling_enabled + store de planes: NO se encola/forwarda; se crea un plan."""
+
+    def test_canal_crea_plan_fraccionado_y_no_encola(self):
+        queue, plans = FakeQueue(), FakePlans()
+        cfg = FakeConfig(scheduling_enabled=True, batch_size=2)
+        bl = BroadcastList(FakeSubs(["1", "2", "3"]), queue, cfg, plans=plans)
+        res = bl("A06 $100.000")
+        self.assertTrue(res["scheduled"])
+        self.assertEqual(queue.calls, [])  # no se vuelca a SQS
+        plan = plans.creados[0]
+        self.assertEqual([len(l) for l in plan["tg_lotes"]], [2, 1])  # 3 contactos, lote 2 -> [2,1]
+        self.assertFalse(plan["wa_enabled"])
+
+    def test_manual_wa_resuelve_total_via_contar(self):
+        class FakeWa:
+            def contar(self, *, mode="all", list_ids=None, exclude=None):
+                return 7
+
+            def forward(self, *a, **k):
+                return {}
+
+        plans = FakePlans()
+        cfg = FakeConfig(
+            scheduling_enabled=True, batch_size=150,
+            whatsapp_lists=[{"name": "c", "ids": ["57300@s.whatsapp.net"]}],
+            whatsapp_target={"mode": "only", "lists": ["c"]},
+        )
+        bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, whatsapp=FakeWa(), plans=plans)
+        bl.enviar_manual("hola", telegram=True, whatsapp=True, whatsapp_list="c")
+        plan = plans.creados[0]
+        self.assertTrue(plan["wa_enabled"])
+        self.assertTrue(plan["wa_resolved"])
+        self.assertEqual(plan["wa_total"], 7)
+
+    def test_fallback_legacy_si_no_hay_plans(self):
+        # scheduling_enabled pero sin store de planes -> envío inmediato (compatibilidad)
+        queue = FakeQueue()
+        bl = BroadcastList(FakeSubs(["1"]), queue, FakeConfig(scheduling_enabled=True), plans=None)
+        bl("A $100.000")
+        self.assertEqual(len(queue.calls), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

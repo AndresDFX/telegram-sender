@@ -12,6 +12,7 @@ from typing import Callable, Sequence
 
 from application.ports import MessageSender, SubscriberRepository
 from domain.models import BroadcastStats
+from domain.scheduling import delay_aleatorio
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +24,15 @@ class DeliverBatch:
         subscribers: SubscriberRepository,
         delay: float = 0.05,
         sleep: Callable[[float], None] = time.sleep,
+        delay_min: float | None = None,
+        delay_max: float | None = None,
     ) -> None:
         self._sender = sender
         self._subscribers = subscribers
-        self._delay = delay
+        # Delay ALEATORIO entre [delay_min, delay_max] (anti-patrón). Si no se dan,
+        # se usa 'delay' fijo (compatibilidad). El rango activo se decide aquí.
+        self._delay_min = delay if delay_min is None else delay_min
+        self._delay_max = delay if delay_max is None else delay_max
         self._sleep = sleep
 
     def __call__(self, text: str, chat_ids: Sequence[str], image_url: str | None = None) -> BroadcastStats:
@@ -64,5 +70,6 @@ class DeliverBatch:
             logger.exception("No se pudo marcar inactivo al chat %s", chat_id)
 
     def _wait(self) -> None:
-        if self._delay:
-            self._sleep(self._delay)
+        espera = delay_aleatorio(self._delay_min, self._delay_max)
+        if espera > 0:
+            self._sleep(espera)

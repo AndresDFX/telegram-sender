@@ -45,6 +45,7 @@ $params = @(
   "LambdaCodeS3Bucket=$bucket",
   "LambdaCodeS3Key=$key",
   "WorkerReservedConcurrency=0",
+  "BroadcastBatchSize=150",
   "AdminUser=admin",
   "AdminPassword=$($dep['ADMIN_PASSWORD'])",
   "SendMode=userbot",

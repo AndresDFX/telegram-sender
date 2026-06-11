@@ -28,6 +28,7 @@ subscribers = None
 queue_stats = None
 image_store = None
 broadcast_store = None
+plan_store = None
 
 _CAMPOS_EDITABLES = (
     "source_channel",
@@ -50,16 +51,30 @@ _CAMPOS_EDITABLES = (
     "telegram_target",
     "whatsapp_lists",
     "whatsapp_target",
+    # Anti-baneo / colas / ventana de envío.
+    "batch_size",
+    "scheduling_enabled",
+    "tg_delay_min",
+    "tg_delay_max",
+    "wa_delay_min",
+    "wa_delay_max",
+    "window_enabled",
+    "window_start",
+    "window_end",
+    "window_tz",
 )
 _LISTAS = ("strip_patterns", "excluded_ids", "whatsapp_excluded")
 _LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
 _TARGETS = ("telegram_target", "whatsapp_target")
+_FLOATS = ("tg_delay_min", "tg_delay_max")
+_ENTEROS = ("batch_size", "wa_delay_min", "wa_delay_max", "window_tz")
+_BOOLS = ("whatsapp_enabled", "scheduling_enabled", "window_enabled")
 # Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
 _NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token", "bot_token")
 
 
 def _ensure() -> None:
-    global config, subscribers, queue_stats, image_store, broadcast_store
+    global config, subscribers, queue_stats, image_store, broadcast_store, plan_store
     if config is None:
         config = wiring.build_config_store()
     if subscribers is None:
@@ -70,6 +85,27 @@ def _ensure() -> None:
         image_store = wiring.build_image_store()
     if broadcast_store is None:
         broadcast_store = wiring.build_broadcast_store()
+    if plan_store is None:
+        plan_store = wiring.build_plan_store()
+
+
+def _planes_con_progreso() -> list[dict]:
+    """Planes fraccionados con, por cada lote despachado, cuántos mensajes se han enviado.
+    El progreso real se deriva de los contadores del job (Broadcasts) por canal."""
+    salida = []
+    for p in plan_store.listar():
+        bid = p.get("broadcast_id")
+        prog = broadcast_store.progreso(bid) if bid else {"tg": 0, "wa": 0}
+        log = []
+        for e in p.get("log", []):
+            ch, n, target = e.get("ch"), int(e.get("n", 0)), int(e.get("target", 0))
+            avance = int(prog.get(ch, 0))
+            enviados = max(0, min(n, avance - (target - n)))  # progreso atribuible a este lote
+            log.append({**e, "enviados": enviados})
+        p["log"] = log
+        p["progreso"] = prog
+        salida.append(p)
+    return salida
 
 
 # --- auth -------------------------------------------------------------------
@@ -151,8 +187,22 @@ def _sanea_config(cambios: dict) -> dict:
             v = {"mode": mode, "lists": listas}
         elif k == "send_mode":
             v = "userbot" if str(v).strip().lower() == "userbot" else "bot"
-        elif k == "whatsapp_enabled":
+        elif k in _BOOLS:
             v = bool(v)
+        elif k in _FLOATS:
+            try:
+                v = max(0.0, float(v))
+            except (TypeError, ValueError):
+                continue
+        elif k == "batch_size":
+            from domain.scheduling import cap_batch_size
+
+            v = cap_batch_size(v)  # tope duro 150
+        elif k in _ENTEROS:
+            try:
+                v = int(float(v))
+            except (TypeError, ValueError):
+                continue
         else:
             v = str(v).strip()
         if k in _NO_VACIAR and not v:  # no borrar secretos con vacío
@@ -288,6 +338,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json(queue_stats.profundidades())
         if sub == "/api/broadcasts" and method == "GET":
             return _json({"broadcasts": broadcast_store.listar()})
+        if sub == "/api/plans" and method == "GET":
+            return _json({"plans": _planes_con_progreso()})
         if sub == "/api/telegram/me" and method == "GET":
             return _telegram_api("getMe", {})  # verifica el token + muestra el bot
         if sub == "/api/telegram/webhook" and method == "GET":
@@ -853,6 +905,7 @@ img.preview{box-shadow:var(--sh-sm)}
    <button data-tab="msg" onclick="showTab('msg')">📝 Mensaje</button>
    <button data-tab="telegram" onclick="showTab('telegram')">✈️ Telegram</button>
    <button data-tab="whatsapp" onclick="showTab('whatsapp')">🟢 WhatsApp</button>
+   <button data-tab="prog" onclick="showTab('prog')">⏱️ Programación</button>
    <button data-tab="estado" onclick="showTab('estado')">📊 Estado</button>
    <button data-tab="enviar" onclick="showTab('enviar')">📨 Enviar</button>
  </nav>
@@ -935,7 +988,7 @@ img.preview{box-shadow:var(--sh-sm)}
   </div>
   <div class="card" data-tab="telegram"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
-   <input id="subsearch" placeholder="🔎 Buscar por nombre..." oninput="onSearch()" style="margin-top:10px">
+   <input id="subsearch" placeholder="🔎 Buscar por nombre o número..." oninput="onSearch()" style="margin-top:10px">
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
      <button class="sec" onclick="toggleAll(true)">Marcar visibles</button>
      <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
@@ -966,7 +1019,7 @@ img.preview{box-shadow:var(--sh-sm)}
   <div class="card" data-tab="whatsapp"><h2>Destinatarios WhatsApp <span id="wa_c_count" class="hint"></span></h2>
    <div class="hint">Carga tus contactos (servicio conectado), busca por nombre, y marca para <b>excluir/incluir</b>. Los excluidos NO reciben las difusiones por WhatsApp.</div>
    <button class="sec" style="margin-top:10px" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button>
-   <input id="wa_search" placeholder="🔎 Buscar por nombre..." oninput="renderWa()" style="margin-top:10px">
+   <input id="wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="renderWa()" style="margin-top:10px">
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
      <button class="sec" onclick="waToggleAll(true)">Marcar visibles</button>
      <button class="sec" onclick="waToggleAll(false)">Desmarcar</button>
@@ -1011,12 +1064,12 @@ img.preview{box-shadow:var(--sh-sm)}
    <label style="margin-top:16px">Enviar a</label>
    <div class="row">
      <div id="bc_tg_wrap"><div class="hint" style="margin-top:0">Telegram — busca y marca contactos</div>
-       <input id="bc_tg_search" placeholder="🔎 Buscar contacto..." oninput="bcRenderPick('tg')">
+       <input id="bc_tg_search" placeholder="🔎 Buscar por nombre o número..." oninput="bcRenderPick('tg')">
        <div id="bc_tg_pick" class="pickbox"></div>
        <div class="hint" style="margin-top:6px">o una lista: <select id="bc_tg_list" onchange="bcPrev()"><option value="">(según configuración)</option></select></div>
      </div>
      <div id="bc_wa_wrap" style="display:none"><div class="hint" style="margin-top:0">WhatsApp — busca y marca contactos</div>
-       <input id="bc_wa_search" placeholder="🔎 Buscar contacto..." oninput="bcRenderPick('wa')">
+       <input id="bc_wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="bcRenderPick('wa')">
        <div id="bc_wa_pick" class="pickbox"></div>
        <div class="hint" style="margin-top:6px">o una lista: <select id="bc_wa_list" onchange="bcPrev()"><option value="">— elige una lista —</option></select></div>
      </div>
@@ -1038,6 +1091,38 @@ img.preview{box-shadow:var(--sh-sm)}
    </div>
    <div class="bc-empty" id="bc_empty" style="display:none">Aún no hay envíos. Crea uno en <b>Componer y enviar</b>.</div>
    <div style="margin-top:14px"><button class="sec" onclick="loadBroadcasts()">Refrescar</button></div>
+  </div>
+  <div class="card accent" data-tab="prog"><h2>Anti-baneo · lotes y ritmo</h2>
+   <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="scheduling_enabled" style="width:auto"> Envío fraccionado y secuencial (procesa un lote a la vez)</label>
+   <div class="row">
+     <div><label>Tamaño de lote (máx 150)</label><input id="batch_size" type="number" min="1" max="150"></div>
+     <div><label>Zona horaria (min vs UTC, ej -300)</label><input id="window_tz" type="number" step="1"></div>
+   </div>
+   <div class="row">
+     <div><label>Delay Telegram mín (s)</label><input id="tg_delay_min" type="number" step="0.1" min="0"></div>
+     <div><label>Delay Telegram máx (s)</label><input id="tg_delay_max" type="number" step="0.1" min="0"></div>
+   </div>
+   <div class="row">
+     <div><label>Delay WhatsApp mín (ms)</label><input id="wa_delay_min" type="number" step="100" min="0"></div>
+     <div><label>Delay WhatsApp máx (ms)</label><input id="wa_delay_max" type="number" step="100" min="0"></div>
+   </div>
+   <div class="callout">El delay entre mensajes es <b>aleatorio</b> dentro del rango (evita patrones predecibles). El dispatcher libera <b>un lote por minuto</b> y espera a que termine el anterior antes de soltar el siguiente.</div>
+   <button onclick="saveSched()">Guardar anti-baneo</button>
+  </div>
+  <div class="card" data-tab="prog"><h2>Ventana de envío (horario permitido)</h2>
+   <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="window_enabled" style="width:auto"> Enviar solo dentro del horario permitido</label>
+   <div class="row">
+     <div><label>Desde (HH:MM)</label><input id="window_start" placeholder="08:00"></div>
+     <div><label>Hasta (HH:MM)</label><input id="window_end" placeholder="20:00"></div>
+   </div>
+   <div class="hint">Fuera del horario, los lotes quedan <b>encolados</b> y se procesan de forma diferida al reabrir la ventana. Soporta cruzar medianoche (p.ej. 22:00 → 06:00).</div>
+   <button onclick="saveSched()">Guardar ventana</button>
+  </div>
+  <div class="card" data-tab="prog"><h2>📦 Envíos fraccionados <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
+   <div class="hint">De cada lote programado se muestra <b>cuántos mensajes se han enviado</b>. El sistema procesa un lote a la vez, en orden.</div>
+   <div id="pl_list" style="margin-top:12px"></div>
+   <div class="bc-empty" id="pl_empty" style="display:none">No hay envíos programados todavía. Crea uno en <b>Enviar</b> o espera al próximo del canal.</div>
+   <div style="margin-top:14px"><button class="sec" onclick="loadPlans()">Refrescar</button></div>
   </div>
  </main>
 </div>
@@ -1067,7 +1152,20 @@ async function loadCfg(){ const c=await api('/api/config');
   WA_EXCLUDED=new Set((c.whatsapp_excluded||[]).map(String)); if($('wa_subs')) renderWa();
   LISTS.telegram=c.telegram_lists||[]; TGT.telegram=c.telegram_target||{mode:'all',lists:[]};
   LISTS.whatsapp=c.whatsapp_lists||[]; TGT.whatsapp=c.whatsapp_target||{mode:'all',lists:[]};
-  renderLists('telegram'); renderLists('whatsapp'); }
+  renderLists('telegram'); renderLists('whatsapp');
+  // --- anti-baneo / ventana ---
+  ['batch_size','tg_delay_min','tg_delay_max','wa_delay_min','wa_delay_max','window_tz','window_start','window_end'].forEach(k=>{ if($(k)) $(k).value=c[k]??''; });
+  if($('scheduling_enabled')) $('scheduling_enabled').checked = c.scheduling_enabled!==false;
+  if($('window_enabled')) $('window_enabled').checked = !!c.window_enabled; }
+async function saveSched(){
+  const b={ scheduling_enabled:$('scheduling_enabled').checked, window_enabled:$('window_enabled').checked,
+    batch_size:parseInt($('batch_size').value||'150',10),
+    tg_delay_min:parseFloat($('tg_delay_min').value||'1'), tg_delay_max:parseFloat($('tg_delay_max').value||'4'),
+    wa_delay_min:parseInt($('wa_delay_min').value||'3000',10), wa_delay_max:parseInt($('wa_delay_max').value||'9000',10),
+    window_start:($('window_start').value||'08:00').trim(), window_end:($('window_end').value||'20:00').trim(),
+    window_tz:parseInt($('window_tz').value||'-300',10) };
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); toast('✓ Guardado'); loadCfg(); }
+  catch(e){ toast('Error al guardar',true); } }
 async function saveWhatsapp(){ const b={ whatsapp_enabled:$('whatsapp_enabled').checked, whatsapp_service_url:$('whatsapp_service_url').value };
    const tok=$('whatsapp_token').value; if(tok) b.whatsapp_token=tok;
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
@@ -1113,7 +1211,7 @@ async function loadQueue(){ const q=await api('/api/queue'); $('q_b').textConten
 let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0;
 const PAGE_SIZE=50;
 function filtered(){ if(!FILTER) return DEST; const q=FILTER.toLowerCase();
-  return DEST.filter(s=> (s.name||'').toLowerCase().includes(q)); }
+  return DEST.filter(s=> (s.name||'').toLowerCase().includes(q) || String(s.chatId||'').toLowerCase().includes(q)); }
 function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
   if(PAGE>=pages) PAGE=pages-1; if(PAGE<0) PAGE=0;
   const slice=f.slice(PAGE*PAGE_SIZE,(PAGE+1)*PAGE_SIZE);
@@ -1178,7 +1276,7 @@ async function loadWaContacts(){ $('wa_c_count').textContent='· cargando...';
   try{ const r=await api('/api/whatsapp/contacts'); WA_DEST=r.contacts||[]; WA_PAGE=0; renderWa(); }
   catch(e){ $('wa_c_count').textContent='· servicio inaccesible (¿conectado?)'; } }
 function waFiltered(){ const q=($('wa_search').value||'').trim().toLowerCase(); if(!q) return WA_DEST;
-  return WA_DEST.filter(c=> waName(c).toLowerCase().includes(q)); }
+  return WA_DEST.filter(c=> waName(c).toLowerCase().includes(q) || String(c.id||'').toLowerCase().includes(q)); }
 function renderWa(){ const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
   if(WA_PAGE>=pages)WA_PAGE=pages-1; if(WA_PAGE<0)WA_PAGE=0; const slice=f.slice(WA_PAGE*PAGE_SIZE,(WA_PAGE+1)*PAGE_SIZE);
   const t=$('wa_subs'); t.innerHTML='';
@@ -1215,7 +1313,9 @@ function bcRenderPick(ch){
   const box=$('bc_'+ch+'_pick'); if(!box) return;
   const data=(ch==='tg'?DEST:WA_DEST)||[], sel=bcSel(ch);
   const q=($('bc_'+ch+'_search').value||'').trim().toLowerCase();
-  const f=data.filter(c=> !q || bcNameOf(ch,c).toLowerCase().includes(q)).slice(0,40);
+  const f=data.filter(c=>{ if(!q) return true;
+    const id=(ch==='tg'?String(c.chatId||''):String(c.id||'')).toLowerCase();
+    return bcNameOf(ch,c).toLowerCase().includes(q) || id.includes(q); }).slice(0,40);
   box.innerHTML = f.length ? f.map(c=>{ const id=bcIdOf(ch,c);
     return `<label class="pickitem"><input type="checkbox" ${sel.has(id)?'checked':''} onchange="bcTogglePick('${ch}','${id}',this.checked)"> ${bcEsc(bcNameOf(ch,c))}</label>`; }).join('')
     : '<div class="hint">'+(data.length?'sin resultados':'sin contactos cargados aún')+'</div>';
@@ -1375,6 +1475,52 @@ function bcStartPolling(){
     window.showTab=function(t){ _showTab(t); if(t==='enviar') loadBroadcasts(); };
   }
   const start=()=>{ if(CRED) bcStartPolling(); };
+  if(document.readyState!=='loading') start();
+  else document.addEventListener('DOMContentLoaded', start);
+})();
+// ===== Programación: monitor de envíos fraccionados (GET /api/plans) =====
+const PL_ST={pending:'Pendiente',running:'En curso',done:'Completado',canceled:'Cancelado'};
+const PL_PILL={pending:'queued',running:'sending',done:'done',canceled:'failed'};
+function plBatchLine(e){
+  const chName=e.ch==='wa'?'🟢 WhatsApp':'✈️ Telegram';
+  const n=e.n|0, env=e.enviados|0, pct=n?Math.round(env/n*100):0, full=env>=n;
+  return `<div class="ch ${e.ch==='wa'?'wa':'tg'}" style="margin:6px 0">`+
+    `<span class="ic"></span>`+
+    `<span class="num">${chName} · lote ${ (e.idx|0)+1 } · programado <b>${bcFmtTime(e.at)}</b> → <b>${env}/${n}</b> enviados</span>`+
+    `<span class="bar ${e.ch==='wa'?'wa':''} ${full?'full':''}" style="max-width:120px"><i style="width:${pct}%"></i></span></div>`;
+}
+function plCard(p){
+  const txt=(p.text||'').trim()||'(solo imagen)';
+  const st=String(p.status||'pending'); const lab=PL_ST[st]||st; const pill=PL_PILL[st]||'queued';
+  const tgI=(p.tg&&p.tg.total)?`✈️ ${p.tg.next|0}/${p.tg.batches|0} lotes`:'';
+  const waI=(p.wa&&p.wa.enabled)?`🟢 ${p.wa.next|0}/${p.wa.batches|0} lotes`+(!p.wa.resolved?' (resolviendo…)':''):'';
+  const lines=(p.log||[]).map(plBatchLine).join('') || '<div class="hint" style="margin-top:6px">Aún sin lotes despachados (esperando ventana/turno).</div>';
+  return `<div class="card" style="margin-bottom:12px;background:var(--elev);padding:16px">`+
+    `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center">`+
+      `<b style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${bcEsc(txt)}</b>`+
+      `<span class="pill ${pill}">${lab}</span></div>`+
+    `<div class="bc-meta" style="margin:6px 0 4px">${bcFmtTime(p.created_at)} · lote ${p.batch_size|0} ${tgI?'· '+tgI:''} ${waI?'· '+waI:''}</div>`+
+    lines+`</div>`;
+}
+async function loadPlans(){
+  try{
+    const r=await api('/api/plans'); const list=r.plans||[];
+    $('pl_empty').style.display=list.length?'none':'block';
+    $('pl_list').innerHTML=list.map(plCard).join('');
+    const active=list.some(p=>p.status==='pending'||p.status==='running');
+    $('pl_live').classList.toggle('on',active); $('pl_live_t').textContent=active?'en vivo':'al día';
+  }catch(e){ /* silencioso */ }
+}
+let PL_TIMER=null;
+function plStartPolling(){
+  if(PL_TIMER) return; loadPlans();
+  PL_TIMER=setInterval(()=>{ if(!CRED||document.hidden) return;
+    const vis=document.querySelector('main>.card[data-tab="prog"]')?.classList.contains('show');
+    if(vis) loadPlans(); }, BC_POLL);
+}
+(function(){ const _s=window.showTab;
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='prog') loadPlans(); }; }
+  const start=()=>{ if(CRED) plStartPolling(); };
   if(document.readyState!=='loading') start();
   else document.addEventListener('DOMContentLoaded', start);
 })();
