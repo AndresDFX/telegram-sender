@@ -36,7 +36,15 @@ class WhatsAppForwarderTests(unittest.TestCase):
         self.assertEqual(req.get_header("Authorization"), "Bearer tok")
         self.assertEqual(
             json.loads(req.data.decode()),
-            {"text": "hola", "image_url": "http://img", "exclude": ["1", "2"], "mode": "all", "list_ids": []},
+            {
+                "text": "hola",
+                "image_url": "http://img",
+                "exclude": ["1", "2"],
+                "mode": "all",
+                "list_ids": [],
+                "broadcast_id": None,
+                "broadcasts_table": None,
+            },
         )
 
     def test_forward_pasa_mode_y_list_ids(self):

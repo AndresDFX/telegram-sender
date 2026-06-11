@@ -67,9 +67,17 @@ class HighWaterMarkStore(ABC):
 class BroadcastQueue(ABC):
     @abstractmethod
     def encolar(
-        self, text: str, chat_ids: Sequence[str], image_url: str | None = None, image_key: str | None = None
+        self,
+        text: str,
+        chat_ids: Sequence[str],
+        image_url: str | None = None,
+        image_key: str | None = None,
+        broadcast_id: str | None = None,
     ) -> int:
-        """Encola el broadcast (en lotes). Devuelve cuántos lotes; lanza PartialEnqueueError si falla a medias."""
+        """Encola el broadcast (en lotes). Devuelve cuántos lotes; lanza PartialEnqueueError si falla a medias.
+
+        ``broadcast_id`` se propaga en cada lote para que el worker reporte progreso del job.
+        """
 
 
 class MessageSender(ABC):
@@ -98,11 +106,14 @@ class WhatsAppForwarder(ABC):
         *,
         mode: str = "all",
         list_ids: list[str] | None = None,
+        broadcast_id: str | None = None,
+        broadcasts_table: str | None = None,
     ) -> dict:
         """Reenvía la lista al servicio de WhatsApp (fire-and-forget). No-op si no está configurado.
 
         mode: "all" | "only" (whitelist sobre list_ids) | "except" (blacklist sobre list_ids).
         list_ids: unión de ids de las listas activas (para whitelist/blacklist).
+        broadcast_id/broadcasts_table: para que el servicio reporte progreso del job en DynamoDB.
         """
 
 

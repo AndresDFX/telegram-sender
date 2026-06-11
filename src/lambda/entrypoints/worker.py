@@ -21,14 +21,17 @@ logger.setLevel(logging.INFO)
 
 deliver = None  # caso de uso DeliverBatch; inyectable en tests
 image_store = None  # S3ImageStore; inyectable en tests
+broadcasts = None  # DynamoDbBroadcastStore; inyectable en tests
 
 
 def _ensure() -> None:
-    global deliver, image_store
+    global deliver, image_store, broadcasts
     if deliver is None:
         deliver = wiring.build_deliver_batch()
     if image_store is None:
         image_store = wiring.build_image_store()
+    if broadcasts is None:
+        broadcasts = wiring.build_broadcast_store()
 
 
 def _resolver_imagen(body: dict) -> str | None:
@@ -51,6 +54,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             body = json.loads(record["body"])
             stats = deliver(body["text"], body.get("chat_ids", []), _resolver_imagen(body))
             logger.info("Lote %s procesado: %s", body.get("batch_index"), stats.resumen())
+            bid = body.get("broadcast_id")
+            if bid:
+                broadcasts.incr_telegram(bid, sent=stats.sent, failed=stats.failed + stats.blocked)
             if stats.total > 0 and stats.failed == stats.total:
                 raise RuntimeError(f"Todos los envíos del lote {message_id} fallaron")
         except Exception:

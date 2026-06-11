@@ -27,7 +27,7 @@ class FakeQueue:
     def __init__(self):
         self.calls = []
 
-    def encolar(self, text, chat_ids, image_url=None, image_key=None):
+    def encolar(self, text, chat_ids, image_url=None, image_key=None, broadcast_id=None):
         self.calls.append((text, list(chat_ids), image_url, image_key))
         return 1
 
@@ -58,7 +58,9 @@ class BroadcastListTests(unittest.TestCase):
         bl = BroadcastList(FakeSubs(["1", "2"]), queue, FakeConfig())
         res = bl("UBICADOS aqui\nA06 4-64GB $100.000")
 
-        self.assertEqual(res, {"batches": 1, "subscribers": 2})
+        self.assertEqual(res["batches"], 1)
+        self.assertEqual(res["subscribers"], 2)
+        self.assertIn("broadcast_id", res)
         text, ids, image_url, image_key = queue.calls[0]
         self.assertNotIn("UBICADOS", text)            # ubicación fuera
         self.assertIn("$115.000", text)               # markup aplicado
@@ -86,7 +88,7 @@ class BroadcastListTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None):
+            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None):
                 self.calls.append((text, image_url, list(exclude), mode, list(list_ids or [])))
                 return {"accepted": True}
 
@@ -120,7 +122,7 @@ class BroadcastListTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None):
+            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None):
                 self.calls.append((mode, list(list_ids or [])))
                 return {}
 
@@ -134,6 +136,36 @@ class BroadcastListTests(unittest.TestCase):
         mode, list_ids = wa.calls[0]
         self.assertEqual(mode, "only")
         self.assertEqual(list_ids, ["57300@s.whatsapp.net", "57301@s.whatsapp.net"])
+
+    def test_envio_manual_texto_crudo_a_ambos_canales(self):
+        class FakeWa:
+            def __init__(self):
+                self.calls = []
+
+            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None):
+                self.calls.append((text, broadcast_id))
+                return {}
+
+        class FakeBroadcasts:
+            def __init__(self):
+                self.jobs = []
+
+            def crear(self, broadcast_id, text, source, channels, tg_total=0):
+                self.jobs.append({"id": broadcast_id, "source": source, "channels": list(channels), "tg_total": tg_total})
+
+        queue, wa, store = FakeQueue(), FakeWa(), FakeBroadcasts()
+        bl = BroadcastList(FakeSubs(["1", "2"]), queue, FakeConfig(), whatsapp=wa, broadcasts=store)
+        res = bl.enviar_manual("Hola mundo $100.000", telegram=True, whatsapp=True)
+
+        # texto CRUDO (sin markup ni footer)
+        self.assertEqual(queue.calls[0][0], "Hola mundo $100.000")
+        self.assertEqual(queue.calls[0][1], ["1", "2"])
+        self.assertEqual(wa.calls[0][0], "Hola mundo $100.000")
+        # job registrado como manual, en ambos canales, con el mismo id propagado
+        self.assertEqual(store.jobs[0]["source"], "manual")
+        self.assertEqual(store.jobs[0]["channels"], ["telegram", "whatsapp"])
+        self.assertEqual(res["broadcast_id"], store.jobs[0]["id"])
+        self.assertEqual(wa.calls[0][1], res["broadcast_id"])
 
     def test_no_reenvia_whatsapp_si_desactivado(self):
         class FakeWa:

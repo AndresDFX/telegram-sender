@@ -27,6 +27,7 @@ config = None
 subscribers = None
 queue_stats = None
 image_store = None
+broadcast_store = None
 
 _CAMPOS_EDITABLES = (
     "source_channel",
@@ -57,7 +58,7 @@ _NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token")
 
 
 def _ensure() -> None:
-    global config, subscribers, queue_stats, image_store
+    global config, subscribers, queue_stats, image_store, broadcast_store
     if config is None:
         config = wiring.build_config_store()
     if subscribers is None:
@@ -66,6 +67,8 @@ def _ensure() -> None:
         queue_stats = wiring.build_queue_stats()
     if image_store is None:
         image_store = wiring.build_image_store()
+    if broadcast_store is None:
+        broadcast_store = wiring.build_broadcast_store()
 
 
 # --- auth -------------------------------------------------------------------
@@ -231,7 +234,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 return _json({"error": "imagen vacía"}, 400)
             key = image_store.guardar(raw_img, cuerpo.get("content_type", "image/jpeg"))
             config.set({"image_key": key})
-            return _json({"ok": True, "key": key})
+            url = ""
+            try:
+                url = image_store.url_temporal(key)  # para adjuntarla en un envío manual
+            except Exception:
+                logger.exception("No se pudo firmar la imagen subida")
+            return _json({"ok": True, "key": key, "url": url})
         if sub == "/api/subscribers" and method == "GET":
             return _json({"subscribers": subscribers.listar_todos()})
         if sub == "/api/subscribers" and method == "POST":
@@ -243,6 +251,21 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json({"ok": True})
         if sub == "/api/queue" and method == "GET":
             return _json(queue_stats.profundidades())
+        if sub == "/api/broadcasts" and method == "GET":
+            return _json({"broadcasts": broadcast_store.listar()})
+        if sub == "/api/broadcast" and method == "POST":
+            cuerpo = _body(event)
+            texto = str(cuerpo.get("text", "")).strip()
+            a_tg = bool(cuerpo.get("telegram"))
+            a_wa = bool(cuerpo.get("whatsapp"))
+            if not texto:
+                return _json({"error": "texto requerido"}, 400)
+            if not (a_tg or a_wa):
+                return _json({"error": "elige al menos un canal"}, 400)
+            res = wiring.build_broadcast_list().enviar_manual(
+                texto, image_url=str(cuerpo.get("image_url", "")).strip() or None, telegram=a_tg, whatsapp=a_wa
+            )
+            return _json({"ok": True, **res})
         if sub == "/api/whatsapp/status" and method == "GET":
             return _whatsapp_proxy("/status")
         if sub == "/api/whatsapp/contacts" and method == "GET":
@@ -260,61 +283,263 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sender · Panel</title>
 <style>
- :root{--bg:#0b1020;--card:#151c32;--card2:#1c2540;--bd:#2a3354;--tx:#e6ebff;--mut:#8b96b8;--ac:#6366f1;--ac2:#22d3ee;--ok:#34d399;--warn:#fbbf24;--bad:#fb7185}
- *{box-sizing:border-box}body{font-family:system-ui,Segoe UI,Roboto,sans-serif;margin:0;background:
-   radial-gradient(1200px 600px at 80% -10%,#1e2a52 0%,transparent 60%),var(--bg);color:var(--tx);min-height:100vh}
- /* login */
- #login{display:flex;min-height:100vh;align-items:center;justify-content:center;padding:20px}
- #login .box{background:var(--card);border:1px solid var(--bd);border-radius:18px;padding:34px;width:360px;
-   box-shadow:0 24px 60px rgba(0,0,0,.45)}
- #login h1{font-size:20px;margin:0 0 4px}#login p{color:var(--mut);margin:0 0 22px;font-size:13px}
- .logo{font-size:34px;margin-bottom:10px}
- /* marca Sender */
- .brand{display:flex;align-items:center;gap:11px}
- .brand .wordmark{font-weight:800;font-size:21px;letter-spacing:-.4px;
-   background:linear-gradient(90deg,#a5b4fc,#22d3ee);-webkit-background-clip:text;background-clip:text;color:transparent}
- .brand svg{border-radius:11px;filter:drop-shadow(0 6px 16px rgba(99,102,241,.45))}
- .brand-lg{justify-content:center;margin-bottom:8px}
- .brand-lg .wordmark{font-size:32px}
- /* app */
- #app{display:none}
- header{display:flex;align-items:center;justify-content:space-between;background:rgba(21,28,50,.8);
-   backdrop-filter:blur(8px);padding:14px 24px;border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:5}
- header .t{font-weight:700;font-size:17px}header .u{color:var(--mut);font-size:13px}
- main{max-width:920px;margin:0 auto;padding:24px;display:grid;gap:20px}
- .card{background:linear-gradient(180deg,var(--card) 0%,var(--card2) 100%);border:1px solid var(--bd);
-   border-radius:16px;padding:22px}
- h2{margin:0 0 16px;font-size:15px;color:var(--ac2);letter-spacing:.3px;text-transform:uppercase}
- label{display:block;margin:12px 0 5px;font-size:12px;color:var(--mut);font-weight:600}
- input,textarea,select{width:100%;background:#0e1428;border:1px solid var(--bd);color:var(--tx);border-radius:10px;
-   padding:11px;font-size:14px;transition:border .15s}
- input:focus,textarea:focus,select:focus{outline:0;border-color:var(--ac)}
- textarea{min-height:84px;font-family:ui-monospace,monospace;font-size:13px}
- .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
- button{background:linear-gradient(90deg,var(--ac),#818cf8);color:#fff;border:0;border-radius:10px;
-   padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer;transition:filter .15s}
- button:hover{filter:brightness(1.1)}button.sec{background:#26304f}button.ghost{background:transparent;border:1px solid var(--bd)}
- .markup{display:flex;align-items:center;gap:14px;background:#0e1428;border:1px solid var(--bd);border-radius:12px;padding:16px}
- .markup input{font-size:30px;font-weight:700;text-align:center;width:120px;padding:6px}
- .hint{color:var(--mut);font-size:12px;margin-top:6px}
- table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--bd)}
- th{color:var(--mut);font-size:12px;text-transform:uppercase}
- .pill{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
- .pill.active{background:rgba(52,211,153,.15);color:var(--ok)}.pill.inactive{background:rgba(251,146,60,.15);color:var(--warn)}
- .stats{display:flex;gap:18px}.stat{flex:1;background:#0e1428;border:1px solid var(--bd);border-radius:12px;padding:16px;text-align:center}
- .stat b{display:block;font-size:30px;color:var(--ac2)}.stat span{color:var(--mut);font-size:12px}
- .toast{position:fixed;bottom:24px;right:24px;background:var(--ok);color:#04261a;padding:12px 18px;border-radius:10px;
-   font-weight:600;opacity:0;transform:translateY(10px);transition:.25s;pointer-events:none}
- .toast.show{opacity:1;transform:none}.toast.err{background:var(--bad);color:#3b0712}
- .err{color:var(--bad);font-size:13px;min-height:18px;margin-top:8px}
- img.preview{max-width:160px;border-radius:10px;margin-top:10px;border:1px solid var(--bd)}
- /* navegación por módulos */
- .nav{position:sticky;top:51px;z-index:4;background:rgba(11,16,32,.85);backdrop-filter:blur(8px);
-   display:flex;gap:8px;justify-content:center;padding:14px 16px;border-bottom:1px solid var(--bd);flex-wrap:wrap}
- .nav button{background:#1c2540;border:1px solid var(--bd);color:var(--mut);padding:9px 18px;border-radius:999px;font-weight:600}
- .nav button.on{background:linear-gradient(90deg,var(--ac),#818cf8);color:#fff;border-color:transparent}
- main>.card{display:none}
- main>.card.show{display:block}
+:root{
+  --bg:#0a0e1a; --bg2:#0d1322;
+  --card:#10172a; --card2:#0f1730; --elev:#0c1322;
+  --bd:#1f2840; --bd2:#28324f;
+  --tx:#e8ecf8; --tx2:#c3cbe4; --mut:#7c87a8; --mut2:#5c668a;
+  --ac:#6366f1; --ac-h:#7c80f7; --ac2:#22d3ee;
+  --ok:#34d399; --warn:#fbbf24; --bad:#fb7185; --info:#60a5fa;
+  --r:14px; --r-sm:10px;
+  --sh:0 1px 0 rgba(255,255,255,.02) inset, 0 18px 50px -20px rgba(0,0,0,.7);
+  --ring:0 0 0 3px rgba(99,102,241,.22);
+  --fs:13px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{
+  font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  margin:0; background:var(--bg); color:var(--tx);
+  min-height:100vh; font-size:var(--fs); line-height:1.5;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  background-image:
+    radial-gradient(900px 500px at 88% -8%, rgba(99,102,241,.12), transparent 60%),
+    radial-gradient(700px 420px at 8% 0%, rgba(34,211,238,.06), transparent 55%);
+  background-attachment:fixed;
+}
+::selection{background:rgba(99,102,241,.35);color:#fff}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#243056;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:#33406b;background-clip:padding-box}
+a{color:var(--ac2)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
+  background:var(--elev);border:1px solid var(--bd);padding:1px 6px;border-radius:6px;color:#b9c4ec}
+
+/* ---------- marca ---------- */
+.brand{display:flex;align-items:center;gap:11px}
+.brand .wordmark{
+  font-weight:800;font-size:20px;letter-spacing:-.5px;
+  background:linear-gradient(95deg,#c7cdff,#7bdcf0);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.brand svg{border-radius:11px;filter:drop-shadow(0 6px 18px rgba(99,102,241,.45))}
+.brand-lg{justify-content:center;margin-bottom:6px}
+.brand-lg .wordmark{font-size:30px}
+.logo{font-size:32px;margin-bottom:10px}
+
+/* ---------- login ---------- */
+#login{display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}
+#login .box{
+  position:relative;overflow:hidden;
+  background:linear-gradient(180deg,var(--card),var(--card2));
+  border:1px solid var(--bd);border-radius:20px;
+  padding:38px 32px;width:372px;box-shadow:var(--sh);
+}
+#login .box::before{content:"";position:absolute;inset:-2px -2px auto -2px;height:3px;
+  background:linear-gradient(90deg,var(--ac),var(--ac2));opacity:.9}
+#login h1{font-size:20px;margin:0 0 4px}
+#login p{color:var(--mut);margin:0 0 24px;font-size:13px}
+
+/* ---------- app shell ---------- */
+#app{display:none}
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  background:rgba(10,14,26,.72);backdrop-filter:blur(14px) saturate(140%);
+  padding:13px 22px;border-bottom:1px solid var(--bd);
+  position:sticky;top:0;z-index:5;
+}
+header .t{font-weight:700;font-size:16px}
+header .u{color:var(--mut);font-size:12.5px;display:inline-flex;align-items:center;gap:8px}
+main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
+
+/* ---------- nav (pestañas horizontales) ---------- */
+.nav{
+  position:sticky;top:50px;z-index:4;
+  background:rgba(10,14,26,.8);backdrop-filter:blur(14px) saturate(140%);
+  display:flex;gap:6px;justify-content:center;align-items:center;
+  padding:11px 14px;border-bottom:1px solid var(--bd);flex-wrap:wrap;
+}
+.nav button{
+  background:transparent;border:1px solid transparent;color:var(--mut);
+  padding:8px 15px;border-radius:999px;font-weight:600;font-size:13px;
+  cursor:pointer;transition:color .15s,background .15s,border-color .15s;
+}
+.nav button:hover{color:var(--tx2);background:rgba(255,255,255,.04)}
+.nav button.on{
+  background:rgba(99,102,241,.14);color:#cdd1ff;border-color:rgba(99,102,241,.4);
+}
+
+/* ---------- cards ---------- */
+.card{
+  background:linear-gradient(180deg,var(--card),var(--card2));
+  border:1px solid var(--bd);border-radius:var(--r);padding:22px;box-shadow:var(--sh);
+}
+h2{
+  margin:0 0 16px;font-size:12px;color:var(--ac2);
+  letter-spacing:.9px;text-transform:uppercase;font-weight:700;
+  display:flex;align-items:center;gap:8px;
+}
+
+/* ---------- form fields ---------- */
+label{display:block;margin:13px 0 6px;font-size:12px;color:var(--mut);font-weight:600;letter-spacing:.2px}
+input,textarea,select{
+  width:100%;background:var(--elev);border:1px solid var(--bd);color:var(--tx);
+  border-radius:var(--r-sm);padding:11px 12px;font-size:14px;font-family:inherit;
+  transition:border-color .15s,box-shadow .15s,background .15s;
+}
+input::placeholder,textarea::placeholder{color:var(--mut2)}
+input:hover,textarea:hover,select:hover{border-color:var(--bd2)}
+input:focus,textarea:focus,select:focus{outline:0;border-color:var(--ac);box-shadow:var(--ring);background:#0d1426}
+textarea{min-height:88px;resize:vertical;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:13px;line-height:1.55}
+select{appearance:none;-webkit-appearance:none;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237c87a8' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat:no-repeat;background-position:right 12px center;padding-right:36px;cursor:pointer}
+input[type=file]{padding:9px 12px;color:var(--mut);cursor:pointer}
+input[type=file]::file-selector-button{
+  background:#1b2440;border:1px solid var(--bd2);color:var(--tx2);
+  border-radius:8px;padding:7px 13px;margin-right:12px;cursor:pointer;font:inherit;font-weight:600}
+input[type=file]::file-selector-button:hover{background:#222c4d}
+input[type=checkbox],input[type=radio]{accent-color:var(--ac);width:auto;cursor:pointer}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+/* ---------- buttons ---------- */
+button{
+  background:var(--ac);color:#fff;border:1px solid transparent;border-radius:var(--r-sm);
+  padding:10px 17px;font-size:13.5px;font-weight:600;font-family:inherit;cursor:pointer;
+  transition:background .15s,transform .05s,box-shadow .15s,border-color .15s,opacity .15s;
+}
+button:hover{background:var(--ac-h)}
+button:active{transform:translateY(1px)}
+button:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(99,102,241,.35)}
+button:disabled{opacity:.5;cursor:not-allowed;transform:none}
+button.sec{background:#1b2440;color:var(--tx2);border-color:var(--bd2)}
+button.sec:hover{background:#222c4d}
+button.ghost{background:transparent;border:1px solid var(--bd2);color:var(--mut)}
+button.ghost:hover{background:rgba(255,255,255,.04);color:var(--tx2)}
+
+/* ---------- markup widget ---------- */
+.markup{display:flex;align-items:center;gap:18px;background:var(--elev);border:1px solid var(--bd);border-radius:var(--r);padding:18px}
+.markup input{font-size:32px;font-weight:700;text-align:center;width:124px;padding:8px;color:var(--ac2)}
+
+/* ---------- misc text ---------- */
+.hint{color:var(--mut);font-size:12px;margin-top:6px;line-height:1.55}
+.hint code{background:var(--elev);border:1px solid var(--bd);padding:1px 6px;border-radius:6px;font-size:11.5px}
+.err{color:var(--bad);font-size:13px;min-height:18px;margin-top:8px}
+img.preview{max-width:170px;border-radius:var(--r-sm);margin-top:12px;border:1px solid var(--bd)}
+
+/* ---------- table ---------- */
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:10px 9px;border-bottom:1px solid var(--bd);vertical-align:middle}
+tbody tr{transition:background .12s}
+tbody tr:hover{background:rgba(255,255,255,.025)}
+th{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:700}
+td b{font-weight:600;color:var(--tx)}
+
+/* ---------- pills / chips de estado ---------- */
+.pill{padding:3px 11px;border-radius:999px;font-size:11.5px;font-weight:600;display:inline-block;border:1px solid transparent;white-space:nowrap}
+.pill.active{background:rgba(52,211,153,.13);color:var(--ok);border-color:rgba(52,211,153,.28)}
+.pill.inactive{background:rgba(251,191,36,.12);color:var(--warn);border-color:rgba(251,191,36,.26)}
+/* estados de envíos (reutiliza .pill) */
+.pill.queued{background:rgba(96,165,250,.13);color:var(--info);border-color:rgba(96,165,250,.3)}
+.pill.sending{background:rgba(34,211,238,.12);color:var(--ac2);border-color:rgba(34,211,238,.28)}
+.pill.done{background:rgba(52,211,153,.13);color:var(--ok);border-color:rgba(52,211,153,.28)}
+.pill.partial{background:rgba(251,191,36,.12);color:var(--warn);border-color:rgba(251,191,36,.26)}
+.pill.failed{background:rgba(251,113,133,.12);color:var(--bad);border-color:rgba(251,113,133,.3)}
+
+/* ---------- stats ---------- */
+.stats{display:flex;gap:14px;flex-wrap:wrap}
+.stat{flex:1;min-width:130px;background:var(--elev);border:1px solid var(--bd);border-radius:var(--r);padding:18px;text-align:center;position:relative;overflow:hidden}
+.stat::after{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,var(--ac),var(--ac2));opacity:.6}
+.stat b{display:block;font-size:30px;font-weight:700;color:var(--ac2);line-height:1.1}
+.stat span{color:var(--mut);font-size:12px}
+
+/* ---------- toast ---------- */
+.toast{
+  position:fixed;bottom:24px;right:24px;z-index:50;
+  background:#0f2a21;color:#9ff0d2;border:1px solid rgba(52,211,153,.35);
+  padding:12px 18px;border-radius:var(--r-sm);font-weight:600;font-size:13px;
+  box-shadow:0 18px 50px -16px rgba(0,0,0,.7);
+  opacity:0;transform:translateY(12px);transition:opacity .25s,transform .25s;pointer-events:none;
+}
+.toast.show{opacity:1;transform:none}
+.toast.err{background:#2a1015;color:#ffc0c8;border-color:rgba(251,113,133,.4)}
+
+/* ---------- tab visibility ---------- */
+main>.card{display:none;animation:fade .22s ease}
+main>.card.show{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ===========================================================
+   NUEVO — Componer y Envíos (data-tab="enviar")
+   =========================================================== */
+/* contador de caracteres */
+.charcount{float:right;font-size:11px;color:var(--mut);font-weight:500;margin-top:-2px;font-variant-numeric:tabular-nums}
+
+/* selector de canales (chips toggle) */
+.chan-row{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 4px}
+.chan{
+  display:flex;align-items:center;gap:9px;cursor:pointer;user-select:none;
+  background:var(--elev);border:1px solid var(--bd);border-radius:var(--r-sm);
+  padding:11px 15px;font-size:13.5px;font-weight:600;color:var(--tx2);
+  transition:border-color .15s,background .15s,color .15s;
+}
+.chan:hover{border-color:var(--bd2)}
+.chan input{margin:0}
+.chan.tg.on{border-color:rgba(99,102,241,.55);background:rgba(99,102,241,.1);color:#cdd1ff}
+.chan.wa.on{border-color:rgba(52,211,153,.5);background:rgba(52,211,153,.1);color:#a9f0d4}
+.chan .dot{width:8px;height:8px;border-radius:50%;background:var(--mut)}
+.chan.tg.on .dot{background:var(--ac)}
+.chan.wa.on .dot{background:var(--ok)}
+
+/* dropzone / preview del compositor */
+.img-slot{display:flex;align-items:flex-start;gap:14px;margin-top:6px}
+.img-slot .preview{margin-top:0}
+.img-slot .meta{flex:1;min-width:0}
+
+/* barra de acciones del compositor */
+.compose-actions{display:flex;align-items:center;gap:12px;margin-top:18px;flex-wrap:wrap}
+.compose-actions .grow{flex:1}
+
+/* ---- tabla de envíos ---- */
+.bc-empty{color:var(--mut);font-size:13px;padding:18px 4px;text-align:center}
+.bc-msg{max-width:340px}
+.bc-msg b{display:block;color:var(--tx);font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bc-meta{color:var(--mut);font-size:11.5px;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.bc-src{text-transform:uppercase;letter-spacing:.5px;font-weight:700;font-size:10px;color:#8b96b8;
+  background:var(--elev);border:1px solid var(--bd);border-radius:5px;padding:1px 6px}
+
+/* progreso por canal */
+.chprog{display:flex;flex-direction:column;gap:7px;min-width:150px}
+.chprog .ch{display:flex;align-items:center;gap:8px;font-size:12px}
+.chprog .ch .ic{width:7px;height:7px;border-radius:50%;flex:none}
+.chprog .ch.tg .ic{background:var(--ac)}
+.chprog .ch.wa .ic{background:var(--ok)}
+.chprog .ch .num{color:var(--tx2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.chprog .ch .num .fail{color:var(--bad)}
+.chprog .ch .muted{color:var(--mut)}
+.bar{flex:1;height:5px;background:var(--elev);border:1px solid var(--bd);border-radius:999px;overflow:hidden;min-width:48px}
+.bar>i{display:block;height:100%;width:0;border-radius:999px;transition:width .5s ease;background:linear-gradient(90deg,var(--ac),#818cf8)}
+.bar.wa>i{background:linear-gradient(90deg,var(--ok),#5eead4)}
+.bar.full>i{background:var(--ok)}
+.bar.err>i{background:var(--bad)}
+
+/* indicador de "vivo" (polling) */
+.live{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--mut);font-weight:600;text-transform:none;letter-spacing:0}
+.live .ping{width:8px;height:8px;border-radius:50%;background:var(--mut)}
+.live.on .ping{background:var(--ok);box-shadow:0 0 0 0 rgba(52,211,153,.6);animation:ping 1.8s infinite}
+@keyframes ping{0%{box-shadow:0 0 0 0 rgba(52,211,153,.5)}70%{box-shadow:0 0 0 7px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
+
+/* ---------- responsive ---------- */
+@media (max-width:620px){
+  main{padding:18px 14px 70px}
+  .card{padding:18px 16px}
+  .row{grid-template-columns:1fr}
+  .stats{flex-direction:column}
+  .bc-msg{max-width:none}
+  .nav{gap:4px;padding:9px 8px}
+  .nav button{padding:7px 11px;font-size:12.5px}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style></head><body>
 
 <div id="login"><div class="box">
@@ -334,6 +559,7 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
    <button data-tab="telegram" onclick="showTab('telegram')">✈️ Telegram</button>
    <button data-tab="whatsapp" onclick="showTab('whatsapp')">🟢 WhatsApp</button>
    <button data-tab="estado" onclick="showTab('estado')">📊 Estado</button>
+   <button data-tab="enviar" onclick="showTab('enviar')">📨 Enviar</button>
  </nav>
  <main>
   <div class="card" data-tab="msg"><h2>Aumento (markup)</h2>
@@ -455,6 +681,43 @@ _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
      <label style="display:inline-flex;align-items:center;gap:6px;width:auto"><input type="radio" name="mode_whatsapp" value="except" style="width:auto"> Excluir listas activas</label>
    </div>
    <button onclick="saveLists('whatsapp')">Guardar listas WhatsApp</button>
+  </div>
+  <div class="card" data-tab="enviar"><h2>✍️ Componer y enviar</h2>
+   <div class="hint">Escribe un mensaje y envíalo de inmediato a los canales seleccionados. Respeta las listas y exclusiones configuradas en cada canal.</div>
+   <label>Mensaje <span id="bc_count" class="charcount">0 caracteres</span></label>
+   <textarea id="bc_text" style="min-height:120px" placeholder="Escribe aquí el mensaje a difundir..." oninput="bcCount()"></textarea>
+
+   <label>Imagen (opcional)</label>
+   <div class="img-slot">
+     <div class="meta">
+       <input type="file" id="bc_imgfile" accept="image/*" onchange="bcUploadImg()">
+       <input id="bc_image_url" placeholder="…o pega una URL de imagen" style="margin-top:10px" oninput="bcPreview()">
+     </div>
+     <img id="bc_imgprev" class="preview" style="display:none">
+   </div>
+
+   <label style="margin-top:16px">Canales</label>
+   <div class="chan-row">
+     <label class="chan tg on" id="bc_chan_tg"><span class="dot"></span><input type="checkbox" id="bc_telegram" checked onchange="bcChan()" style="display:none">✈️ Telegram</label>
+     <label class="chan wa" id="bc_chan_wa"><span class="dot"></span><input type="checkbox" id="bc_whatsapp" onchange="bcChan()" style="display:none">🟢 WhatsApp</label>
+   </div>
+   <div class="hint">⚠️ El envío masivo por WhatsApp puede banear tu número. El sistema lo hace con ritmo lento (anti-baneo); úsalo con listas pequeñas.</div>
+
+   <div class="compose-actions">
+     <button id="bc_send" onclick="sendBroadcast()">Enviar ahora</button>
+     <button class="ghost" onclick="bcClear()">Limpiar</button>
+     <span class="grow"></span>
+     <span id="bc_status" class="hint" style="margin-top:0"></span>
+   </div>
+  </div>
+  <div class="card" data-tab="enviar"><h2>📡 Envíos <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
+   <div class="hint">Estado y progreso de cada difusión. Se actualiza automáticamente mientras hay envíos en curso.</div>
+   <div style="overflow-x:auto;margin-top:12px">
+     <table id="bc_table"><thead><tr><th>Mensaje</th><th>Estado</th><th>Progreso</th></tr></thead>
+       <tbody id="bc_rows"></tbody></table>
+   </div>
+   <div class="bc-empty" id="bc_empty" style="display:none">Aún no hay envíos. Crea uno en <b>Componer y enviar</b>.</div>
+   <div style="margin-top:14px"><button class="sec" onclick="loadBroadcasts()">Refrescar</button></div>
   </div>
  </main>
 </div>
@@ -603,4 +866,121 @@ function showTab(t){
   window.scrollTo(0,0); }
 function boot(){ showTab((()=>{try{return localStorage.getItem('tab')}catch(e){return null}})()||'msg'); loadCfg(); loadQueue(); loadSubs(); }
 if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } }).catch(()=>{}); }
+
+// ===== Componer y enviar (POST /api/broadcast) =====
+let BC_IMG_URL = '';           // URL devuelta tras subir un archivo a /api/image
+function bcCount(){ const n=$('bc_text').value.length; $('bc_count').textContent=n+(n===1?' carácter':' caracteres'); }
+function bcChan(){
+  $('bc_chan_tg').classList.toggle('on', $('bc_telegram').checked);
+  $('bc_chan_wa').classList.toggle('on', $('bc_whatsapp').checked);
+}
+function bcEffectiveUrl(){ return ($('bc_image_url').value || '').trim() || BC_IMG_URL || ''; }
+function bcPreview(){
+  const u=bcEffectiveUrl(), p=$('bc_imgprev');
+  if(u){ p.src=u; p.style.display='block'; } else { p.style.display='none'; p.removeAttribute('src'); }
+}
+async function bcUploadImg(){
+  const f=$('bc_imgfile').files[0]; if(!f) return;
+  $('bc_status').textContent='subiendo imagen...';
+  const r=new FileReader();
+  r.onload=async()=>{ const b64=r.result.split(',')[1];
+    try{
+      const res=await api('/api/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:b64,content_type:f.type})});
+      BC_IMG_URL = res.url || res.image_url || '';   // si el backend devuelve URL pública la usamos
+      $('bc_imgprev').src=r.result; $('bc_imgprev').style.display='block';
+      $('bc_status').textContent=''; toast('✓ Imagen lista');
+    }catch(e){ $('bc_status').textContent=''; toast('Error al subir imagen',true); }
+  };
+  r.readAsDataURL(f);
+}
+function bcClear(){
+  $('bc_text').value=''; $('bc_image_url').value=''; BC_IMG_URL='';
+  $('bc_imgfile').value=''; $('bc_imgprev').style.display='none'; $('bc_imgprev').removeAttribute('src');
+  $('bc_status').textContent=''; bcCount();
+}
+async function sendBroadcast(){
+  const text=$('bc_text').value.trim();
+  const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked;
+  if(!text && !bcEffectiveUrl()){ toast('Escribe un mensaje o adjunta una imagen',true); return; }
+  if(!tg && !wa){ toast('Elige al menos un canal',true); return; }
+  let msg='¿Enviar este mensaje ahora?';
+  if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
+  if(!confirm(msg)) return;
+  const body={ text, telegram:tg, whatsapp:wa };
+  const url=bcEffectiveUrl(); if(url) body.image_url=url;
+  const btn=$('bc_send'); btn.disabled=true; $('bc_status').textContent='encolando...';
+  try{
+    await api('/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    toast('✓ Envío encolado'); $('bc_status').textContent='';
+    bcClear();
+    showTab('enviar');          // ambas tarjetas viven en la pestaña "enviar"
+    loadBroadcasts();           // refresca la tabla de Envíos de inmediato
+  }catch(e){ $('bc_status').textContent=''; toast('Error al encolar',true); }
+  finally{ btn.disabled=false; }
+}
+// ===== Envíos: listado + polling (GET /api/broadcasts) =====
+let BC_TIMER=null;
+const BC_POLL=4000;
+const BC_STATUS={ queued:'En cola', sending:'Enviando', done:'Completado', failed:'Fallido', partial:'Parcial' };
+function bcEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function bcFmtTime(t){
+  if(!t) return '';
+  const d=new Date(typeof t==='number'? (t<1e12? t*1000 : t) : t);
+  if(isNaN(d)) return bcEsc(t);
+  return d.toLocaleString('es',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+}
+function bcChanCell(isWa, data){
+  const total=(data&&data.total)|0, sent=(data&&data.sent)|0, fail=(data&&data.failed)|0;
+  if(!total){ return `<div class="ch ${isWa?'wa':'tg'}"><span class="ic"></span><span class="muted">${isWa?'WhatsApp':'Telegram'} —</span></div>`; }
+  const done=sent+fail;
+  const pct=total? Math.round(done/total*100):0;
+  const full=done>=total;
+  const failTxt=fail? ` <span class="fail">(${fail} fallidos)</span>`:'';
+  return `<div class="ch ${isWa?'wa':'tg'}"><span class="ic"></span>`+
+    `<span class="num">${sent}/${total}${failTxt}</span>`+
+    `<span class="bar ${isWa?'wa':''} ${full&&!fail?'full':''} ${fail&&full?'err':''}"><i style="width:${pct}%"></i></span></div>`;
+}
+function bcRow(b){
+  const st=String(b.status||'queued');
+  const label=BC_STATUS[st]||st;
+  const txt=(b.text||'').trim()||'(solo imagen)';
+  const tr=document.createElement('tr');
+  tr.innerHTML=
+    `<td class="bc-msg"><b title="${bcEsc(txt)}">${bcEsc(txt)}</b>`+
+      `<div class="bc-meta"><span class="bc-src">${bcEsc(b.source||'manual')}</span><span>${bcFmtTime(b.created_at)}</span></div></td>`+
+    `<td><span class="pill ${st}">${bcEsc(label)}</span></td>`+
+    `<td><div class="chprog">${bcChanCell(false,b.telegram)}${bcChanCell(true,b.whatsapp)}</div></td>`;
+  return tr;
+}
+async function loadBroadcasts(){
+  try{
+    const r=await api('/api/broadcasts');
+    const list=r.broadcasts||[];
+    const rows=$('bc_rows'); rows.innerHTML='';
+    $('bc_empty').style.display=list.length?'none':'block';
+    let active=false;
+    list.forEach(b=>{ rows.appendChild(bcRow(b)); if(b.status==='queued'||b.status==='sending') active=true; });
+    const live=$('bc_live'); live.classList.toggle('on', active);
+    $('bc_live_t').textContent = active ? 'en vivo' : 'al día';
+  }catch(e){ /* silencioso: no romper el polling por un fallo puntual */ }
+}
+function bcStartPolling(){
+  if(BC_TIMER) return;
+  loadBroadcasts();
+  BC_TIMER=setInterval(()=>{
+    if(!CRED || document.hidden) return;            // sin sesión o pestaña del navegador oculta
+    const visible=document.querySelector('main>.card[data-tab="enviar"]')?.classList.contains('show');
+    if(visible) loadBroadcasts();
+  }, BC_POLL);
+}
+// Arranque autónomo (no toca boot()/showTab()): hook aditivo sobre showTab + DOMContentLoaded.
+(function(){
+  const _showTab=window.showTab;
+  if(typeof _showTab==='function'){
+    window.showTab=function(t){ _showTab(t); if(t==='enviar') loadBroadcasts(); };
+  }
+  const start=()=>{ if(CRED) bcStartPolling(); };
+  if(document.readyState!=='loading') start();
+  else document.addEventListener('DOMContentLoaded', start);
+})();
 </script></body></html>"""

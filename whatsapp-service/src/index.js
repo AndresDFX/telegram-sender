@@ -2,6 +2,7 @@
 // en DynamoDB), expone el QR para vincular desde el panel, lista contactos y envía las
 // listas reenviadas desde Telegram. Protegido con un bearer token compartido.
 import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
+import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb'
 import express from 'express'
 import pino from 'pino'
 import qrcode from 'qrcode'
@@ -403,9 +404,34 @@ function resolverTargets(mode, list_ids, exclude) {
   })
 }
 
-async function enviarLote(text, image_url, targets) {
-  let sent = 0
-  let failed = 0
+// Reporte de progreso del job (estado) al store de broadcasts en DynamoDB. Best-effort:
+// nunca debe romper el envío. El nombre de la tabla y el id llegan en el payload de /send.
+const ddb = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
+async function bcSetTotal(table, id, total) {
+  if (!table || !id) return
+  try {
+    await ddb.send(new UpdateItemCommand({
+      TableName: table, Key: { id: { S: id } },
+      UpdateExpression: 'SET wa_total = :t, wa_started = :b',
+      ExpressionAttributeValues: { ':t': { N: String(total) }, ':b': { BOOL: true } },
+    }))
+  } catch (e) { log.error({ err: String(e) }, 'bcSetTotal falló') }
+}
+async function bcIncr(table, id, sent, failed) {
+  if (!table || !id || (!sent && !failed)) return
+  try {
+    await ddb.send(new UpdateItemCommand({
+      TableName: table, Key: { id: { S: id } },
+      UpdateExpression: 'ADD wa_sent :s, wa_failed :f',
+      ExpressionAttributeValues: { ':s': { N: String(sent) }, ':f': { N: String(failed) } },
+    }))
+  } catch (e) { log.error({ err: String(e) }, 'bcIncr falló') }
+}
+
+async function enviarLote(text, image_url, targets, track) {
+  const { table, id } = track || {}
+  await bcSetTotal(table, id, targets.length)
+  let sent = 0, failed = 0, sentDelta = 0, failedDelta = 0
   for (const jid of targets) {
     try {
       if (image_url) {
@@ -414,13 +440,17 @@ async function enviarLote(text, image_url, targets) {
       } else {
         await sock.sendMessage(jid, { text })
       }
-      sent++
+      sent++; sentDelta++
       await new Promise((r) => setTimeout(r, SEND_DELAY_MS)) // anti-baneo
     } catch (e) {
-      failed++
+      failed++; failedDelta++
       log.error({ jid, err: String(e) }, 'fallo enviando')
     }
+    if (sentDelta + failedDelta >= 20) { // progreso parcial cada ~20
+      await bcIncr(table, id, sentDelta, failedDelta); sentDelta = 0; failedDelta = 0
+    }
   }
+  await bcIncr(table, id, sentDelta, failedDelta) // resto final
   log.info({ sent, failed, total: targets.length }, 'lote WhatsApp enviado')
 }
 
@@ -428,10 +458,12 @@ async function enviarLote(text, image_url, targets) {
 // contactos con delay tarda minutos; el backend no debe esperar).
 app.post('/send', auth, (req, res) => {
   if (!connected || !sock) return res.status(409).json({ error: 'whatsapp_no_conectado' })
-  const { text = '', image_url = null, exclude = [], mode = 'all', list_ids = [] } = req.body || {}
+  const { text = '', image_url = null, exclude = [], mode = 'all', list_ids = [], broadcast_id = null, broadcasts_table = null } = req.body || {}
   const targets = resolverTargets(mode, list_ids, exclude)
   res.status(202).json({ accepted: true, targets: targets.length, mode })
-  enviarLote(text, image_url, targets).catch((e) => log.error({ err: String(e) }, 'enviarLote falló'))
+  enviarLote(text, image_url, targets, { table: broadcasts_table, id: broadcast_id }).catch((e) =>
+    log.error({ err: String(e) }, 'enviarLote falló')
+  )
 })
 
 app.listen(PORT, () => log.info(`whatsapp-service en :${PORT}`))

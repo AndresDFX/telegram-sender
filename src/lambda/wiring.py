@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from adapters import config
 from adapters.dynamodb import (
+    DynamoDbBroadcastStore,
     DynamoDbConfigStore,
     DynamoDbDedupStore,
     DynamoDbHighWaterMarkStore,
@@ -66,7 +67,13 @@ def _broadcast_list() -> BroadcastList:
         deliver = DeliverBatch(_sender(cfg), recipients, delay=config.send_delay_seconds())
         queue = InlineBroadcastQueue(lambda text, ids, image_url=None: deliver(text, ids, image_url))
     whatsapp = HttpWhatsAppForwarder(cfg.get("whatsapp_service_url", ""), cfg.get("whatsapp_token", ""))
-    return BroadcastList(recipients, queue, store, whatsapp=whatsapp, image_store=S3ImageStore())
+    return BroadcastList(
+        recipients, queue, store, whatsapp=whatsapp, image_store=S3ImageStore(), broadcasts=build_broadcast_store()
+    )
+
+
+def build_broadcast_store() -> DynamoDbBroadcastStore:
+    return DynamoDbBroadcastStore()
 
 
 def build_dedup() -> DynamoDbDedupStore:

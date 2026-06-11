@@ -39,7 +39,12 @@ class SqsBroadcastQueue(BroadcastQueue):
         return boto3.client("sqs", **kwargs)
 
     def encolar(
-        self, text: str, chat_ids: Sequence[str], image_url: str | None = None, image_key: str | None = None
+        self,
+        text: str,
+        chat_ids: Sequence[str],
+        image_url: str | None = None,
+        image_key: str | None = None,
+        broadcast_id: str | None = None,
     ) -> int:
         if not self._url:
             raise RuntimeError("BROADCAST_QUEUE_URL no configurado")
@@ -59,6 +64,7 @@ class SqsBroadcastQueue(BroadcastQueue):
                     "batch_index": index,
                     "image_url": image_url,
                     "image_key": image_key,
+                    "broadcast_id": broadcast_id,
                 }
             )
             attempt = 0
@@ -83,7 +89,12 @@ class InlineBroadcastQueue(BroadcastQueue):
         self._deliver = deliver
 
     def encolar(
-        self, text: str, chat_ids: Sequence[str], image_url: str | None = None, image_key: str | None = None
+        self,
+        text: str,
+        chat_ids: Sequence[str],
+        image_url: str | None = None,
+        image_key: str | None = None,
+        broadcast_id: str | None = None,
     ) -> int:
         self._deliver(text, list(chat_ids), image_url)  # inline (dev) usa solo image_url
         return 1

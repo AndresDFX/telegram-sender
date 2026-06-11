@@ -263,3 +263,106 @@ class DynamoDbConfigStore(ConfigStore):
                 ExpressionAttributeValues=values,
             )
         return self.get()
+
+
+class DynamoDbBroadcastStore:
+    """Estados de los envíos (jobs): encolado→enviando→enviado/parcial, con progreso por canal.
+
+    El estado se DERIVA de los contadores al listar, así el worker (Telegram) y el servicio
+    (WhatsApp) solo necesitan incrementar contadores de forma atómica (ADD), sin coordinarse.
+    """
+
+    def __init__(self, table_name: str | None = None, endpoint: str | None = None):
+        self._name = table_name or os.environ.get("BROADCASTS_TABLE", "Broadcasts")
+        self._endpoint = endpoint or os.environ.get("DYNAMODB_ENDPOINT")
+
+    def _t(self):
+        return _table(self._name, self._endpoint)
+
+    def crear(self, broadcast_id: str, text: str, source: str, channels, tg_total: int = 0, ttl_days: int = 30) -> None:
+        now = int(time.time())
+        self._t().put_item(
+            Item={
+                "id": broadcast_id,
+                "created_at": now,
+                "text": (text or "")[:280],
+                "source": source,
+                "channels": list(channels),
+                "tg_total": int(tg_total),
+                "tg_sent": 0,
+                "tg_failed": 0,
+                "wa_total": 0,
+                "wa_sent": 0,
+                "wa_failed": 0,
+                "wa_started": False,
+                "ttl": now + ttl_days * 86400,
+            }
+        )
+
+    def incr_telegram(self, broadcast_id: str, sent: int = 0, failed: int = 0) -> None:
+        self._add(broadcast_id, "ADD tg_sent :s, tg_failed :f", {":s": int(sent), ":f": int(failed)})
+
+    def set_whatsapp_total(self, broadcast_id: str, total: int) -> None:
+        from decimal import Decimal
+
+        self._t().update_item(
+            Key={"id": broadcast_id},
+            UpdateExpression="SET wa_total = :t, wa_started = :b",
+            ExpressionAttributeValues={":t": Decimal(int(total)), ":b": True},
+        )
+
+    def incr_whatsapp(self, broadcast_id: str, sent: int = 0, failed: int = 0) -> None:
+        self._add(broadcast_id, "ADD wa_sent :s, wa_failed :f", {":s": int(sent), ":f": int(failed)})
+
+    def _add(self, broadcast_id: str, expr: str, values: dict) -> None:
+        from decimal import Decimal
+
+        try:
+            self._t().update_item(
+                Key={"id": broadcast_id},
+                UpdateExpression=expr,
+                ExpressionAttributeValues={k: Decimal(v) for k, v in values.items()},
+            )
+        except Exception:
+            pass  # el tracking de estado nunca debe romper el envío
+
+    @staticmethod
+    def _estado(j: dict) -> str:
+        chans = j.get("channels", []) or []
+        tg_total, tg_done = int(j.get("tg_total", 0)), int(j.get("tg_sent", 0)) + int(j.get("tg_failed", 0))
+        wa_total, wa_done = int(j.get("wa_total", 0)), int(j.get("wa_sent", 0)) + int(j.get("wa_failed", 0))
+        wa_pendiente = ("whatsapp" in chans) and not j.get("wa_started")
+        total, done = tg_total + wa_total, tg_done + wa_done
+        failed = int(j.get("tg_failed", 0)) + int(j.get("wa_failed", 0))
+        if done == 0 and not wa_pendiente:
+            return "queued"
+        if wa_pendiente or total == 0 or done < total:
+            return "sending"
+        return "partial" if failed > 0 else "done"
+
+    def listar(self, limit: int = 30) -> list[dict]:
+        items = self._t().scan().get("Items", [])
+        items.sort(key=lambda j: int(j.get("created_at", 0)), reverse=True)
+        salida = []
+        for j in items[:limit]:
+            salida.append(
+                {
+                    "id": j.get("id"),
+                    "created_at": int(j.get("created_at", 0)),
+                    "text": j.get("text", ""),
+                    "source": j.get("source", ""),
+                    "channels": list(j.get("channels", [])),
+                    "status": self._estado(j),
+                    "telegram": {
+                        "total": int(j.get("tg_total", 0)),
+                        "sent": int(j.get("tg_sent", 0)),
+                        "failed": int(j.get("tg_failed", 0)),
+                    },
+                    "whatsapp": {
+                        "total": int(j.get("wa_total", 0)),
+                        "sent": int(j.get("wa_sent", 0)),
+                        "failed": int(j.get("wa_failed", 0)),
+                    },
+                }
+            )
+        return salida

@@ -251,6 +251,27 @@ Resources:
         - Key: Environment
           Value: !Ref EnvironmentName
 
+  # Estados de los envíos (jobs): progreso por canal + TTL para auto-expirar el historial.
+  BroadcastsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${EnvironmentName}-broadcasts"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
   # --- Cola de broadcast + DLQ -------------------------------------------------
   BroadcastDLQ:
     Type: AWS::SQS::Queue
@@ -347,6 +368,11 @@ Resources:
                   - !GetAtt SubscribersTable.Arn
               - Effect: Allow
                 Action:
+                  - dynamodb:UpdateItem # progreso del job (estado del envío)
+                Resource:
+                  - !GetAtt BroadcastsTable.Arn
+              - Effect: Allow
+                Action:
                   - sqs:ReceiveMessage
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
@@ -419,6 +445,7 @@ Resources:
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
           SEND_DELAY_SECONDS: !Ref SendDelaySeconds
           IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
+          BROADCASTS_TABLE: !Ref BroadcastsTable
           SEND_MODE: !Ref SendMode
           TELETHON_API_ID: !Ref TelethonApiId
           TELETHON_API_HASH: !Ref TelethonApiHash
@@ -477,6 +504,11 @@ Resources:
                   - !GetAtt ConfigTable.Arn
               - Effect: Allow
                 Action:
+                  - dynamodb:PutItem # crear el job del envío (estado)
+                Resource:
+                  - !GetAtt BroadcastsTable.Arn
+              - Effect: Allow
+                Action:
                   - sqs:SendMessage
                 Resource:
                   - !GetAtt BroadcastQueue.Arn
@@ -508,6 +540,7 @@ Resources:
           CONFIG_TABLE: !Ref ConfigTable
           BROADCAST_QUEUE_URL: !Ref BroadcastQueue
           BROADCAST_BATCH_SIZE: !Ref BroadcastBatchSize
+          BROADCASTS_TABLE: !Ref BroadcastsTable
           MARKUP_PERCENTAGE: !Ref MarkupPercentage
           SEND_MODE: !Ref SendMode
           TELETHON_API_ID: !Ref TelethonApiId
@@ -572,12 +605,20 @@ Resources:
               - Effect: Allow
                 Action:
                   - sqs:GetQueueAttributes # profundidad de cola/DLQ
+                  - sqs:SendMessage # encolar envío manual
                 Resource:
                   - !GetAtt BroadcastQueue.Arn
                   - !GetAtt BroadcastDLQ.Arn
               - Effect: Allow
                 Action:
+                  - dynamodb:PutItem # crear job de envío manual
+                  - dynamodb:Scan # listar envíos (estados)
+                Resource:
+                  - !GetAtt BroadcastsTable.Arn
+              - Effect: Allow
+                Action:
                   - s3:PutObject # subir la imagen de la lista
+                  - s3:GetObject # firmar URL temporal (adjuntar imagen en envío manual)
                 Resource:
                   - !Sub "arn:aws:s3:::${LambdaCodeS3Bucket}/images/*"
 
@@ -601,6 +642,7 @@ Resources:
           SUBSCRIBERS_STATUS_INDEX: StatusIndex
           BROADCAST_QUEUE_URL: !Ref BroadcastQueue
           BROADCAST_DLQ_URL: !Ref BroadcastDLQ
+          BROADCASTS_TABLE: !Ref BroadcastsTable
           IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
           ADMIN_USER: !Ref AdminUser
           ADMIN_PASSWORD: !Ref AdminPassword

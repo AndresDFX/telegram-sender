@@ -29,6 +29,8 @@ class HttpWhatsAppForwarder(WhatsAppForwarder):
         *,
         mode: str = "all",
         list_ids: list[str] | None = None,
+        broadcast_id: str | None = None,
+        broadcasts_table: str | None = None,
     ) -> dict:
         if not self._url or not self._token:
             return {"skipped": "whatsapp no configurado"}
@@ -39,6 +41,8 @@ class HttpWhatsAppForwarder(WhatsAppForwarder):
                 "exclude": list(exclude or []),
                 "mode": mode or "all",
                 "list_ids": list(list_ids or []),
+                "broadcast_id": broadcast_id,
+                "broadcasts_table": broadcasts_table,
             }
         ).encode()
         req = urllib.request.Request(
@@ -60,5 +64,7 @@ class NullWhatsAppForwarder(WhatsAppForwarder):
         *,
         mode: str = "all",
         list_ids: list[str] | None = None,
+        broadcast_id: str | None = None,
+        broadcasts_table: str | None = None,
     ) -> dict:
         return {"skipped": "disabled"}
