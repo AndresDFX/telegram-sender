@@ -1418,7 +1418,9 @@ async function sendBroadcast(){
   const btn=$('bc_send'); btn.disabled=true; $('bc_status').textContent='encolando...';
   try{
     await api('/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    toast('✓ Envío encolado'); $('bc_status').textContent='';
+    // OJO: "programado" != "entregado". El envío se fracciona y la ENTREGA real se
+    // confirma abajo en la tabla de Envíos (queda en cola → enviando → completado).
+    toast('✓ Programado — la entrega se confirma abajo en Envíos','info'); $('bc_status').textContent='';
     bcClear();
     showTab('enviar');          // ambas tarjetas viven en la pestaña "enviar"
     loadBroadcasts();           // refresca la tabla de Envíos de inmediato

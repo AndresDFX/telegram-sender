@@ -425,6 +425,11 @@ Resources:
                   - !GetAtt SubscribersTable.Arn
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem # leer config en runtime (modo de envío, credenciales, delays)
+                Resource:
+                  - !GetAtt ConfigTable.Arn
+              - Effect: Allow
+                Action:
                   - dynamodb:UpdateItem # progreso del job (estado del envío)
                 Resource:
                   - !GetAtt BroadcastsTable.Arn
@@ -501,6 +506,11 @@ Resources:
           # El worker solo envía y marca inactivos (update_item en la tabla base);
           # no consulta el GSI, por eso no necesita SUBSCRIBERS_STATUS_INDEX.
           SUBSCRIBERS_TABLE: !Ref SubscribersTable
+          # CONFIG_TABLE es OBLIGATORIO: build_deliver_batch() lee la config en runtime
+          # (modo de envío, credenciales userbot, delays). Sin él, DynamoDbConfigStore caía
+          # al nombre por defecto "Config" -> AccessDenied -> el worker fallaba en _ensure y
+          # NINGÚN envío de Telegram se entregaba (fallo silencioso -> DLQ, sin marcar fallido).
+          CONFIG_TABLE: !Ref ConfigTable
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
           SEND_DELAY_SECONDS: !Ref SendDelaySeconds
           IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
