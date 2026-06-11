@@ -74,5 +74,23 @@ class TelethonContactsTests(unittest.TestCase):
         rec.marcar_inactivo("123")  # no-op, no debe fallar
 
 
+class CachedContactsTests(unittest.TestCase):
+    def test_listar_todos_propaga_telefono(self):
+        from adapters.telethon_user import CachedContacts
+
+        class FakeCfg:
+            def get_contacts(self):
+                return [
+                    {"id": "123", "name": "Ana", "phone": "573188468892"},
+                    {"id": "456", "name": "Beto"},  # sin teléfono -> ""
+                ]
+
+        cc = CachedContacts(FakeCfg())
+        todos = cc.listar_todos()
+        self.assertEqual(todos[0], {"chatId": "123", "name": "Ana", "phone": "573188468892"})
+        self.assertEqual(todos[1]["phone"], "")  # tolera contactos viejos sin teléfono
+        self.assertEqual(cc.listar_activos(), ["123", "456"])
+
+
 if __name__ == "__main__":
     unittest.main()

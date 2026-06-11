@@ -982,8 +982,10 @@ img.preview{box-shadow:var(--sh-sm)}
    <button class="sec" onclick="saveCfg()">Guardar URL</button>
   </div>
   <div class="card" data-tab="estado"><h2>Cola de mensajes</h2>
-   <div class="stats"><div class="stat"><b id="q_b">–</b><span>en cola</span></div>
+   <div class="stats"><div class="stat"><b id="q_p">–</b><span>lotes programados pendientes</span></div>
+     <div class="stat"><b id="q_b">–</b><span>en cola SQS (en vuelo)</span></div>
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
+   <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>⏱️ Programación</b>.</div>
    <button class="sec" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
   </div>
   <div class="card" data-tab="telegram"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
@@ -1207,11 +1209,25 @@ async function uploadImg(){ const f=$('imgfile').files[0]; if(!f) return;
     try{ await api('/api/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:b64,content_type:f.type})});
       $('imgprev').src=r.result; $('imgprev').style.display='block'; toast('✓ Imagen subida'); }
     catch(e){ toast('Error al subir',true); } }; r.readAsDataURL(f); }
-async function loadQueue(){ const q=await api('/api/queue'); $('q_b').textContent=q.broadcast; $('q_d').textContent=q.dlq; }
+async function loadQueue(){
+  try{ const q=await api('/api/queue'); $('q_b').textContent=q.broadcast; $('q_d').textContent=q.dlq; }catch(e){}
+  try{ const r=await api('/api/plans'); let pend=0;
+    (r.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running'){
+      pend += Math.max(0,(p.tg.batches|0)-(p.tg.next|0)) + Math.max(0,(p.wa.batches|0)-(p.wa.next|0)); }});
+    if($('q_p')) $('q_p').textContent=pend;
+  }catch(e){ if($('q_p')) $('q_p').textContent='–'; }
+}
+let Q_TIMER=null;
+function qStartPolling(){
+  if(Q_TIMER) return; loadQueue();
+  Q_TIMER=setInterval(()=>{ if(!CRED||document.hidden) return;
+    const vis=document.querySelector('main>.card[data-tab="estado"]')?.classList.contains('show');
+    if(vis) loadQueue(); }, BC_POLL);
+}
 let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0;
 const PAGE_SIZE=50;
 function filtered(){ if(!FILTER) return DEST; const q=FILTER.toLowerCase();
-  return DEST.filter(s=> (s.name||'').toLowerCase().includes(q) || String(s.chatId||'').toLowerCase().includes(q)); }
+  return DEST.filter(s=> (s.name||'').toLowerCase().includes(q) || String(s.chatId||'').toLowerCase().includes(q) || String(s.phone||'').toLowerCase().includes(q)); }
 function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
   if(PAGE>=pages) PAGE=pages-1; if(PAGE<0) PAGE=0;
   const slice=f.slice(PAGE*PAGE_SIZE,(PAGE+1)*PAGE_SIZE);
@@ -1519,8 +1535,8 @@ function plStartPolling(){
     if(vis) loadPlans(); }, BC_POLL);
 }
 (function(){ const _s=window.showTab;
-  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='prog') loadPlans(); }; }
-  const start=()=>{ if(CRED) plStartPolling(); };
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='prog') loadPlans(); if(t==='estado') loadQueue(); }; }
+  const start=()=>{ if(CRED){ plStartPolling(); qStartPolling(); } };
   if(document.readyState!=='loading') start();
   else document.addEventListener('DOMContentLoaded', start);
 })();

@@ -4,12 +4,17 @@ userbot, refresca el caché de contactos para que el panel los muestre rápido."
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import wiring
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Telethon GetContacts es caro y dispara FloodWait si se llama seguido; refrescamos el
+# caché como mucho cada 30 min (los contactos casi no cambian).
+_CONTACTS_TTL = 1800
 
 poll = None
 config_store = None
@@ -27,6 +32,11 @@ def _refresh_contacts() -> None:
     fuente = wiring.build_contacts_source()  # None en modo bot
     if fuente is None:
         return
+    try:
+        if int(time.time()) - config_store.contacts_refreshed_at() < _CONTACTS_TTL:
+            return  # refrescado hace poco: no llamar a GetContacts (evita FloodWait)
+    except Exception:
+        pass  # si no se puede leer el timestamp, intentamos refrescar igual
     try:
         config_store.set_contacts(fuente.listar())
     except Exception:

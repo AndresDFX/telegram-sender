@@ -64,10 +64,18 @@ def _recipients(cfg: dict):
     return ContactRecipients(_telethon_contacts(cfg)) if _es_userbot(cfg) else DynamoDbSubscriberRepository()
 
 
+def _recipients_listado(cfg: dict, store):
+    """Destinatarios para LISTAR (difusión/panel). En userbot usa la CACHÉ (DynamoDB),
+    NUNCA Telethon en vivo: GetContacts en vivo dispara FloodWait y tumbaba el envío/preview
+    del panel (HTTP 500 'internal'). El envío real lo hace el worker, sí en vivo, por mensaje."""
+    return CachedContacts(store) if _es_userbot(cfg) else DynamoDbSubscriberRepository()
+
+
 def _broadcast_list() -> BroadcastList:
     store = build_config_store()
     cfg = store.get()
-    recipients = _recipients(cfg)
+    # Para LISTAR destinatarios usamos la caché (evita FloodWait de Telethon en el panel/difusión).
+    recipients = _recipients_listado(cfg, store)
     if config.broadcast_queue_url():
         queue = SqsBroadcastQueue()
     else:

@@ -102,7 +102,10 @@ class TelethonContacts(_TelethonBase):
         contactos = []
         for u in getattr(result, "users", []):
             nombre = " ".join(filter(None, [getattr(u, "first_name", ""), getattr(u, "last_name", "")]))
-            contactos.append({"id": str(u.id), "name": nombre or (getattr(u, "username", "") or str(u.id))})
+            telefono = str(getattr(u, "phone", "") or "")  # para buscar/mostrar por número en el panel
+            contactos.append(
+                {"id": str(u.id), "name": nombre or (getattr(u, "username", "") or str(u.id)), "phone": telefono}
+            )
         return contactos
 
 
@@ -116,7 +119,7 @@ class ContactRecipients:
         return [c["id"] for c in self._contacts.listar()]
 
     def listar_todos(self) -> list[dict]:
-        return [{"chatId": c["id"], "name": c["name"]} for c in self._contacts.listar()]
+        return [{"chatId": c["id"], "name": c["name"], "phone": c.get("phone", "")} for c in self._contacts.listar()]
 
     def registrar(self, chat_id: str, status: str) -> None:
         pass  # no aplica a contactos de una cuenta
@@ -138,7 +141,14 @@ class CachedContacts:
         return [str(c.get("id") or c.get("chatId")) for c in self._items()]
 
     def listar_todos(self) -> list[dict]:
-        return [{"chatId": str(c.get("id") or c.get("chatId")), "name": c.get("name", "")} for c in self._items()]
+        return [
+            {
+                "chatId": str(c.get("id") or c.get("chatId")),
+                "name": c.get("name", ""),
+                "phone": str(c.get("phone", "") or ""),
+            }
+            for c in self._items()
+        ]
 
     def registrar(self, chat_id: str, status: str) -> None:
         pass

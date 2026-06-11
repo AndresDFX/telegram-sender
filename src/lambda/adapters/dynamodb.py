@@ -280,7 +280,18 @@ class DynamoDbConfigStore(ConfigStore):
         return list(item.get("items", []))
 
     def set_contacts(self, contactos: list[dict]) -> None:
-        self._t().put_item(Item={"configId": self._CONTACTS_ID, "items": contactos})
+        self._t().put_item(
+            Item={"configId": self._CONTACTS_ID, "items": contactos, "refreshed_at": int(time.time())}
+        )
+
+    def contacts_refreshed_at(self) -> int:
+        """Epoch del último refresco del caché de contactos (0 si nunca). Para no llamar a
+        Telethon GetContacts con demasiada frecuencia (dispara FloodWait)."""
+        item = self._t().get_item(Key={"configId": self._CONTACTS_ID}).get("Item") or {}
+        try:
+            return int(item.get("refreshed_at", 0))
+        except (TypeError, ValueError):
+            return 0
 
     # Campos numéricos: DynamoDB no acepta float de Python, se guardan como Decimal.
     _NUMERICOS = (
