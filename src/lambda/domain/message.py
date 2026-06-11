@@ -37,6 +37,34 @@ DEFAULT_LOCATION_PATTERNS = (
 )
 
 
+# Teléfono colombiano: móvil 3XX o fijo 60X (10 dígitos nacionales). Para NO borrar por error
+# referencias/costos/cantidades (números de 10 dígitos PEGADOS sin formato), se exige una
+# SEÑAL de teléfono: separador entre grupos, indicativo +57, paréntesis, o una palabra de
+# contacto adyacente. Un número de 10 dígitos pelado y sin etiqueta NO se toca (es ambiguo).
+_AREA = r"(?:3\d{2}|60\d)"          # móvil 3XX o fijo 60X
+_S = r"[\s.\-]"                     # separadores admitidos (espacio, punto, guion)
+
+# (1) Teléfono FORMATEADO: +57, paréntesis, o al menos un separador entre los grupos.
+_TEL_FORMATEADO = (
+    r"(?<![\d$\U0001F4B2\U0001F4B8])"        # no tras dígito ni símbolo de moneda
+    r"(?:"
+    rf"\+?\s?57{_S}*\(?\s*{_AREA}\s*\)?{_S}*\d{{3}}{_S}*\d{{4}}"   # indicativo +57/57
+    rf"|\(\s*{_AREA}\s*\){_S}*\d{{3}}{_S}*\d{{4}}"                  # (área) entre paréntesis
+    rf"|{_AREA}{_S}+\d{{3}}{_S}*\d{{4}}"                            # >=1 separador tras el área
+    rf"|{_AREA}{_S}*\d{{3}}{_S}+\d{{4}}"                            # >=1 separador antes del final
+    r")"
+    r"(?!\d)"
+)
+# (2) Teléfono ETIQUETADO: palabra de contacto inmediatamente seguida del número (aunque vaya
+# pegado). Cubre "Cel 3001234567", "WhatsApp: 3001234567", "Pedidos 3001234567".
+_KW_CONTACTO = r"(?:whats?app|wsp|wpp|cel(?:ular)?|tel[eé]fonos?|tel|pedidos?|domicilios?|contacto|cont[aá]ctanos|ll[aá]manos)"
+_TEL_ETIQUETADO = (
+    rf"\b{_KW_CONTACTO}\b[\s:.\-]*"
+    rf"(?:\+?57{_S}*)?\(?\s*{_AREA}\s*\)?{_S}*\d{{3}}{_S}*\d{{4}}(?!\d)"
+)
+DEFAULT_PHONE_PATTERNS = (_TEL_FORMATEADO, _TEL_ETIQUETADO)
+
+
 def quitar_lineas(texto: str, patrones: Sequence[str]) -> str:
     """Elimina las líneas que casen (case-insensitive) con cualquiera de los patrones."""
     if not patrones:
@@ -56,6 +84,7 @@ def componer_mensaje(
     footer: str = "",
 ) -> str:
     limpio = quitar_lineas(texto, strip_patterns)
+    limpio = quitar_lineas(limpio, DEFAULT_PHONE_PATTERNS)  # quita líneas con teléfono CO (siempre)
     con_markup = aplicar_markup(limpio, markup_percentage, currency_symbols=currency_symbols)
     if footer:
         con_markup = f"{con_markup}\n\n{footer}"

@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "lambda"))
 
-from domain.message import componer_mensaje, quitar_lineas  # noqa: E402
+from domain.message import DEFAULT_PHONE_PATTERNS, componer_mensaje, quitar_lineas  # noqa: E402
 
 LISTA = """IPRO PARTS
 📣 UBICADOS EN EL C.C LA FORTUNA
@@ -84,6 +84,40 @@ class ComponerMensajeTests(unittest.TestCase):
     def test_sin_footer(self):
         out = componer_mensaje("A06 $100.000", markup_percentage=15, strip_patterns=(), footer="")
         self.assertEqual(out, "A06 $115.000")
+
+
+class TelefonoTests(unittest.TestCase):
+    def _quita(self, linea):
+        # True si la línea (con un producto debajo) se elimina por contener teléfono.
+        out = quitar_lineas(linea + "\nA06 4-64GB", DEFAULT_PHONE_PATTERNS)
+        return linea not in out and "A06 4-64GB" in out
+
+    def test_quita_telefonos_formateados_o_etiquetados(self):
+        for tel in (
+            "320 123 4567", "300-123-4567", "320.123.4567", "300  123  4567",  # formateados
+            "300 - 123 - 4567", "WhatsApp +57 300 123 4567", "+573001234567",   # +57 / espaciado
+            "Tel: (601) 234 5678", "Cel 350 1234567", "57 311 222 3344",        # parens / etiqueta
+            "📞 Pedidos: 3201234567", "Cel 3001234567", "WhatsApp 3001234567",   # etiqueta + pelado
+        ):
+            self.assertTrue(self._quita(tel), f"no quitó: {tel!r}")
+
+    def test_conserva_numeros_ambiguos_sin_senal_de_telefono(self):
+        # 10 dígitos PEGADOS sin separador/indicativo/etiqueta: refs/costos/cantidades -> NO tocar
+        for linea in (
+            "Item 6012345678", "REF 3001234567", "Costo 3123456789", "3001234567",
+            "A06 4-64GB $325.000", "iPhone 13 256GB $3.200.000", "REDMI 12 6-128GB",
+            "INTEL CORE i5", "REF 1234567890", "05/06/2026",
+        ):
+            out = quitar_lineas(linea + "\nMARCA", DEFAULT_PHONE_PATTERNS)
+            self.assertIn(linea, out, f"borró por error: {linea!r}")
+
+    def test_componer_quita_telefono_y_conserva_lista(self):
+        src = "IPRO PARTS\n📲 Pedidos: 320 123 4567\nSAMSUNG\nA06 4-64GB $325.000"
+        out = componer_mensaje(src, markup_percentage=15, footer="")
+        self.assertNotIn("320 123 4567", out)
+        self.assertNotIn("Pedidos", out)               # la línea de contacto desaparece
+        self.assertIn("SAMSUNG", out)
+        self.assertIn("A06 4-64GB $374.000", out)
 
 
 if __name__ == "__main__":
