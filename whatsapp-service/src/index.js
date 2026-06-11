@@ -274,7 +274,7 @@ app.get('/', (req, res) =>
   res
     .type('html')
     .send(
-      '<h2>Sender · servicio WhatsApp</h2>' +
+      '<h2>Replica · servicio WhatsApp</h2>' +
         `<p>Servicio activo ✓ · ${connected ? 'WhatsApp conectado' : 'WhatsApp NO conectado (escanea el QR)'}</p>` +
         '<p>Endpoints: <code>/health</code> (público), <code>/status</code>, <code>/contacts</code>, <code>/send</code> (requieren token).</p>' +
         '<p>Configura este servicio (URL + token) desde el panel admin y escanea el QR desde ahí.</p>'
@@ -290,9 +290,9 @@ app.get('/qr', (req, res) => {
   res.type('html').send(
     '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<meta name="referrer" content="no-referrer">' + // evita filtrar el token por Referer
-      '<title>Vincular WhatsApp · Sender</title>' +
+      '<title>Vincular WhatsApp · Replica</title>' +
       '<body style="font-family:system-ui;text-align:center;background:#0b1020;color:#e6ebff;padding:28px;margin:0">' +
-      '<h2>Vincular WhatsApp · Sender</h2><div id="s">cargando…</div>' +
+      '<h2>Vincular WhatsApp · Replica</h2><div id="s">cargando…</div>' +
       '<img id="q" style="width:300px;height:300px;margin:18px;background:#fff;border-radius:10px;padding:10px;object-fit:contain"/>' +
       '<div id="hint" style="color:#8b96b8">WhatsApp → Dispositivos vinculados → Vincular un dispositivo</div>' +
       '<script>const tok=new URLSearchParams(location.search).get("token");' +

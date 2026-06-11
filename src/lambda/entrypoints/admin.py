@@ -304,7 +304,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 _PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sender · Panel</title>
+<title>Replica · Panel</title>
 <style>
 :root{
   --bg:#0a0e1a; --bg2:#0d1322;
@@ -563,11 +563,224 @@ main>.card.show{display:block}
   .nav button{padding:7px 11px;font-size:12.5px}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ===== Replica · refinamiento UI/UX (rebrand) ===== */
+/* ============================================================
+   REPLICA · capa de refinamiento UI/UX  (vanilla, aditiva)
+   Compatible con tokens y clases existentes del panel (admin.py).
+   Sin cambios de JS: reacciona a clases/estados ya presentes o
+   que el front puede alternar con classList.
+   Tokens verificados en :root del panel: --bg --card --elev --bd
+   --bd2 --tx --tx2 --mut --mut2 --ac --ac2 --ok --warn --bad
+   --info --r --r-sm --ring.
+   ============================================================ */
+
+:root{
+  --ac-soft:rgba(99,102,241,.14);
+  --ac2-soft:rgba(34,211,238,.12);
+  --ok-soft:rgba(52,211,153,.12);
+  --warn-soft:rgba(251,191,36,.12);
+  --bad-soft:rgba(251,113,133,.12);
+  --r-lg:18px;
+  --tx3:#9aa4c6;            /* secundario un punto mas contrastado que --mut */
+  --sh-sm:0 6px 18px -10px rgba(0,0,0,.6);
+}
+
+/* ------------------------------------------------------------
+   1) FIX: filas de listas con separador #eee (roto en oscuro)
+   El JS pinta inline border-bottom:1px solid #eee (admin.py L854);
+   lo anulamos y convertimos cada fila en un item legible.
+   ------------------------------------------------------------ */
+#tg_lists>div, #wa_lists>div{
+  border-bottom:1px solid var(--bd) !important;
+  padding:11px 12px !important;
+  margin:0 -12px;
+  transition:background .12s;
+  row-gap:8px !important;
+}
+#tg_lists>div:hover, #wa_lists>div:hover{ background:rgba(255,255,255,.025); }
+#tg_lists>div:last-child, #wa_lists>div:last-child{ border-bottom:0 !important; }
+#tg_lists>div b, #wa_lists>div b{ color:var(--tx); }
+/* el "N miembros" como chip discreto */
+#tg_lists>div .hint, #wa_lists>div .hint{
+  background:var(--elev);border:1px solid var(--bd);
+  padding:2px 9px;border-radius:999px;margin-top:0;font-weight:600;
+  color:var(--tx3);
+}
+/* botones de fila mas compactos para que respiren */
+#tg_lists>div button, #wa_lists>div button{ padding:7px 12px;font-size:12.5px; }
+
+/* ------------------------------------------------------------
+   2) CALLOUT / banner de advertencia reutilizable
+   Uso sugerido: <div class="callout warn">...</div>
+   Fallback automatico: realza el ultimo .hint de la tarjeta de
+   WhatsApp (aviso de baneo) para que no se lea como texto plano.
+   ------------------------------------------------------------ */
+.callout{
+  display:flex;gap:10px;align-items:flex-start;
+  border:1px solid var(--bd2);border-left-width:3px;
+  background:var(--elev);border-radius:var(--r-sm);
+  padding:12px 14px;margin:12px 0;font-size:12.5px;line-height:1.55;color:var(--tx2);
+}
+.callout::before{content:"i";flex:none;width:18px;height:18px;border-radius:50%;
+  display:grid;place-items:center;font-weight:800;font-size:11px;
+  background:var(--info);color:#04121f;margin-top:1px}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+.callout.warn::before{content:"!";background:var(--warn);color:#3a2c00}
+.callout.danger{border-left-color:var(--bad);background:var(--bad-soft)}
+.callout.danger::before{content:"!";background:var(--bad);color:#2a0a0f}
+.callout.ok{border-left-color:var(--ok);background:var(--ok-soft)}
+.callout.ok::before{content:"\2713";background:var(--ok);color:#04130d}
+.callout b{color:var(--tx)}
+/* fallback: ultimo .hint de la tarjeta de WhatsApp (aviso de baneo) resaltado */
+.card[data-tab="whatsapp"] > .hint:last-of-type{
+  border:1px solid rgba(251,191,36,.3);border-left:3px solid var(--warn);
+  background:var(--warn-soft);border-radius:var(--r-sm);
+  padding:11px 13px;color:#f3dca0;
+}
+
+/* ------------------------------------------------------------
+   3) ESTADOS VACIOS + SKELETONS de carga
+   ------------------------------------------------------------ */
+.stat b{font-variant-numeric:tabular-nums}
+.empty-state{
+  text-align:center;padding:34px 18px;color:var(--mut);
+  display:flex;flex-direction:column;align-items:center;gap:8px;
+}
+.empty-state .ico{
+  width:56px;height:56px;border-radius:16px;display:grid;place-items:center;
+  font-size:26px;background:var(--ac-soft);border:1px solid rgba(99,102,241,.28);
+  color:#cdd1ff;margin-bottom:4px;
+}
+.empty-state h3{margin:0;font-size:15px;color:var(--tx)}
+.empty-state p{margin:0;max-width:340px;font-size:12.5px;line-height:1.6}
+.empty-state .cta{margin-top:6px}
+/* refuerzo visual de los empties existentes */
+.bc-empty, #subsempty{
+  border:1px dashed var(--bd2);border-radius:var(--r);
+  background:rgba(255,255,255,.012);
+}
+/* skeleton shimmer (el front puede inyectar .skeleton .sk-line al cargar) */
+.skeleton{pointer-events:none}
+.sk-line{
+  height:12px;border-radius:6px;margin:9px 0;
+  background:linear-gradient(90deg,var(--elev) 25%,#16203c 37%,var(--elev) 63%);
+  background-size:400% 100%;animation:sk 1.3s ease infinite;
+}
+.sk-line.lg{height:26px;width:60%}
+.sk-line.sm{width:40%}
+@keyframes sk{0%{background-position:100% 0}100%{background-position:-100% 0}}
+
+/* ------------------------------------------------------------
+   4) FEEDBACK: botones cargando / ok + toasts mejorados
+   ------------------------------------------------------------ */
+.btn-loading{position:relative;color:transparent !important;pointer-events:none}
+.btn-loading::after{
+  content:"";position:absolute;inset:0;margin:auto;width:15px;height:15px;
+  border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;
+  animation:spin .6s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+button.ok{background:var(--ok);border-color:transparent;color:#04130d}
+button.ok:hover{background:#46e0a9}
+.err:empty{margin-top:0;min-height:0}
+/* toasts: icono, variantes y barra de auto-cierre */
+.toast{display:flex;align-items:center;gap:9px;padding-right:16px;position:relative;overflow:hidden}
+.toast::before{content:"\2713";font-weight:800}
+.toast.err::before{content:"!"}
+.toast.info{background:#0c1d33;color:#bcd6ff;border-color:rgba(96,165,250,.35)}
+.toast.info::before{content:"i"}
+.toast.warn{background:#2a230d;color:#f3dca0;border-color:rgba(251,191,36,.4)}
+.toast.warn::before{content:"!"}
+.toast.show::after{
+  content:"";position:absolute;left:0;bottom:0;height:2px;width:100%;
+  background:currentColor;opacity:.45;transform-origin:left;
+  animation:toastbar 2.2s linear forwards;
+}
+@keyframes toastbar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+@media (max-width:620px){
+  .toast{left:14px;right:14px;bottom:14px}
+}
+
+/* ------------------------------------------------------------
+   5) NAV con indicador inferior + jerarquia de secciones + a11y
+   ------------------------------------------------------------ */
+.nav button{position:relative;min-height:36px}
+.nav button.on::after{
+  content:"";position:absolute;left:14px;right:14px;bottom:-12px;height:2px;
+  border-radius:2px;background:linear-gradient(90deg,var(--ac),var(--ac2));
+}
+.nav button:hover{background:rgba(255,255,255,.05)}
+/* etiqueta de seccion para encabezar grupos de tarjetas */
+.section-label{
+  grid-column:1/-1;display:flex;align-items:center;gap:10px;
+  margin:6px 2px -4px;color:var(--tx3);font-size:11px;font-weight:700;
+  letter-spacing:.8px;text-transform:uppercase;
+}
+.section-label::after{content:"";flex:1;height:1px;background:var(--bd)}
+/* cabecera de tarjeta: acento superior opcional */
+.card.accent{position:relative;overflow:hidden}
+.card.accent::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;
+  background:linear-gradient(90deg,var(--ac),var(--ac2));opacity:.7}
+h2{align-items:center}
+h2::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;
+  background:var(--ac2);box-shadow:0 0 0 3px var(--ac2-soft);margin-right:8px;flex:none}
+/* ACCESIBILIDAD: foco visible y areas de toque */
+.nav button:focus-visible,
+.chan:focus-within,
+input[type=checkbox]:focus-visible,
+input[type=radio]:focus-visible,
+select:focus-visible,
+[onclick]:focus-visible{
+  outline:0;box-shadow:var(--ring);border-radius:var(--r-sm);
+}
+.chan:focus-within{border-color:var(--ac)}
+input[type=checkbox],input[type=radio]{min-width:17px;min-height:17px}
+th input[type=checkbox],td input[type=checkbox]{transform:scale(1.05)}
+
+/* ------------------------------------------------------------
+   6) Chips de canal + pulido de superficie (tablas, badges, scroll)
+   ------------------------------------------------------------ */
+.chan{transition:transform .12s,border-color .15s,background .15s,color .15s}
+.chan:active{transform:scale(.98)}
+.chan.tg.on,.chan.wa.on{box-shadow:0 0 0 1px currentColor inset}
+.chan .dot{transition:transform .15s,background .15s}
+.chan.tg.on .dot,.chan.wa.on .dot{transform:scale(1.25)}
+/* zebra muy tenue en tablas largas de contactos/destinatarios */
+#subs tr:nth-child(even) td, #wa_subs tr:nth-child(even) td{
+  background:rgba(255,255,255,.012);
+}
+tbody tr:hover td{background:rgba(255,255,255,.03)}
+/* badge de origen del envio mas legible */
+.bc-src{background:var(--ac-soft);border-color:rgba(99,102,241,.28);color:#b9c0ee}
+/* pildora "sending" pulsa para indicar actividad */
+.pill.sending{position:relative}
+.pill.sending::after{
+  content:"";display:inline-block;width:6px;height:6px;margin-left:6px;border-radius:50%;
+  background:var(--ac2);vertical-align:middle;animation:pulseDot 1.2s ease-in-out infinite;
+}
+@keyframes pulseDot{0%,100%{opacity:.35}50%{opacity:1}}
+/* sombra suave al hover en tarjetas para dar profundidad */
+.card{transition:border-color .15s,box-shadow .2s}
+.card:hover{border-color:var(--bd2)}
+/* contador de caracteres avisa cerca del limite de Telegram (4096) */
+.charcount[data-near="1"]{color:var(--warn)}
+.charcount[data-over="1"]{color:var(--bad)}
+/* indicador "en vivo" mas claro */
+.live:not(.on) .ping{background:var(--mut2)}
+.live.on{color:var(--ok)}
+/* coherencia de radios/sombra en bloques anidados */
+img.preview{box-shadow:var(--sh-sm)}
+.stat{box-shadow:var(--sh-sm)}
+
+@media(prefers-reduced-motion:reduce){
+  .btn-loading::after,.pill.sending::after,.sk-line,.toast.show::after{animation:none!important}
+}
 </style></head><body>
 
 <div id="login"><div class="box">
-  <div class="brand brand-lg"><svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg)"/><path transform="translate(12,12)" fill="#fff" d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg><span class="wordmark">Sender</span></div>
-  <p style="text-align:center">Panel de administración</p>
+  <div class="brand brand-lg"><svg viewBox="0 0 48 48" width="46" height="46" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div>
+  <p style="text-align:center">Tu lista de precios, replicada y enviada en segundos.</p>
   <label>Usuario</label><input id="lu" autocomplete="username" value="admin">
   <label>Contraseña</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
   <div class="err" id="lerr"></div>
@@ -575,7 +788,7 @@ main>.card.show{display:block}
 </div></div>
 
 <div id="app">
- <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><path transform="translate(12,12)" fill="#fff" d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg><span class="wordmark">Sender</span></div><div><span class="u" id="who"></span>
+ <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span class="u" id="who"></span>
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
  <nav class="nav">
    <button data-tab="msg" onclick="showTab('msg')">📝 Mensaje</button>

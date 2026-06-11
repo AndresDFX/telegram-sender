@@ -1,6 +1,6 @@
-# Sender — difusión de listas (Telegram + WhatsApp)
+# Replica — difusión de listas (Telegram + WhatsApp)
 
-**Sender** mirrorea un **canal de precios de Telegram** hacia tus contactos/suscriptores: detecta cada
+**Replica** mirrorea un **canal de precios de Telegram** hacia tus contactos/suscriptores: detecta cada
 lista publicada, le aplica un **markup configurable** a los precios, quita el bloque de ubicación, añade
 tu footer/imagen, y la **difunde** por **Telegram** (bot a suscriptores **o** userbot a tus contactos) y
 por **WhatsApp** (cuenta personal vía Baileys). Todo se gestiona desde un **panel web** y los envíos
