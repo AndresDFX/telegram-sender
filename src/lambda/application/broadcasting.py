@@ -76,17 +76,16 @@ class BroadcastList:
         )
 
     def _forward_whatsapp(
-        self, cfg: dict, mensaje: str, image_url: str | None, broadcast_id: str, wa_target: dict | None = None
+        self, cfg: dict, mensaje: str, image_url: str | None, broadcast_id: str, mode: str, list_ids
     ) -> None:
-        wa_target = wa_target if wa_target is not None else cfg.get("whatsapp_target", {})
         aceptado = False
         try:
             resultado = self._whatsapp.forward(
                 mensaje,
                 image_url,
                 cfg.get("whatsapp_excluded", []),
-                mode=wa_target.get("mode", "all"),
-                list_ids=sorted(ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_target)),
+                mode=mode,
+                list_ids=sorted(list_ids),
                 broadcast_id=broadcast_id,
                 broadcasts_table=self._broadcasts_table(),
             )
@@ -127,30 +126,55 @@ class BroadcastList:
         )
         logger.info("Difusión %s: %d lotes para %d clientes", bid, lotes, len(clientes))
         if wa_on:
-            self._forward_whatsapp(cfg, mensaje, self._image_url_para_whatsapp(cfg), bid)
+            wa_t = cfg.get("whatsapp_target", {})
+            self._forward_whatsapp(
+                cfg,
+                mensaje,
+                self._image_url_para_whatsapp(cfg),
+                bid,
+                wa_t.get("mode", "all"),
+                ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_t),
+            )
         return {"batches": lotes, "subscribers": len(clientes), "broadcast_id": bid}
 
     # --- envío manual (mensaje propio, no capturado del canal) -----------------
 
     def _target_para(self, cfg: dict, canal: str, lista: str | None) -> dict:
-        """Target efectivo de un canal: si se eligió una lista en el compositor, esa lista en
-        modo 'only'; si no, el target configurado del canal."""
         if lista:
             return {"mode": "only", "lists": [lista]}
         return cfg.get(f"{canal}_target", {})
 
+    def _wa_destino(self, cfg: dict, whatsapp_list, whatsapp_ids):
+        """(mode, list_ids) para WhatsApp: contactos ad-hoc elegidos > lista elegida > config."""
+        if whatsapp_ids:
+            return "only", [str(x) for x in whatsapp_ids]
+        t = self._target_para(cfg, "whatsapp", whatsapp_list)
+        return t.get("mode", "all"), sorted(ids_de_listas_activas(cfg.get("whatsapp_lists", []), t))
+
+    def _tg_clientes(self, cfg: dict, telegram, telegram_list, telegram_ids) -> list:
+        if not telegram:
+            return []
+        if telegram_ids:
+            sel = {str(x) for x in telegram_ids}
+            return [c for c in self._subscribers.listar_activos() if str(c) in sel]
+        return self._destinatarios_telegram(cfg, self._target_para(cfg, "telegram", telegram_list))
+
     def previsualizar(
-        self, telegram: bool, whatsapp: bool, telegram_list: str | None = None, whatsapp_list: str | None = None
+        self,
+        telegram: bool,
+        whatsapp: bool,
+        telegram_list: str | None = None,
+        whatsapp_list: str | None = None,
+        telegram_ids=None,
+        whatsapp_ids=None,
     ) -> dict:
-        """Cuántos destinatarios recibirían (sin enviar). WhatsApp se aproxima por los ids de
-        la lista (el servicio tiene los contactos reales)."""
+        """Cuántos destinatarios recibirían (sin enviar)."""
         cfg = self._config.get()
         out: dict = {}
         if telegram:
-            out["telegram"] = len(self._destinatarios_telegram(cfg, self._target_para(cfg, "telegram", telegram_list)))
+            out["telegram"] = len(self._tg_clientes(cfg, True, telegram_list, telegram_ids))
         if whatsapp:
-            wa_t = self._target_para(cfg, "whatsapp", whatsapp_list)
-            out["whatsapp"] = len(ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_t))
+            out["whatsapp"] = len(self._wa_destino(cfg, whatsapp_list, whatsapp_ids)[1])
         return out
 
     def enviar_manual(
@@ -161,32 +185,26 @@ class BroadcastList:
         whatsapp: bool = False,
         telegram_list: str | None = None,
         whatsapp_list: str | None = None,
+        telegram_ids=None,
+        whatsapp_ids=None,
     ) -> dict:
-        """Envía un mensaje compuesto por el usuario (texto tal cual, sin markup), por los
-        canales elegidos. Puede dirigirse a una lista concreta (telegram_list/whatsapp_list);
-        si no, usa el target configurado del canal.
-
-        Seguridad: por WhatsApp manual EXIGE una lista con destinatarios (no difunde a TODA la
-        agenda por error). Lanza ValueError si no hay a quién enviar.
-        """
+        """Envía un mensaje propio (texto tal cual) por los canales elegidos. Destinatarios:
+        contactos ad-hoc elegidos (telegram_ids/whatsapp_ids) > lista (telegram_list/whatsapp_list)
+        > target configurado. WhatsApp manual EXIGE destinatarios concretos (no manda a todos)."""
         cfg = self._config.get()
         wa_on = bool(whatsapp and self._whatsapp)
-        wa_target = self._target_para(cfg, "whatsapp", whatsapp_list)
-        if wa_on:
-            wa_ids = ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_target)
-            if wa_target.get("mode") != "only" or not wa_ids:
-                raise ValueError(
-                    "Elige una lista de WhatsApp con destinatarios en 'Enviar a' (evita mandar a "
-                    "todos por error). Crea/activa una lista en la pestaña WhatsApp."
-                )
-        tg_target = self._target_para(cfg, "telegram", telegram_list)
+        wa_mode, wa_ids = self._wa_destino(cfg, whatsapp_list, whatsapp_ids)
+        if wa_on and (wa_mode != "only" or not wa_ids):
+            raise ValueError(
+                "Elige contactos o una lista de WhatsApp en 'Enviar a' (evita mandar a todos por error)."
+            )
+        clientes = self._tg_clientes(cfg, telegram, telegram_list, telegram_ids)
         channels = (["telegram"] if telegram else []) + (["whatsapp"] if wa_on else [])
-        clientes = self._destinatarios_telegram(cfg, tg_target) if telegram else []
         bid = self._nuevo_id()
         self._registrar(bid, text, "manual", channels, len(clientes))
 
         if telegram:
             self._queue.encolar(text, clientes, image_url=image_url or None, image_key=None, broadcast_id=bid)
         if wa_on:
-            self._forward_whatsapp(cfg, text, image_url or None, bid, wa_target)
+            self._forward_whatsapp(cfg, text, image_url or None, bid, wa_mode, wa_ids)
         return {"broadcast_id": bid, "channels": channels, "telegram_total": len(clientes)}

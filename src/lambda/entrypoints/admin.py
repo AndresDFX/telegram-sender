@@ -267,6 +267,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 return _json({"error": "elige al menos un canal"}, 400)
             if img and not img.startswith("https://"):
                 return _json({"error": "la imagen debe ser una URL https:// (o súbela)"}, 400)
+            def _ids(k):
+                v = cuerpo.get(k)
+                return [str(x) for x in v if str(x).strip()] if isinstance(v, list) else None
+
             try:
                 res = wiring.build_broadcast_list().enviar_manual(
                     texto,
@@ -275,18 +279,27 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     whatsapp=a_wa,
                     telegram_list=str(cuerpo.get("telegram_list", "")).strip() or None,
                     whatsapp_list=str(cuerpo.get("whatsapp_list", "")).strip() or None,
+                    telegram_ids=_ids("telegram_ids"),
+                    whatsapp_ids=_ids("whatsapp_ids"),
                 )
             except ValueError as e:
                 return _json({"error": str(e)}, 400)
             return _json({"ok": True, **res})
         if sub == "/api/broadcast/preview" and method == "POST":
             cuerpo = _body(event)
+
+            def _ids(k):
+                v = cuerpo.get(k)
+                return [str(x) for x in v if str(x).strip()] if isinstance(v, list) else None
+
             return _json(
                 wiring.build_broadcast_list().previsualizar(
                     telegram=bool(cuerpo.get("telegram")),
                     whatsapp=bool(cuerpo.get("whatsapp")),
                     telegram_list=str(cuerpo.get("telegram_list", "")).strip() or None,
                     whatsapp_list=str(cuerpo.get("whatsapp_list", "")).strip() or None,
+                    telegram_ids=_ids("telegram_ids"),
+                    whatsapp_ids=_ids("whatsapp_ids"),
                 )
             )
         if sub == "/api/whatsapp/status" and method == "GET":
@@ -500,6 +513,11 @@ main>.card.show{display:block}
 
 /* selector de canales (chips toggle) */
 .chan-row{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 4px}
+.pickbox{max-height:152px;overflow:auto;border:1px solid var(--bd);border-radius:var(--r-sm);background:var(--elev);margin-top:6px;padding:4px}
+.pickitem{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--tx2)}
+.pickitem:hover{background:rgba(255,255,255,.04)}
+.pickitem input{width:auto;margin:0}
+.pickbox .hint{padding:8px}
 .chan{
   display:flex;align-items:center;gap:9px;cursor:pointer;user-select:none;
   background:var(--elev);border:1px solid var(--bd);border-radius:var(--r-sm);
@@ -841,9 +859,7 @@ img.preview{box-shadow:var(--sh-sm)}
      </div>
      <div class="hint" style="margin-top:10px">💡 Lo más fiable si Render bloquea el linking: vincula <b>localmente</b> (corre el servicio en tu PC con las mismas credenciales AWS) y Render reusará la sesión guardada en DynamoDB.</div>
    </div>
-   <label>Excluir de WhatsApp (ids, uno por línea)</label><textarea id="whatsapp_excluded"></textarea>
-   <button onclick="saveWhatsapp()">Guardar exclusiones WhatsApp</button>
-   <div class="hint">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza excluyendo casi todos y prueba con pocos.</div>
+   <div class="callout warn">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza con listas pequeñas. Las <b>exclusiones</b> se gestionan por nombre abajo, en <b>Destinatarios WhatsApp</b>.</div>
   </div>
   <div class="card" data-tab="msg"><h2>Canal y mensaje</h2>
    <label>Canal fuente (username sin @)</label><input id="source_channel">
@@ -859,11 +875,6 @@ img.preview{box-shadow:var(--sh-sm)}
    <label>…o URL externa</label><input id="image_url" placeholder="https://...">
    <button class="sec" onclick="saveCfg()">Guardar URL</button>
   </div>
-  <div class="card" data-tab="telegram"><h2>Excluir destinatarios</h2>
-   <div class="hint">chat IDs que NO recibirán las listas, uno por línea.</div>
-   <textarea id="excluded_ids" style="margin-top:8px"></textarea>
-   <button onclick="saveCfg()">Guardar exclusiones</button>
-  </div>
   <div class="card" data-tab="estado"><h2>Cola de mensajes</h2>
    <div class="stats"><div class="stat"><b id="q_b">–</b><span>en cola</span></div>
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
@@ -871,7 +882,7 @@ img.preview{box-shadow:var(--sh-sm)}
   </div>
   <div class="card" data-tab="telegram"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
-   <input id="subsearch" placeholder="🔎 Buscar por nombre o id..." oninput="onSearch()" style="margin-top:10px">
+   <input id="subsearch" placeholder="🔎 Buscar por nombre..." oninput="onSearch()" style="margin-top:10px">
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
      <button class="sec" onclick="toggleAll(true)">Marcar visibles</button>
      <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
@@ -880,7 +891,7 @@ img.preview{box-shadow:var(--sh-sm)}
      <button class="ghost" onclick="bulkFiltered('excluir')">Excluir filtrados</button>
      <button class="ghost" onclick="bulkFiltered('incluir')">Incluir filtrados</button>
    </div>
-   <table><thead><tr><th><input type="checkbox" id="selall" onchange="toggleAll(this.checked)"></th><th>nombre / id</th><th>estado</th></tr></thead><tbody id="subs"></tbody></table>
+   <table><thead><tr><th><input type="checkbox" id="selall" onchange="toggleAll(this.checked)"></th><th>nombre</th><th>estado</th></tr></thead><tbody id="subs"></tbody></table>
    <div class="hint" id="subsempty" style="display:none;margin-top:12px">Sin destinatarios (modo bot: nadie dio /start; modo userbot: la cuenta no tiene contactos).</div>
    <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
      <button class="sec" onclick="prevPage()">◀</button>
@@ -899,12 +910,17 @@ img.preview{box-shadow:var(--sh-sm)}
    </div>
    <button onclick="saveLists('telegram')">Guardar listas Telegram</button>
   </div>
-  <div class="card" data-tab="whatsapp"><h2>Destinatarios WhatsApp</h2>
-   <div class="hint">Carga los contactos de tu WhatsApp (requiere el servicio conectado) para armar listas.</div>
-   <button class="sec" style="margin-top:10px" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button> <span id="wa_c_count" class="hint"></span>
-   <input id="wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="renderWa()" style="margin-top:10px">
-   <div style="display:flex;gap:8px;margin:10px 0"><button class="sec" onclick="waToggleAll(true)">Marcar visibles</button><button class="sec" onclick="waToggleAll(false)">Desmarcar</button></div>
-   <table><thead><tr><th></th><th>nombre / número</th></tr></thead><tbody id="wa_subs"></tbody></table>
+  <div class="card" data-tab="whatsapp"><h2>Destinatarios WhatsApp <span id="wa_c_count" class="hint"></span></h2>
+   <div class="hint">Carga tus contactos (servicio conectado), busca por nombre, y marca para <b>excluir/incluir</b>. Los excluidos NO reciben las difusiones por WhatsApp.</div>
+   <button class="sec" style="margin-top:10px" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button>
+   <input id="wa_search" placeholder="🔎 Buscar por nombre..." oninput="renderWa()" style="margin-top:10px">
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+     <button class="sec" onclick="waToggleAll(true)">Marcar visibles</button>
+     <button class="sec" onclick="waToggleAll(false)">Desmarcar</button>
+     <button onclick="waBulk('excluir')">Excluir marcados</button>
+     <button onclick="waBulk('incluir')">Incluir marcados</button>
+   </div>
+   <table><thead><tr><th></th><th>nombre</th><th>estado</th></tr></thead><tbody id="wa_subs"></tbody></table>
    <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button class="sec" onclick="waPrev()">◀</button><span id="wa_pageinfo" class="hint"></span><button class="sec" onclick="waNext()">▶</button></div>
   </div>
   <div class="card" data-tab="whatsapp"><h2>Listas de distribución · WhatsApp</h2>
@@ -941,10 +957,16 @@ img.preview{box-shadow:var(--sh-sm)}
 
    <label style="margin-top:16px">Enviar a</label>
    <div class="row">
-     <div id="bc_tg_wrap"><div class="hint" style="margin-top:0">Telegram</div>
-       <select id="bc_tg_list" onchange="bcPrev()"><option value="">Según configuración (modo actual)</option></select></div>
-     <div id="bc_wa_wrap" style="display:none"><div class="hint" style="margin-top:0">WhatsApp (elige una lista)</div>
-       <select id="bc_wa_list" onchange="bcPrev()"><option value="">— elige una lista —</option></select></div>
+     <div id="bc_tg_wrap"><div class="hint" style="margin-top:0">Telegram — busca y marca contactos</div>
+       <input id="bc_tg_search" placeholder="🔎 Buscar contacto..." oninput="bcRenderPick('tg')">
+       <div id="bc_tg_pick" class="pickbox"></div>
+       <div class="hint" style="margin-top:6px">o una lista: <select id="bc_tg_list" onchange="bcPrev()"><option value="">(según configuración)</option></select></div>
+     </div>
+     <div id="bc_wa_wrap" style="display:none"><div class="hint" style="margin-top:0">WhatsApp — busca y marca contactos</div>
+       <input id="bc_wa_search" placeholder="🔎 Buscar contacto..." oninput="bcRenderPick('wa')">
+       <div id="bc_wa_pick" class="pickbox"></div>
+       <div class="hint" style="margin-top:6px">o una lista: <select id="bc_wa_list" onchange="bcPrev()"><option value="">— elige una lista —</option></select></div>
+     </div>
    </div>
    <div class="hint" id="bc_preview" style="margin-top:10px">—</div>
 
@@ -985,15 +1007,15 @@ async function loadCfg(){ const c=await api('/api/config');
   ['source_channel','markup_percentage','currency_symbols','whatsapp_footer','image_url','telethon_api_id','telethon_api_hash'].forEach(k=>$(k).value=c[k]??'');
   $('send_mode').value=c.send_mode||'bot';
   $('sess_status').textContent = c.telethon_session_set ? '· conectada ✓' : '· no configurada';
-  $('strip_patterns').value=(c.strip_patterns||[]).join('\n'); $('excluded_ids').value=(c.excluded_ids||[]).join('\n');
+  $('strip_patterns').value=(c.strip_patterns||[]).join('\n');
   $('whatsapp_enabled').checked=!!c.whatsapp_enabled; $('whatsapp_service_url').value=c.whatsapp_service_url||'';
-  $('whatsapp_excluded').value=(c.whatsapp_excluded||[]).join('\n');
   $('wa_tok_status').textContent = c.whatsapp_token_set ? '· configurado ✓' : '· no configurado';
+  WA_EXCLUDED=new Set((c.whatsapp_excluded||[]).map(String)); if($('wa_subs')) renderWa();
   LISTS.telegram=c.telegram_lists||[]; TGT.telegram=c.telegram_target||{mode:'all',lists:[]};
   LISTS.whatsapp=c.whatsapp_lists||[]; TGT.whatsapp=c.whatsapp_target||{mode:'all',lists:[]};
   renderLists('telegram'); renderLists('whatsapp'); }
-async function saveWhatsapp(){ const b={ whatsapp_enabled:$('whatsapp_enabled').checked, whatsapp_service_url:$('whatsapp_service_url').value,
-   whatsapp_excluded:$('whatsapp_excluded').value }; const tok=$('whatsapp_token').value; if(tok) b.whatsapp_token=tok;
+async function saveWhatsapp(){ const b={ whatsapp_enabled:$('whatsapp_enabled').checked, whatsapp_service_url:$('whatsapp_service_url').value };
+   const tok=$('whatsapp_token').value; if(tok) b.whatsapp_token=tok;
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
     toast('✓ WhatsApp guardado'); $('whatsapp_token').value=''; loadCfg(); } catch(e){ toast('Error',true); } }
 async function waStatus(showQr){ $('wa_state').textContent='consultando...';
@@ -1017,7 +1039,7 @@ async function saveAccount(){ const b={ send_mode:$('send_mode').value, telethon
     toast('✓ Cuenta guardada'); $('telethon_session').value=''; loadCfg(); loadSubs(); } catch(e){ toast('Error',true); } }
 async function saveCfg(){ const b={ source_channel:$('source_channel').value, markup_percentage:parseFloat($('markup_percentage').value),
    currency_symbols:$('currency_symbols').value, whatsapp_footer:$('whatsapp_footer').value, image_url:$('image_url').value,
-   strip_patterns:$('strip_patterns').value, excluded_ids:$('excluded_ids').value };
+   strip_patterns:$('strip_patterns').value };
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); toast('✓ Guardado'); loadCfg(); }
   catch(e){ toast('Error al guardar',true); } }
 async function uploadImg(){ const f=$('imgfile').files[0]; if(!f) return;
@@ -1029,7 +1051,7 @@ async function loadQueue(){ const q=await api('/api/queue'); $('q_b').textConten
 let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0;
 const PAGE_SIZE=50;
 function filtered(){ if(!FILTER) return DEST; const q=FILTER.toLowerCase();
-  return DEST.filter(s=> (s.name||s.status||'').toLowerCase().includes(q) || String(s.chatId).includes(q)); }
+  return DEST.filter(s=> (s.name||'').toLowerCase().includes(q)); }
 function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
   if(PAGE>=pages) PAGE=pages-1; if(PAGE<0) PAGE=0;
   const slice=f.slice(PAGE*PAGE_SIZE,(PAGE+1)*PAGE_SIZE);
@@ -1037,9 +1059,9 @@ function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length
   $('subsempty').style.display=DEST.length?'none':'block';
   $('subcount').textContent = DEST.length ? `· ${f.length}${FILTER?' filtrados':''} de ${DEST.length} (${EXCLUDED.size} excluidos)` : '';
   $('pageinfo').textContent = f.length ? `página ${PAGE+1} de ${pages}` : 'sin resultados';
-  slice.forEach(s=>{ const ex=EXCLUDED.has(String(s.chatId)); const label=s.name||s.status||'—'; const tr=document.createElement('tr');
+  slice.forEach(s=>{ const ex=EXCLUDED.has(String(s.chatId)); const label=s.name||'(sin nombre)'; const tr=document.createElement('tr');
     tr.innerHTML=`<td><input type="checkbox" class="selrow" data-id="${s.chatId}"></td>`+
-      `<td><b>${label}</b><div class="hint">${s.chatId}</div></td>`+
+      `<td><b>${bcEsc(label)}</b></td>`+
       `<td><span class="pill ${ex?'inactive':'active'}">${ex?'Excluido':'Incluido'}</span></td>`;
     t.appendChild(tr); }); }
 async function loadSubs(){ const [d,c]=await Promise.all([api('/api/subscribers'),api('/api/config')]);
@@ -1088,20 +1110,27 @@ async function saveLists(ch){ TGT[ch].mode=curMode(ch);
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('✓ Listas guardadas'); loadCfg(); }
   catch(e){ toast('Error al guardar',true); } }
 // --- contactos de WhatsApp (para armar listas de WhatsApp) ---
-let WA_DEST=[], WA_PAGE=0;
-async function loadWaContacts(){ $('wa_c_count').textContent='cargando...';
-  try{ const r=await api('/api/whatsapp/contacts'); WA_DEST=r.contacts||[]; WA_PAGE=0; renderWa(); $('wa_c_count').textContent='· '+WA_DEST.length+' contactos'; }
-  catch(e){ $('wa_c_count').textContent='servicio inaccesible (¿conectado?)'; } }
+let WA_DEST=[], WA_PAGE=0, WA_EXCLUDED=new Set();
+function waName(c){ return c.name || '(sin nombre)'; }
+async function loadWaContacts(){ $('wa_c_count').textContent='· cargando...';
+  try{ const r=await api('/api/whatsapp/contacts'); WA_DEST=r.contacts||[]; WA_PAGE=0; renderWa(); }
+  catch(e){ $('wa_c_count').textContent='· servicio inaccesible (¿conectado?)'; } }
 function waFiltered(){ const q=($('wa_search').value||'').trim().toLowerCase(); if(!q) return WA_DEST;
-  return WA_DEST.filter(c=> (c.name||'').toLowerCase().includes(q) || String(c.id||'').includes(q)); }
+  return WA_DEST.filter(c=> waName(c).toLowerCase().includes(q)); }
 function renderWa(){ const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
   if(WA_PAGE>=pages)WA_PAGE=pages-1; if(WA_PAGE<0)WA_PAGE=0; const slice=f.slice(WA_PAGE*PAGE_SIZE,(WA_PAGE+1)*PAGE_SIZE);
   const t=$('wa_subs'); t.innerHTML='';
-  slice.forEach(c=>{ const id=String(c.id||''); const tr=document.createElement('tr');
-    tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${c.name||'—'}</b><div class="hint">${id}</div></td>`; t.appendChild(tr); });
+  $('wa_c_count').textContent = WA_DEST.length ? `· ${f.length} de ${WA_DEST.length} (${WA_EXCLUDED.size} excluidos)` : '';
+  slice.forEach(c=>{ const id=String(c.id||''); const ex=WA_EXCLUDED.has(id); const tr=document.createElement('tr');
+    tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${bcEsc(waName(c))}</b></td>`+
+      `<td><span class="pill ${ex?'inactive':'active'}">${ex?'Excluido':'Incluido'}</span></td>`; t.appendChild(tr); });
   $('wa_pageinfo').textContent=f.length?`página ${WA_PAGE+1} de ${pages}`:'sin resultados'; }
 function waSelectedIds(){ return [...document.querySelectorAll('.wsel:checked')].map(c=>String(c.dataset.id)); }
 function waToggleAll(v){ document.querySelectorAll('.wsel').forEach(c=>c.checked=v); }
+async function persistWaExcluded(){ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({whatsapp_excluded:[...WA_EXCLUDED]})}); renderWa(); }
+async function waBulk(accion){ const ids=waSelectedIds(); if(!ids.length){ toast('Marca al menos un contacto',true); return; }
+  ids.forEach(id=> accion==='excluir'?WA_EXCLUDED.add(id):WA_EXCLUDED.delete(id));
+  await persistWaExcluded(); toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); }
 function waPrev(){ WA_PAGE--; renderWa(); }
 function waNext(){ WA_PAGE++; renderWa(); }
 function showTab(t){
@@ -1115,21 +1144,46 @@ if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').s
 // ===== Componer y enviar (POST /api/broadcast) =====
 let BC_IMG_URL = '';           // URL devuelta tras subir un archivo a /api/image
 function bcCount(){ const n=$('bc_text').value.length; $('bc_count').textContent=n+(n===1?' carácter':' caracteres'); }
+// --- selección de contactos (picker) en el compositor ---
+let BC_TG_SEL=new Set(), BC_WA_SEL=new Set();
+function bcSel(ch){ return ch==='tg'?BC_TG_SEL:BC_WA_SEL; }
+function bcNameOf(ch,c){ return ch==='tg'?(c.name||'(sin nombre)'):waName(c); }
+function bcIdOf(ch,c){ return ch==='tg'?String(c.chatId):String(c.id); }
+function bcRenderPick(ch){
+  const box=$('bc_'+ch+'_pick'); if(!box) return;
+  const data=(ch==='tg'?DEST:WA_DEST)||[], sel=bcSel(ch);
+  const q=($('bc_'+ch+'_search').value||'').trim().toLowerCase();
+  const f=data.filter(c=> !q || bcNameOf(ch,c).toLowerCase().includes(q)).slice(0,40);
+  box.innerHTML = f.length ? f.map(c=>{ const id=bcIdOf(ch,c);
+    return `<label class="pickitem"><input type="checkbox" ${sel.has(id)?'checked':''} onchange="bcTogglePick('${ch}','${id}',this.checked)"> ${bcEsc(bcNameOf(ch,c))}</label>`; }).join('')
+    : '<div class="hint">'+(data.length?'sin resultados':'sin contactos cargados aún')+'</div>';
+}
+function bcTogglePick(ch,id,on){ const s=bcSel(ch); on?s.add(id):s.delete(id); bcPrev(); }
 function bcChan(){
   const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked;
   $('bc_chan_tg').classList.toggle('on', tg);
   $('bc_chan_wa').classList.toggle('on', wa);
   $('bc_tg_wrap').style.display = tg ? 'block':'none';
   $('bc_wa_wrap').style.display = wa ? 'block':'none';
-  bcPrev();
+  if(wa && !WA_DEST.length){ loadWaContacts().then(()=>bcRenderPick('wa')); }
+  bcRenderPick('tg'); bcRenderPick('wa'); bcPrev();
 }
-// Rellena los selectores "Enviar a" con las listas configuradas (conserva selección).
+// Rellena los selectores de lista (conserva selección) y refresca los pickers.
 function bcFillLists(){
   const fill=(sel,arr,first)=>{ const cur=sel.value;
     sel.innerHTML='<option value="">'+first+'</option>'+ (arr||[]).map(l=>`<option value="${bcEsc(l.name)}">${bcEsc(l.name)} (${(l.ids||[]).length})</option>`).join('');
     sel.value=cur; };
-  fill($('bc_tg_list'), (LISTS&&LISTS.telegram)||[], 'Según configuración (modo actual)');
+  fill($('bc_tg_list'), (LISTS&&LISTS.telegram)||[], '(según configuración)');
   fill($('bc_wa_list'), (LISTS&&LISTS.whatsapp)||[], '— elige una lista —');
+  bcRenderPick('tg'); bcRenderPick('wa');
+}
+// Cuerpo común: contactos elegidos (ids) tienen prioridad; si no, la lista del select.
+function bcBody(extra){
+  const b=Object.assign({ telegram:$('bc_telegram').checked, whatsapp:$('bc_whatsapp').checked,
+    telegram_list:$('bc_tg_list').value, whatsapp_list:$('bc_wa_list').value }, extra||{});
+  if(BC_TG_SEL.size) b.telegram_ids=[...BC_TG_SEL];
+  if(BC_WA_SEL.size) b.whatsapp_ids=[...BC_WA_SEL];
+  return b;
 }
 let BC_PREV_T=null;
 async function bcPrev(){
@@ -1138,8 +1192,7 @@ async function bcPrev(){
   if(!tg && !wa){ out.textContent='—'; return; }
   out.textContent='calculando destinatarios…';
   BC_PREV_T=setTimeout(async()=>{
-    const body={ telegram:tg, whatsapp:wa, telegram_list:$('bc_tg_list').value, whatsapp_list:$('bc_wa_list').value };
-    try{ const r=await api('/api/broadcast/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    try{ const r=await api('/api/broadcast/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bcBody())});
       const parts=[];
       if(tg) parts.push('✈️ Telegram: <b>'+(r.telegram??0)+'</b>');
       if(wa) parts.push('🟢 WhatsApp: <b>'+(r.whatsapp??0)+'</b>');
@@ -1169,7 +1222,10 @@ async function bcUploadImg(){
 function bcClear(){
   $('bc_text').value=''; $('bc_image_url').value=''; BC_IMG_URL='';
   $('bc_imgfile').value=''; $('bc_imgprev').style.display='none'; $('bc_imgprev').removeAttribute('src');
-  $('bc_status').textContent=''; bcCount();
+  BC_TG_SEL.clear(); BC_WA_SEL.clear();
+  $('bc_tg_search').value=''; $('bc_wa_search').value=''; $('bc_tg_list').value=''; $('bc_wa_list').value='';
+  bcRenderPick('tg'); bcRenderPick('wa');
+  $('bc_status').textContent=''; bcCount(); bcPrev();
 }
 async function sendBroadcast(){
   const text=$('bc_text').value.trim();
@@ -1179,7 +1235,7 @@ async function sendBroadcast(){
   let msg='¿Enviar este mensaje ahora?';
   if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
   if(!confirm(msg)) return;
-  const body={ text, telegram:tg, whatsapp:wa, telegram_list:$('bc_tg_list').value, whatsapp_list:$('bc_wa_list').value };
+  const body=bcBody({ text });
   const url=bcEffectiveUrl(); if(url) body.image_url=url;
   const btn=$('bc_send'); btn.disabled=true; $('bc_status').textContent='encolando...';
   try{
