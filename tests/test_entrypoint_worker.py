@@ -24,15 +24,41 @@ def _stats(total, sent=0, failed=0):
 
 
 class WorkerTests(unittest.TestCase):
+    def setUp(self):
+        # Inyectamos config_store y plans para ejercitar el gate real (no la rama fail-open
+        # por falta de AWS). Por defecto: envíos ACTIVOS y planes no descartables.
+        worker.config_store = MagicMock()
+        worker.config_store.get.return_value = {"sending_enabled": True}
+        worker.plans = MagicMock()
+        worker.plans.descartar.return_value = False
+
     def tearDown(self):
         worker.deliver = None
         worker.image_store = None
+        worker.broadcasts = None
+        worker.config_store = None
+        worker.plans = None
 
     def test_lote_exitoso(self):
         worker.deliver = MagicMock(return_value=_stats(2, sent=2))
         event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1", "2"]})]}
         self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [])
         worker.deliver.assert_called_once_with("x", ["1", "2"], None)
+
+    def test_pausado_descarta_sin_enviar(self):
+        worker.config_store.get.return_value = {"sending_enabled": False}
+        worker.deliver = MagicMock()
+        event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1", "2"]})]}
+        self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [])  # ack sin reencolar
+        worker.deliver.assert_not_called()  # no se intenta enviar
+
+    def test_plan_cancelado_descarta_lote(self):
+        worker.plans.descartar.return_value = True
+        worker.deliver = MagicMock()
+        event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1"], "pid": "b-xyz"})]}
+        self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [])  # ack, no envía
+        worker.deliver.assert_not_called()
+        worker.plans.descartar.assert_called_once_with("b-xyz")
 
     def test_fallo_sistemico_reporta(self):
         worker.deliver = MagicMock(return_value=_stats(2, failed=2))

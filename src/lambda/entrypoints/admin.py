@@ -52,6 +52,7 @@ _CAMPOS_EDITABLES = (
     "whatsapp_lists",
     "whatsapp_target",
     # Anti-baneo / colas / ventana de envío.
+    "sending_enabled",
     "batch_size",
     "scheduling_enabled",
     "tg_delay_min",
@@ -68,7 +69,7 @@ _LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
 _TARGETS = ("telegram_target", "whatsapp_target")
 _FLOATS = ("tg_delay_min", "tg_delay_max")
 _ENTEROS = ("batch_size", "wa_delay_min", "wa_delay_max", "window_tz")
-_BOOLS = ("whatsapp_enabled", "scheduling_enabled", "window_enabled")
+_BOOLS = ("whatsapp_enabled", "scheduling_enabled", "window_enabled", "sending_enabled")
 # Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
 _NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token", "bot_token")
 
@@ -340,6 +341,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json({"broadcasts": broadcast_store.listar()})
         if sub == "/api/plans" and method == "GET":
             return _json({"plans": _planes_con_progreso()})
+        if sub == "/api/plans/cancel" and method == "POST":
+            return _json({"ok": True, "canceled": plan_store.cancelar_pendientes()})
         if sub == "/api/telegram/me" and method == "GET":
             return _telegram_api("getMe", {})  # verifica el token + muestra el bot
         if sub == "/api/telegram/webhook" and method == "GET":
@@ -899,7 +902,7 @@ img.preview{box-shadow:var(--sh-sm)}
 </div></div>
 
 <div id="app">
- <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span class="u" id="who"></span>
+ <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span>
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
  <nav class="nav">
    <button data-tab="msg" onclick="showTab('msg')">📝 Mensaje</button>
@@ -1094,6 +1097,17 @@ img.preview{box-shadow:var(--sh-sm)}
    <div class="bc-empty" id="bc_empty" style="display:none">Aún no hay envíos. Crea uno en <b>Componer y enviar</b>.</div>
    <div style="margin-top:14px"><button class="sec" onclick="loadBroadcasts()">Refrescar</button></div>
   </div>
+  <div class="card accent" data-tab="prog"><h2>Interruptor de envíos</h2>
+   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+     <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos activos</b></label>
+     <span id="sys_badge" class="pill">—</span>
+   </div>
+   <div class="hint" style="margin-top:10px">Apágalo para <b>PAUSAR al instante todos los envíos</b> (Telegram y WhatsApp). Las difusiones quedan en espera; nada sale hasta reactivar. Útil como freno de emergencia.</div>
+   <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bd)">
+     <div class="hint" style="margin-top:0">¿Hay difusiones en cola que NO quieres enviar? Cancélalas (no se enviarán, ni al reactivar).</div>
+     <button class="ghost" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>
+   </div>
+  </div>
   <div class="card accent" data-tab="prog"><h2>Anti-baneo · lotes y ritmo</h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="scheduling_enabled" style="width:auto"> Envío fraccionado y secuencial (procesa un lote a la vez)</label>
    <div class="row">
@@ -1137,7 +1151,9 @@ let CRED = sessionStorage.getItem('cred') || '';
 function hdr(extra){ return Object.assign({Authorization:'Basic '+CRED}, extra||{}); }
 async function api(p, opt){ opt=opt||{}; opt.headers=hdr(opt.headers); const r=await fetch(BASE+p,opt);
   if(r.status===401){ logout(); throw new Error('401'); } if(!r.ok) throw new Error(r.status); return r.json(); }
-function toast(m,err){ const t=$('toast'); t.textContent=m; t.className='toast show'+(err?' err':''); setTimeout(()=>t.className='toast',2200); }
+function toast(m,v){ const t=$('toast'); t.textContent=m;
+  const cls = v===true ? 'err' : (typeof v==='string' && v ? v : '');  // true=err (compat); 'info'/'warn'/'err'
+  t.className='toast show'+(cls?' '+cls:''); setTimeout(()=>t.className='toast',2200); }
 async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':'+p);
   try{ await fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{if(!r.ok)throw 0;}); sessionStorage.setItem('cred',CRED);
     $('login').style.display='none'; $('app').style.display='block'; $('who').textContent=u; boot(); }
@@ -1158,7 +1174,26 @@ async function loadCfg(){ const c=await api('/api/config');
   // --- anti-baneo / ventana ---
   ['batch_size','tg_delay_min','tg_delay_max','wa_delay_min','wa_delay_max','window_tz','window_start','window_end'].forEach(k=>{ if($(k)) $(k).value=c[k]??''; });
   if($('scheduling_enabled')) $('scheduling_enabled').checked = c.scheduling_enabled!==false;
-  if($('window_enabled')) $('window_enabled').checked = !!c.window_enabled; }
+  if($('window_enabled')) $('window_enabled').checked = !!c.window_enabled;
+  renderSendingState(c.sending_enabled!==false); }
+function renderSendingState(on){
+  if($('sending_enabled')) $('sending_enabled').checked = on;
+  const badge=$('sys_badge'); if(badge){ badge.className='pill '+(on?'active':'failed'); badge.textContent = on?'ACTIVOS':'PAUSADOS'; }
+  const hb=$('hdr_badge'); if(hb){ if(on){ hb.style.display='none'; } else { hb.style.display='inline-block'; hb.className='pill failed'; hb.textContent='⏸ Envíos pausados'; } }
+}
+async function toggleSending(){
+  const on=$('sending_enabled').checked;
+  if(!on && !confirm('¿Pausar TODOS los envíos (Telegram y WhatsApp)? Nada saldrá hasta reactivar.')){ $('sending_enabled').checked=true; return; }
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sending_enabled:on})});
+    renderSendingState(on); toast(on?'✓ Envíos ACTIVADOS':'⏸ Envíos PAUSADOS', on?'info':'warn'); }
+  catch(e){ toast('Error al cambiar el estado',true); $('sending_enabled').checked=!on; }
+}
+async function cancelPending(){
+  if(!confirm('¿Cancelar todas las difusiones pendientes/en curso? No se enviarán (ni al reactivar).')) return;
+  try{ const r=await api('/api/plans/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    toast('✓ '+(r.canceled||0)+' difusión(es) cancelada(s)'); loadPlans(); loadQueue(); }
+  catch(e){ toast('Error al cancelar',true); }
+}
 async function saveSched(){
   const b={ scheduling_enabled:$('scheduling_enabled').checked, window_enabled:$('window_enabled').checked,
     batch_size:parseInt($('batch_size').value||'150',10),

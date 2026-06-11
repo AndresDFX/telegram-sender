@@ -27,12 +27,13 @@ def _plan(**over):
 
 
 class FakePlans:
-    def __init__(self, plan):
+    def __init__(self, plan, claim=True):
         self.plan = plan
         self.dispatched = []
         self.cleared = 0
         self.finalized = None
         self.resolved = None
+        self.claim = claim  # False simula que un cancel concurrente ganó (ConditionExpression)
 
     def activos(self):
         return [self.plan] if self.plan and self.plan["status"] in ("pending", "running") else []
@@ -41,7 +42,10 @@ class FakePlans:
         return [f"tg{idx}-{i}" for i in range(150 if idx == 0 else 150)]
 
     def registrar_dispatch(self, plan_id, *, channel, index, n, target, now):
+        if not self.claim:
+            return False  # cancelado en carrera: el dispatcher debe abortar sin encolar
         self.dispatched.append({"ch": channel, "idx": index, "n": n, "target": target, "now": now})
+        return True
 
     def limpiar_inflight(self, plan_id):
         self.cleared += 1
@@ -67,8 +71,8 @@ class FakeQueue:
     def __init__(self):
         self.calls = []
 
-    def encolar_uno(self, text, chat_ids, image_url=None, image_key=None, broadcast_id=None, batch_index=0):
-        self.calls.append({"text": text, "n": len(chat_ids), "bid": broadcast_id, "idx": batch_index})
+    def encolar_uno(self, text, chat_ids, image_url=None, image_key=None, broadcast_id=None, batch_index=0, pid=None):
+        self.calls.append({"text": text, "n": len(chat_ids), "bid": broadcast_id, "idx": batch_index, "pid": pid})
 
 
 class FakeWa:
@@ -108,12 +112,27 @@ class DispatchTests(unittest.TestCase):
     def test_sin_planes(self):
         self.assertEqual(_disp(FakePlans(None))(), {"planes": 0})
 
+    def test_pausado_no_despacha(self):
+        plans, queue = FakePlans(_plan()), FakeQueue()
+        res = _disp(plans, queue=queue, config=FakeConfig(sending_enabled=False))()
+        self.assertEqual(res, {"paused": True})
+        self.assertEqual(queue.calls, [])  # nada se libera
+        self.assertEqual(plans.dispatched, [])
+
     def test_despacha_primer_lote_tg(self):
         plans, queue = FakePlans(_plan()), FakeQueue()
         res = _disp(plans, queue=queue)()
         self.assertEqual(res["despachado"], "TG#0")
         self.assertEqual(queue.calls[0]["bid"], "b1")
         self.assertEqual(plans.dispatched[0], {"ch": "tg", "idx": 0, "n": 150, "target": 150, "now": 1000})
+
+    def test_cancelado_en_carrera_no_encola(self):
+        plans = FakePlans(_plan(), claim=False)  # el claim condicional falla (cancel ganó)
+        queue = FakeQueue()
+        res = _disp(plans, queue=queue)()
+        self.assertEqual(res, {"plan": "p1", "cancelado": True})
+        self.assertEqual(queue.calls, [])  # NO se libera el lote
+        self.assertEqual(plans.dispatched, [])
 
     def test_espera_si_lote_en_vuelo_no_termino(self):
         plans = FakePlans(_plan(status="running", in_flight="TG#0", in_flight_channel="tg",

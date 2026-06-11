@@ -435,6 +435,11 @@ Resources:
                   - !GetAtt BroadcastsTable.Arn
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem # ¿el plan fue cancelado? -> descartar lote en vuelo
+                Resource:
+                  - !GetAtt PlansTable.Arn
+              - Effect: Allow
+                Action:
                   - sqs:ReceiveMessage
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
@@ -785,6 +790,7 @@ Resources:
                   - dynamodb:BatchWriteItem # lotes del plan
                   - dynamodb:Scan # vista de programación / monitoreo
                   - dynamodb:GetItem
+                  - dynamodb:UpdateItem # cancelar difusiones pendientes
                 Resource:
                   - !GetAtt PlansTable.Arn
               - Effect: Allow

@@ -47,6 +47,10 @@ class DispatchCampaigns:
 
     def __call__(self) -> dict:
         cfg = self._config.get()
+        # Interruptor maestro: si los envíos están desactivados, no se despacha NADA
+        # (ni Telegram ni WhatsApp). Las difusiones quedan en espera hasta reactivar.
+        if not cfg.get("sending_enabled", True):
+            return {"paused": True}
         now = int(self._now())
         planes = self._plans.activos()
         if not planes:
@@ -105,6 +109,10 @@ class DispatchCampaigns:
         if tg_next < int(plan.get("tg_batches", 0)):
             ids = self._plans.ids_lote_tg(pid, tg_next)
             target = int(plan.get("tg_dispatched", 0)) + len(ids)
+            # Reclama el lote ANTES de encolar: si un cancel concurrente ganó, no se envía.
+            if not self._plans.registrar_dispatch(pid, channel="tg", index=tg_next, n=len(ids), target=target, now=now):
+                logger.info("Plan %s cancelado en carrera; no se despacha TG#%d", pid, tg_next)
+                return {"plan": pid, "cancelado": True}
             self._queue.encolar_uno(
                 plan.get("text", ""),
                 ids,
@@ -112,8 +120,8 @@ class DispatchCampaigns:
                 image_key=plan.get("image_key") or None,
                 broadcast_id=bid,
                 batch_index=tg_next,
+                pid=pid,
             )
-            self._plans.registrar_dispatch(pid, channel="tg", index=tg_next, n=len(ids), target=target, now=now)
             logger.info("Plan %s: despachado TG#%d (%d destinatarios)", pid, tg_next, len(ids))
             return {"plan": pid, "despachado": f"TG#{tg_next}", "n": len(ids)}
 
@@ -123,6 +131,10 @@ class DispatchCampaigns:
             wa_total = int(plan.get("wa_total", 0))
             limit = max(0, min(bs, wa_total - offset))
             target = int(plan.get("wa_dispatched", 0)) + limit
+            # Reclama el lote ANTES de llamar al servicio: si se canceló en carrera, no se envía.
+            if not self._plans.registrar_dispatch(pid, channel="wa", index=wa_next, n=limit, target=target, now=now):
+                logger.info("Plan %s cancelado en carrera; no se despacha WA#%d", pid, wa_next)
+                return {"plan": pid, "cancelado": True}
             self._whatsapp.forward(
                 plan.get("wa_text", "") or plan.get("text", ""),
                 plan.get("wa_image_url") or None,
@@ -137,7 +149,6 @@ class DispatchCampaigns:
                 delay_min_ms=int(cfg.get("wa_delay_min", 3000)),
                 delay_max_ms=int(cfg.get("wa_delay_max", 9000)),
             )
-            self._plans.registrar_dispatch(pid, channel="wa", index=wa_next, n=limit, target=target, now=now)
             logger.info("Plan %s: despachado WA#%d (offset %d, %d destinatarios)", pid, wa_next, offset, limit)
             return {"plan": pid, "despachado": f"WA#{wa_next}", "n": limit}
 

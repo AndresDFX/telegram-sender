@@ -164,6 +164,9 @@ class BroadcastList:
 
     def __call__(self, text: str) -> dict[str, int]:
         cfg = self._config.get()
+        if not cfg.get("sending_enabled", True):
+            logger.info("Envíos PAUSADOS (sending_enabled=False); difusión de canal omitida")
+            return {"paused": True, "subscribers": 0}
         mensaje = componer_mensaje(
             text,
             markup_percentage=cfg["markup_percentage"],
@@ -259,6 +262,8 @@ class BroadcastList:
         contactos ad-hoc elegidos (telegram_ids/whatsapp_ids) > lista (telegram_list/whatsapp_list)
         > target configurado. WhatsApp manual EXIGE destinatarios concretos (no manda a todos)."""
         cfg = self._config.get()
+        if not cfg.get("sending_enabled", True):
+            raise ValueError("Envíos pausados: actívalos en la pestaña Programación para poder enviar.")
         wa_on = bool(whatsapp and self._whatsapp)
         wa_mode, wa_ids = self._wa_destino(cfg, whatsapp_list, whatsapp_ids)
         if wa_on and (wa_mode != "only" or not wa_ids):

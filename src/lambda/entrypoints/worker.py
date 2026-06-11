@@ -22,16 +22,22 @@ logger.setLevel(logging.INFO)
 deliver = None  # caso de uso DeliverBatch; inyectable en tests
 image_store = None  # S3ImageStore; inyectable en tests
 broadcasts = None  # DynamoDbBroadcastStore; inyectable en tests
+config_store = None  # DynamoDbConfigStore; inyectable en tests
+plans = None  # DynamoDbPlanStore; inyectable en tests
 
 
 def _ensure() -> None:
-    global deliver, image_store, broadcasts
+    global deliver, image_store, broadcasts, config_store, plans
     if deliver is None:
         deliver = wiring.build_deliver_batch()
     if image_store is None:
         image_store = wiring.build_image_store()
     if broadcasts is None:
         broadcasts = wiring.build_broadcast_store()
+    if config_store is None:
+        config_store = wiring.build_config_store()
+    if plans is None:
+        plans = wiring.build_plan_store()
 
 
 def _resolver_imagen(body: dict) -> str | None:
@@ -46,12 +52,32 @@ def _resolver_imagen(body: dict) -> str | None:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     _ensure()
+
+    # Interruptor maestro: si los envíos están desactivados, NO enviar. Confirmamos (ack)
+    # los lotes en vuelo sin entregarlos para no reintentarlos ni mandarlos al reactivar.
+    try:
+        if not config_store.get().get("sending_enabled", True):
+            logger.info("Envíos PAUSADOS; se descartan %d registro(s) sin enviar.", len(event.get("Records", [])))
+            return {"batchItemFailures": []}
+    except Exception:
+        logger.exception("No se pudo leer sending_enabled; continúo (fail-open al envío)")
+
     batch_item_failures: list[dict[str, str]] = []
 
     for record in event.get("Records", []):
         message_id = record.get("messageId")
         try:
             body = json.loads(record["body"])
+            # Si el plan fue CANCELADO tras encolar este lote, se descarta sin enviar
+            # (honra 'cancelar pendientes' para lotes ya en vuelo en SQS). Ack, no reencola.
+            pid = body.get("pid")
+            if pid:
+                try:
+                    if plans.descartar(pid):
+                        logger.info("Plan %s cancelado/inexistente; lote %s descartado sin enviar", pid, message_id)
+                        continue
+                except Exception:
+                    logger.exception("No se pudo verificar el estado del plan %s; continúo (fail-open)", pid)
             stats = deliver(body["text"], body.get("chat_ids", []), _resolver_imagen(body))
             logger.info("Lote %s procesado: %s", body.get("batch_index"), stats.resumen())
             bid = body.get("broadcast_id")

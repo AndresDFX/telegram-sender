@@ -164,6 +164,7 @@ class DynamoDbConfigStore(ConfigStore):
         "whatsapp_lists",
         "whatsapp_target",
         # Anti-baneo / colas / ventana de envío (editable desde el panel).
+        "sending_enabled",  # interruptor maestro: si es False, NADA se envía (pausa total)
         "batch_size",
         "scheduling_enabled",
         "tg_delay_min",
@@ -211,6 +212,7 @@ class DynamoDbConfigStore(ConfigStore):
             "whatsapp_lists": [],
             "whatsapp_target": {"mode": "all", "lists": []},
             # --- Anti-baneo / colas / ventana ---
+            "sending_enabled": True,  # interruptor maestro de envíos (activar/desactivar)
             "batch_size": int(os.environ.get("BROADCAST_BATCH_SIZE", "150")),  # tope 150
             "scheduling_enabled": True,  # fraccionar y enviar 1 lote a la vez (secuencial)
             "tg_delay_min": float(os.environ.get("TG_DELAY_MIN", "1")),  # jitter Telegram (s)
@@ -241,6 +243,7 @@ class DynamoDbConfigStore(ConfigStore):
         # Anti-baneo / colas / ventana
         from domain.scheduling import cap_batch_size
 
+        cfg["sending_enabled"] = bool(cfg["sending_enabled"])
         cfg["batch_size"] = cap_batch_size(cfg["batch_size"])
         cfg["scheduling_enabled"] = bool(cfg["scheduling_enabled"])
         cfg["tg_delay_min"] = float(cfg["tg_delay_min"])
@@ -578,10 +581,14 @@ class DynamoDbPlanStore:
 
     def registrar_dispatch(
         self, plan_id: str, *, channel: str, index: int, n: int, target: int, now: int
-    ) -> None:
-        """Marca un lote como en vuelo: avanza el cursor del canal, fija in_flight y añade
-        una entrada a la bitácora ('lote programado a las HH:MM' -> target acumulado)."""
+    ) -> bool:
+        """Reclama un lote (avanza cursor, fija in_flight, añade bitácora) SI el plan sigue
+        despachable. Condicional sobre status != 'canceled' para que un cancel concurrente
+        SIEMPRE gane (no se puede 'resucitar' un plan cancelado). Devuelve True si reclamó,
+        False si el plan ya estaba cancelado (carrera con cancelar_pendientes)."""
         from decimal import Decimal
+
+        from botocore.exceptions import ClientError
 
         cursor = "tg_next" if channel == "tg" else "wa_next"
         disp = "tg_dispatched" if channel == "tg" else "wa_dispatched"
@@ -592,27 +599,35 @@ class DynamoDbPlanStore:
             "n": int(n),
             "target": int(target),
         }
-        self._t().update_item(
-            Key={"pid": plan_id, "sk": self._META},
-            UpdateExpression=(
-                "SET #st = :running, in_flight = :sk, in_flight_at = :now, "
-                "in_flight_channel = :ch, in_flight_target = :tgt, "
-                f"{cursor} = :nxt, {disp} = :disp, "
-                "dispatch_log = list_append(if_not_exists(dispatch_log, :empty), :entry)"
-            ),
-            ExpressionAttributeNames={"#st": "status"},
-            ExpressionAttributeValues={
-                ":running": "running",
-                ":sk": f"{channel.upper()}#{index:06d}",
-                ":now": Decimal(int(now)),
-                ":ch": channel,
-                ":tgt": Decimal(int(target)),
-                ":nxt": Decimal(int(index) + 1),
-                ":disp": Decimal(int(target)),
-                ":empty": [],
-                ":entry": [entry],
-            },
-        )
+        try:
+            self._t().update_item(
+                Key={"pid": plan_id, "sk": self._META},
+                UpdateExpression=(
+                    "SET #st = :running, in_flight = :sk, in_flight_at = :now, "
+                    "in_flight_channel = :ch, in_flight_target = :tgt, "
+                    f"{cursor} = :nxt, {disp} = :disp, "
+                    "dispatch_log = list_append(if_not_exists(dispatch_log, :empty), :entry)"
+                ),
+                ConditionExpression="attribute_exists(pid) AND #st <> :canceled",
+                ExpressionAttributeNames={"#st": "status"},
+                ExpressionAttributeValues={
+                    ":running": "running",
+                    ":canceled": "canceled",
+                    ":sk": f"{channel.upper()}#{index:06d}",
+                    ":now": Decimal(int(now)),
+                    ":ch": channel,
+                    ":tgt": Decimal(int(target)),
+                    ":nxt": Decimal(int(index) + 1),
+                    ":disp": Decimal(int(target)),
+                    ":empty": [],
+                    ":entry": [entry],
+                },
+            )
+            return True
+        except ClientError as error:
+            if error.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False  # cancelado en carrera: el cancel gana
+            raise
 
     def limpiar_inflight(self, plan_id: str) -> None:
         self._t().update_item(
@@ -639,12 +654,47 @@ class DynamoDbPlanStore:
         )
 
     def finalizar(self, plan_id: str, status: str = "done") -> None:
-        self._t().update_item(
-            Key={"pid": plan_id, "sk": self._META},
-            UpdateExpression="SET #st = :s, in_flight = :empty",
-            ExpressionAttributeNames={"#st": "status"},
-            ExpressionAttributeValues={":s": status, ":empty": ""},
-        )
+        from botocore.exceptions import ClientError
+
+        kwargs = {
+            "Key": {"pid": plan_id, "sk": self._META},
+            "UpdateExpression": "SET #st = :s, in_flight = :empty",
+            "ExpressionAttributeNames": {"#st": "status"},
+            "ExpressionAttributeValues": {":s": status, ":empty": ""},
+        }
+        # Cerrar a 'done' NO debe pisar un 'canceled' (cancelar siempre gana). El cancel sí
+        # aplica incondicionalmente sobre pending/running.
+        if status != "canceled":
+            kwargs["ConditionExpression"] = "#st <> :canceled"
+            kwargs["ExpressionAttributeValues"][":canceled"] = "canceled"
+        try:
+            self._t().update_item(**kwargs)
+        except ClientError as error:
+            if error.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+
+    def descartar(self, plan_id: str) -> bool:
+        """¿El worker debe DESCARTAR (no entregar) un lote de este plan? True si el plan ya
+        no existe o está cancelado. Honra 'cancelar pendientes' para lotes ya encolados en SQS."""
+        try:
+            item = self._t().get_item(
+                Key={"pid": plan_id, "sk": self._META}, ProjectionExpression="#st",
+                ExpressionAttributeNames={"#st": "status"},
+            ).get("Item")
+        except Exception:
+            return False  # ante duda, no bloquear el envío
+        if not item:
+            return True  # plan inexistente (borrado): descartar
+        return str(item.get("status", "")) == "canceled"
+
+    def cancelar_pendientes(self) -> int:
+        """Marca como 'canceled' todos los planes pendientes/en curso para que el dispatcher
+        NO los despache (ni al reactivar). Devuelve cuántos se cancelaron."""
+        n = 0
+        for p in self.activos():
+            self.finalizar(p["pid"], status="canceled")
+            n += 1
+        return n
 
     def listar(self, limit: int = 20) -> list[dict]:
         """Planes (PLAN) más recientes, con su bitácora, para la vista de programación."""

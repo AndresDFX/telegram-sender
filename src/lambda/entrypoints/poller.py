@@ -45,6 +45,10 @@ def _refresh_contacts() -> None:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     _ensure()
+    # Interruptor maestro: si los envíos están desactivados, no difundir (no se crean planes).
+    if not config_store.get().get("sending_enabled", True):
+        logger.info("Envíos PAUSADOS (sending_enabled=False); el poller no difunde.")
+        return {"paused": True}
     resultado = poll()
     _refresh_contacts()
     return resultado

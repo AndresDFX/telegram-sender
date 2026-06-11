@@ -89,9 +89,11 @@ class SqsBroadcastQueue(BroadcastQueue):
         image_key: str | None = None,
         broadcast_id: str | None = None,
         batch_index: int = 0,
+        pid: str | None = None,
     ) -> None:
         """Encola UN lote ya formado (sin trocear). Lo usa el dispatcher para liberar
-        exactamente un lote por tick (envío fraccionado y secuencial)."""
+        exactamente un lote por tick (envío fraccionado y secuencial). ``pid`` permite al
+        worker descartar el lote si su plan fue cancelado tras encolarlo."""
         if not self._url:
             raise RuntimeError("BROADCAST_QUEUE_URL no configurado")
         body = json.dumps(
@@ -102,6 +104,7 @@ class SqsBroadcastQueue(BroadcastQueue):
                 "image_url": image_url,
                 "image_key": image_key,
                 "broadcast_id": broadcast_id,
+                "pid": pid,
             }
         )
         self._client().send_message(QueueUrl=self._url, MessageBody=body)
