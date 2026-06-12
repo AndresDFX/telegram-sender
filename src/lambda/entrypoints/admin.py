@@ -499,20 +499,261 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return _json({"error": "not found"}, 404)
 
 
-_PAGE = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
+_PAGE = r"""<!doctype html><html lang="es" data-theme="dark"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Replica · Panel</title>
 <style>
+/* === DESIGN SYSTEM TOKENS (Replica) — fuente: docs/design-system/tokens.css === */
+/* Replica Design System — Tokens de diseño
+   Primario: #FD531E · Neutro base: #4A4A49
+   Generado automaticamente. Editar aqui es la fuente de verdad de los valores. */
+
+:root {
+  /* ============================================================
+     PALETA PRIMARIA / MARCA — Naranja (#FD531E = --color-primary-500)
+     Tints (50..400) mezclados hacia blanco; shades (600..900) hacia
+     negro calido, manteniendo el matiz ~13deg para coherencia.
+     ============================================================ */
+  --color-primary-50:  #FFF2ED;
+  --color-primary-100: #FFE0D3;
+  --color-primary-200: #FEC2A8;
+  --color-primary-300: #FD9E76;
+  --color-primary-400: #FD7848;
+  --color-primary-500: #FD531E; /* base de marca */
+  --color-primary-600: #E84410;
+  --color-primary-700: #BD350B;
+  --color-primary-800: #8F280A;
+  --color-primary-900: #5E1B08;
+
+  /* Alias semanticos de marca */
+  --color-primary:       var(--color-primary-500);
+  --color-primary-hover: var(--color-primary-600);
+  --color-primary-active:var(--color-primary-700);
+  --color-on-primary:    #FFFFFF; /* texto sobre primario */
+
+  /* ============================================================
+     ESCALA DE GRISES — armonizada con #4A4A49 (gris calido neutro).
+     Matiz ligeramente calido (sin azul) para casar con el naranja.
+     #4A4A49 se ubica en --color-gray-700.
+     ============================================================ */
+  --color-gray-50:  #FAFAF9;
+  --color-gray-100: #F4F4F3;
+  --color-gray-200: #E7E7E5;
+  --color-gray-300: #D2D2CF;
+  --color-gray-400: #A8A8A5;
+  --color-gray-500: #7C7C7A;
+  --color-gray-600: #5E5E5C;
+  --color-gray-700: #4A4A49; /* base neutra */
+  --color-gray-800: #333332;
+  --color-gray-900: #1C1C1B;
+
+  /* Utilitarios base */
+  --color-white: #FFFFFF;
+  --color-black: #0F0F0E;
+
+  /* ============================================================
+     COLORES SEMANTICOS (cada uno con texto fuerte + fondo suave)
+     ============================================================ */
+  --color-success:        #1E9E5A;
+  --color-success-bg:     #E5F6EC;
+  --color-success-border: #A7E0BF;
+
+  --color-warning:        #E0900B;
+  --color-warning-bg:     #FDF3DF;
+  --color-warning-border: #F4D58A;
+
+  --color-danger:         #DC362E;
+  --color-danger-bg:      #FCEAE9;
+  --color-danger-border:  #F3B5B2;
+
+  --color-info:           #1E6FE0;
+  --color-info-bg:        #E8F0FD;
+  --color-info-border:    #AECBF6;
+
+  /* ============================================================
+     SUPERFICIE / TEXTO — Tema CLARO (por defecto)
+     ============================================================ */
+  --color-bg:         var(--color-gray-50);   /* fondo de pagina */
+  --color-surface:    var(--color-white);     /* tarjetas, paneles */
+  --color-surface-2:  var(--color-gray-100);  /* superficie elevada/zebra */
+  --color-text:       var(--color-gray-900);  /* texto principal */
+  --color-text-muted: var(--color-gray-500);  /* texto secundario */
+  --color-border:     var(--color-gray-200);  /* bordes sutiles */
+  --color-border-strong: var(--color-gray-300);
+  --color-ring:       var(--color-primary-500);/* color del focus ring */
+  --color-overlay:    rgba(28, 28, 27, 0.55); /* scrim de modales */
+
+  /* ============================================================
+     TIPOGRAFIA
+     ============================================================ */
+  --font-family-base: system-ui, -apple-system, "Segoe UI", Roboto,
+                      "Helvetica Neue", Arial, "Noto Sans", sans-serif,
+                      "Apple Color Emoji", "Segoe UI Emoji";
+  --font-family-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+                      Consolas, "Liberation Mono", monospace;
+
+  /* Escala de tamaños (base 16px, ratio ~1.2 Minor Third) */
+  --text-xs:   0.75rem;   /* 12px */
+  --text-sm:   0.875rem;  /* 14px */
+  --text-base: 1rem;      /* 16px */
+  --text-md:   1.125rem;  /* 18px */
+  --text-lg:   1.25rem;   /* 20px */
+  --text-xl:   1.5rem;    /* 24px */
+  --text-2xl:  1.875rem;  /* 30px */
+  --text-3xl:  2.25rem;   /* 36px */
+  --text-4xl:  3rem;      /* 48px */
+
+  /* Pesos */
+  --font-weight-regular:  400;
+  --font-weight-medium:   500;
+  --font-weight-semibold: 600;
+  --font-weight-bold:     700;
+
+  /* Line-heights */
+  --leading-none:    1;
+  --leading-tight:   1.25;
+  --leading-snug:    1.375;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.625;
+
+  /* Letter-spacing */
+  --tracking-tighter: -0.05em;
+  --tracking-tight:   -0.025em;
+  --tracking-normal:  0em;
+  --tracking-wide:    0.025em;
+  --tracking-wider:   0.05em;
+
+  /* ============================================================
+     ESPACIADO — escala base 4px
+     ============================================================ */
+  --space-0:  0;
+  --space-1:  0.25rem;  /* 4px  */
+  --space-2:  0.5rem;   /* 8px  */
+  --space-3:  0.75rem;  /* 12px */
+  --space-4:  1rem;     /* 16px */
+  --space-5:  1.25rem;  /* 20px */
+  --space-6:  1.5rem;   /* 24px */
+  --space-7:  2rem;     /* 32px */
+  --space-8:  2.5rem;   /* 40px */
+  --space-9:  3rem;     /* 48px */
+  --space-10: 4rem;     /* 64px */
+  --space-11: 5rem;     /* 80px */
+  --space-12: 6rem;     /* 96px */
+
+  /* ============================================================
+     RADIOS
+     ============================================================ */
+  --radius-sm:   0.25rem;  /* 4px  */
+  --radius-md:   0.5rem;   /* 8px  */
+  --radius-lg:   0.75rem;  /* 12px */
+  --radius-xl:   1rem;     /* 16px */
+  --radius-full: 9999px;
+
+  /* ============================================================
+     SOMBRAS (tono calido derivado del gris de marca)
+     ============================================================ */
+  --shadow-sm: 0 1px 2px 0 rgba(28, 28, 27, 0.06);
+  --shadow-md: 0 2px 4px -1px rgba(28, 28, 27, 0.08),
+              0 4px 8px -2px rgba(28, 28, 27, 0.08);
+  --shadow-lg: 0 4px 8px -2px rgba(28, 28, 27, 0.10),
+              0 12px 20px -4px rgba(28, 28, 27, 0.10);
+  --shadow-xl: 0 8px 16px -4px rgba(28, 28, 27, 0.12),
+              0 24px 40px -8px rgba(28, 28, 27, 0.14);
+
+  /* ============================================================
+     Z-INDEX
+     ============================================================ */
+  --z-base:     0;
+  --z-dropdown: 1000;
+  --z-sticky:   1100;
+  --z-modal:    1300;
+  --z-toast:    1400;
+
+  /* ============================================================
+     TRANSICIONES
+     ============================================================ */
+  --transition-fast: 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 320ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ============================================================
+     FOCUS RING
+     ============================================================ */
+  --focus-ring-width:  2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color:  var(--color-ring);
+  --focus-ring: 0 0 0 var(--focus-ring-offset) var(--color-surface),
+               0 0 0 calc(var(--focus-ring-offset) + var(--focus-ring-width)) var(--color-ring);
+}
+
+/* ============================================================
+   TEMA OSCURO — via atributo explicito [data-theme="dark"]
+   ============================================================ */
+[data-theme="dark"] {
+  --color-bg:         var(--color-gray-900);
+  --color-surface:    var(--color-gray-800);
+  --color-surface-2:  #2A2A29;            /* entre 800 y 700 */
+  --color-text:       var(--color-gray-50);
+  --color-text-muted: var(--color-gray-400);
+  --color-border:     #3A3A39;            /* entre 800 y 700 */
+  --color-border-strong: var(--color-gray-600);
+  --color-ring:       var(--color-primary-400);
+  --color-overlay:    rgba(0, 0, 0, 0.65);
+
+  /* Primario: aclarado para legibilidad sobre fondos oscuros */
+  --color-primary:       var(--color-primary-400);
+  --color-primary-hover: var(--color-primary-300);
+  --color-primary-active:var(--color-primary-500);
+  --color-on-primary:    #1C1C1B;
+
+  /* Semanticos: fondos suaves re-derivados a baja luminancia */
+  --color-success-bg: #11331F;
+  --color-warning-bg: #33270A;
+  --color-danger-bg:  #38120F;
+  --color-info-bg:    #0F2440;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.40);
+  --shadow-md: 0 2px 4px -1px rgba(0, 0, 0, 0.45),
+              0 4px 8px -2px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 4px 8px -2px rgba(0, 0, 0, 0.50),
+              0 12px 20px -4px rgba(0, 0, 0, 0.50);
+  --shadow-xl: 0 8px 16px -4px rgba(0, 0, 0, 0.55),
+              0 24px 40px -8px rgba(0, 0, 0, 0.60);
+}
+
+/* Fallback automatico por preferencia del SO (si no hay data-theme) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg:         var(--color-gray-900);
+    --color-surface:    var(--color-gray-800);
+    --color-surface-2:  #2A2A29;
+    --color-text:       var(--color-gray-50);
+    --color-text-muted: var(--color-gray-400);
+    --color-border:     #3A3A39;
+    --color-border-strong: var(--color-gray-600);
+    --color-ring:       var(--color-primary-400);
+    --color-overlay:    rgba(0, 0, 0, 0.65);
+    --color-primary:       var(--color-primary-400);
+    --color-primary-hover: var(--color-primary-300);
+    --color-primary-active:var(--color-primary-500);
+    --color-on-primary:    #1C1C1B;
+    --color-success-bg: #11331F;
+    --color-warning-bg: #33270A;
+    --color-danger-bg:  #38120F;
+    --color-info-bg:    #0F2440;
+  }
+}
+
 :root{
-  --bg:#0a0e1a; --bg2:#0d1322;
-  --card:#10172a; --card2:#0f1730; --elev:#0c1322;
-  --bd:#1f2840; --bd2:#28324f;
-  --tx:#e8ecf8; --tx2:#c3cbe4; --mut:#7c87a8; --mut2:#5c668a;
-  --ac:#6366f1; --ac-h:#7c80f7; --ac2:#22d3ee;
+  --bg:#1C1C1B; --bg2:#141413;
+  --card:#333332; --card2:#2A2A29; --elev:#2A2A29;
+  --bd:#3A3A39; --bd2:#5E5E5C;
+  --tx:#FAFAF9; --tx2:#E7E7E5; --mut:#A8A8A5; --mut2:#7C7C7A;
+  --ac:#FD531E; --ac-h:#FD7848; --ac2:#FD9E76;
   --ok:#34d399; --warn:#fbbf24; --bad:#fb7185; --info:#60a5fa;
   --r:14px; --r-sm:10px;
   --sh:0 1px 0 rgba(255,255,255,.02) inset, 0 18px 50px -20px rgba(0,0,0,.7);
-  --ring:0 0 0 3px rgba(99,102,241,.22);
+  --ring:0 0 0 3px rgba(253,83,30,.22);
   --fs:13px;
 }
 *{box-sizing:border-box}
@@ -523,26 +764,26 @@ body{
   min-height:100vh; font-size:var(--fs); line-height:1.5;
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   background-image:
-    radial-gradient(900px 500px at 88% -8%, rgba(99,102,241,.12), transparent 60%),
-    radial-gradient(700px 420px at 8% 0%, rgba(34,211,238,.06), transparent 55%);
+    radial-gradient(900px 500px at 88% -8%, rgba(253,83,30,.12), transparent 60%),
+    radial-gradient(700px 420px at 8% 0%, rgba(253,120,72,.06), transparent 55%);
   background-attachment:fixed;
 }
-::selection{background:rgba(99,102,241,.35);color:#fff}
+::selection{background:rgba(253,83,30,.35);color:#fff}
 ::-webkit-scrollbar{width:10px;height:10px}
-::-webkit-scrollbar-thumb{background:#243056;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
-::-webkit-scrollbar-thumb:hover{background:#33406b;background-clip:padding-box}
+::-webkit-scrollbar-thumb{background:#3A3A39;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:#5E5E5C;background-clip:padding-box}
 a{color:var(--ac2)}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
-  background:var(--elev);border:1px solid var(--bd);padding:1px 6px;border-radius:6px;color:#b9c4ec}
+  background:var(--elev);border:1px solid var(--bd);padding:1px 6px;border-radius:6px;color:#E7E7E5}
 
 /* ---------- marca ---------- */
 .brand{display:flex;align-items:center;gap:11px}
 .brand .wordmark{
   font-weight:800;font-size:20px;letter-spacing:-.5px;
-  background:linear-gradient(95deg,#c7cdff,#7bdcf0);
+  background:linear-gradient(95deg,#FFD3C2,#FD7848);
   -webkit-background-clip:text;background-clip:text;color:transparent;
 }
-.brand svg{border-radius:11px;filter:drop-shadow(0 6px 18px rgba(99,102,241,.45))}
+.brand svg{border-radius:11px;filter:drop-shadow(0 6px 18px rgba(253,83,30,.45))}
 .brand-lg{justify-content:center;margin-bottom:6px}
 .brand-lg .wordmark{font-size:30px}
 .logo{font-size:32px;margin-bottom:10px}
@@ -564,7 +805,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
 #app{display:none}
 header{
   display:flex;align-items:center;justify-content:space-between;
-  background:rgba(10,14,26,.72);backdrop-filter:blur(14px) saturate(140%);
+  background:rgba(28,28,27,.72);backdrop-filter:blur(14px) saturate(140%);
   padding:13px 22px;border-bottom:1px solid var(--bd);
   position:sticky;top:0;z-index:5;
 }
@@ -575,7 +816,7 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
 /* ---------- nav (pestañas horizontales) ---------- */
 .nav{
   position:sticky;top:50px;z-index:4;
-  background:rgba(10,14,26,.8);backdrop-filter:blur(14px) saturate(140%);
+  background:rgba(28,28,27,.8);backdrop-filter:blur(14px) saturate(140%);
   display:flex;gap:6px;justify-content:center;align-items:center;
   padding:11px 14px;border-bottom:1px solid var(--bd);flex-wrap:wrap;
 }
@@ -586,7 +827,7 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
 }
 .nav button:hover{color:var(--tx2);background:rgba(255,255,255,.04)}
 .nav button.on{
-  background:rgba(99,102,241,.14);color:#cdd1ff;border-color:rgba(99,102,241,.4);
+  background:rgba(253,83,30,.14);color:#FFE0D3;border-color:rgba(253,83,30,.4);
 }
 
 /* ---------- cards ---------- */
@@ -609,16 +850,16 @@ input,textarea,select{
 }
 input::placeholder,textarea::placeholder{color:var(--mut2)}
 input:hover,textarea:hover,select:hover{border-color:var(--bd2)}
-input:focus,textarea:focus,select:focus{outline:0;border-color:var(--ac);box-shadow:var(--ring);background:#0d1426}
+input:focus,textarea:focus,select:focus{outline:0;border-color:var(--ac);box-shadow:var(--ring);background:#262625}
 textarea{min-height:88px;resize:vertical;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:13px;line-height:1.55}
 select{appearance:none;-webkit-appearance:none;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237c87a8' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>");
   background-repeat:no-repeat;background-position:right 12px center;padding-right:36px;cursor:pointer}
 input[type=file]{padding:9px 12px;color:var(--mut);cursor:pointer}
 input[type=file]::file-selector-button{
-  background:#1b2440;border:1px solid var(--bd2);color:var(--tx2);
+  background:#3A3A39;border:1px solid var(--bd2);color:var(--tx2);
   border-radius:8px;padding:7px 13px;margin-right:12px;cursor:pointer;font:inherit;font-weight:600}
-input[type=file]::file-selector-button:hover{background:#222c4d}
+input[type=file]::file-selector-button:hover{background:#4A4A49}
 input[type=checkbox],input[type=radio]{accent-color:var(--ac);width:auto;cursor:pointer}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 
@@ -630,10 +871,10 @@ button{
 }
 button:hover{background:var(--ac-h)}
 button:active{transform:translateY(1px)}
-button:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(99,102,241,.35)}
+button:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(253,83,30,.35)}
 button:disabled{opacity:.5;cursor:not-allowed;transform:none}
-button.sec{background:#1b2440;color:var(--tx2);border-color:var(--bd2)}
-button.sec:hover{background:#222c4d}
+button.sec{background:#3A3A39;color:var(--tx2);border-color:var(--bd2)}
+button.sec:hover{background:#4A4A49}
 button.ghost{background:transparent;border:1px solid var(--bd2);color:var(--mut)}
 button.ghost:hover{background:rgba(255,255,255,.04);color:var(--tx2)}
 
@@ -661,7 +902,7 @@ td b{font-weight:600;color:var(--tx)}
 .pill.inactive{background:rgba(251,191,36,.12);color:var(--warn);border-color:rgba(251,191,36,.26)}
 /* estados de envíos (reutiliza .pill) */
 .pill.queued{background:rgba(96,165,250,.13);color:var(--info);border-color:rgba(96,165,250,.3)}
-.pill.sending{background:rgba(34,211,238,.12);color:var(--ac2);border-color:rgba(34,211,238,.28)}
+.pill.sending{background:rgba(253,120,72,.12);color:var(--ac2);border-color:rgba(253,120,72,.28)}
 .pill.done{background:rgba(52,211,153,.13);color:var(--ok);border-color:rgba(52,211,153,.28)}
 .pill.partial{background:rgba(251,191,36,.12);color:var(--warn);border-color:rgba(251,191,36,.26)}
 .pill.failed{background:rgba(251,113,133,.12);color:var(--bad);border-color:rgba(251,113,133,.3)}
@@ -676,13 +917,13 @@ td b{font-weight:600;color:var(--tx)}
 /* ---------- toast ---------- */
 .toast{
   position:fixed;bottom:24px;right:24px;z-index:50;
-  background:#0f2a21;color:#9ff0d2;border:1px solid rgba(52,211,153,.35);
+  background:#11331F;color:#9ff0d2;border:1px solid rgba(52,211,153,.35);
   padding:12px 18px;border-radius:var(--r-sm);font-weight:600;font-size:13px;
   box-shadow:0 18px 50px -16px rgba(0,0,0,.7);
   opacity:0;transform:translateY(12px);transition:opacity .25s,transform .25s;pointer-events:none;
 }
 .toast.show{opacity:1;transform:none}
-.toast.err{background:#2a1015;color:#ffc0c8;border-color:rgba(251,113,133,.4)}
+.toast.err{background:#38120F;color:#ffc0c8;border-color:rgba(251,113,133,.4)}
 
 /* ---------- tab visibility ---------- */
 main>.card{display:none;animation:fade .22s ease}
@@ -710,7 +951,7 @@ main>.card.show{display:block}
 }
 .chan:hover{border-color:var(--bd2)}
 .chan input{margin:0}
-.chan.tg.on{border-color:rgba(99,102,241,.55);background:rgba(99,102,241,.1);color:#cdd1ff}
+.chan.tg.on{border-color:rgba(253,83,30,.55);background:rgba(253,83,30,.1);color:#FFE0D3}
 .chan.wa.on{border-color:rgba(52,211,153,.5);background:rgba(52,211,153,.1);color:#a9f0d4}
 .chan .dot{width:8px;height:8px;border-radius:50%;background:var(--mut)}
 .chan.tg.on .dot{background:var(--ac)}
@@ -730,7 +971,7 @@ main>.card.show{display:block}
 .bc-msg{max-width:340px}
 .bc-msg b{display:block;color:var(--tx);font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bc-meta{color:var(--mut);font-size:11.5px;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.bc-src{text-transform:uppercase;letter-spacing:.5px;font-weight:700;font-size:10px;color:#8b96b8;
+.bc-src{text-transform:uppercase;letter-spacing:.5px;font-weight:700;font-size:10px;color:#A8A8A5;
   background:var(--elev);border:1px solid var(--bd);border-radius:5px;padding:1px 6px}
 
 /* progreso por canal */
@@ -743,7 +984,7 @@ main>.card.show{display:block}
 .chprog .ch .num .fail{color:var(--bad)}
 .chprog .ch .muted{color:var(--mut)}
 .bar{flex:1;height:5px;background:var(--elev);border:1px solid var(--bd);border-radius:999px;overflow:hidden;min-width:48px}
-.bar>i{display:block;height:100%;width:0;border-radius:999px;transition:width .5s ease;background:linear-gradient(90deg,var(--ac),#818cf8)}
+.bar>i{display:block;height:100%;width:0;border-radius:999px;transition:width .5s ease;background:linear-gradient(90deg,var(--ac),#FD9E76)}
 .bar.wa>i{background:linear-gradient(90deg,var(--ok),#5eead4)}
 .bar.full>i{background:var(--ok)}
 .bar.err>i{background:var(--bad)}
@@ -778,19 +1019,19 @@ main>.card.show{display:block}
    ============================================================ */
 
 :root{
-  --ac-soft:rgba(99,102,241,.14);
-  --ac2-soft:rgba(34,211,238,.12);
+  --ac-soft:rgba(253,83,30,.14);
+  --ac2-soft:rgba(253,120,72,.12);
   --ok-soft:rgba(52,211,153,.12);
   --warn-soft:rgba(251,191,36,.12);
   --bad-soft:rgba(251,113,133,.12);
   --r-lg:18px;
-  --tx3:#9aa4c6;            /* secundario un punto mas contrastado que --mut */
+  --tx3:#A8A8A5;            /* secundario un punto mas contrastado que --mut */
   --sh-sm:0 6px 18px -10px rgba(0,0,0,.6);
 }
 
 /* ------------------------------------------------------------
-   1) FIX: filas de listas con separador #eee (roto en oscuro)
-   El JS pinta inline border-bottom:1px solid #eee (admin.py L854);
+   1) FIX: filas de listas con separador #3A3A39 (roto en oscuro)
+   El JS pinta inline border-bottom:1px solid #3A3A39 (admin.py L854);
    lo anulamos y convertimos cada fila en un item legible.
    ------------------------------------------------------------ */
 #tg_lists>div, #wa_lists>div{
@@ -826,13 +1067,13 @@ main>.card.show{display:block}
 }
 .callout::before{content:"i";flex:none;width:18px;height:18px;border-radius:50%;
   display:grid;place-items:center;font-weight:800;font-size:11px;
-  background:var(--info);color:#04121f;margin-top:1px}
+  background:var(--info);color:#0F2440;margin-top:1px}
 .callout.warn{border-left-color:var(--warn);background:var(--warn-soft)}
-.callout.warn::before{content:"!";background:var(--warn);color:#3a2c00}
+.callout.warn::before{content:"!";background:var(--warn);color:#33270A}
 .callout.danger{border-left-color:var(--bad);background:var(--bad-soft)}
-.callout.danger::before{content:"!";background:var(--bad);color:#2a0a0f}
+.callout.danger::before{content:"!";background:var(--bad);color:#38120F}
 .callout.ok{border-left-color:var(--ok);background:var(--ok-soft)}
-.callout.ok::before{content:"\2713";background:var(--ok);color:#04130d}
+.callout.ok::before{content:"\2713";background:var(--ok);color:#11331F}
 .callout b{color:var(--tx)}
 /* fallback: ultimo .hint de la tarjeta de WhatsApp (aviso de baneo) resaltado */
 .card[data-tab="whatsapp"] > .hint:last-of-type{
@@ -851,8 +1092,8 @@ main>.card.show{display:block}
 }
 .empty-state .ico{
   width:56px;height:56px;border-radius:16px;display:grid;place-items:center;
-  font-size:26px;background:var(--ac-soft);border:1px solid rgba(99,102,241,.28);
-  color:#cdd1ff;margin-bottom:4px;
+  font-size:26px;background:var(--ac-soft);border:1px solid rgba(253,83,30,.28);
+  color:#FFE0D3;margin-bottom:4px;
 }
 .empty-state h3{margin:0;font-size:15px;color:var(--tx)}
 .empty-state p{margin:0;max-width:340px;font-size:12.5px;line-height:1.6}
@@ -866,7 +1107,7 @@ main>.card.show{display:block}
 .skeleton{pointer-events:none}
 .sk-line{
   height:12px;border-radius:6px;margin:9px 0;
-  background:linear-gradient(90deg,var(--elev) 25%,#16203c 37%,var(--elev) 63%);
+  background:linear-gradient(90deg,var(--elev) 25%,#0F2440 37%,var(--elev) 63%);
   background-size:400% 100%;animation:sk 1.3s ease infinite;
 }
 .sk-line.lg{height:26px;width:60%}
@@ -883,16 +1124,16 @@ main>.card.show{display:block}
   animation:spin .6s linear infinite;
 }
 @keyframes spin{to{transform:rotate(360deg)}}
-button.ok{background:var(--ok);border-color:transparent;color:#04130d}
+button.ok{background:var(--ok);border-color:transparent;color:#11331F}
 button.ok:hover{background:#46e0a9}
 .err:empty{margin-top:0;min-height:0}
 /* toasts: icono, variantes y barra de auto-cierre */
 .toast{display:flex;align-items:center;gap:9px;padding-right:16px;position:relative;overflow:hidden}
 .toast::before{content:"\2713";font-weight:800}
 .toast.err::before{content:"!"}
-.toast.info{background:#0c1d33;color:#bcd6ff;border-color:rgba(96,165,250,.35)}
+.toast.info{background:#0F2440;color:#bcd6ff;border-color:rgba(96,165,250,.35)}
 .toast.info::before{content:"i"}
-.toast.warn{background:#2a230d;color:#f3dca0;border-color:rgba(251,191,36,.4)}
+.toast.warn{background:#33270A;color:#f3dca0;border-color:rgba(251,191,36,.4)}
 .toast.warn::before{content:"!"}
 .toast.show::after{
   content:"";position:absolute;left:0;bottom:0;height:2px;width:100%;
@@ -954,7 +1195,7 @@ th input[type=checkbox],td input[type=checkbox]{transform:scale(1.05)}
 }
 tbody tr:hover td{background:rgba(255,255,255,.03)}
 /* badge de origen del envio mas legible */
-.bc-src{background:var(--ac-soft);border-color:rgba(99,102,241,.28);color:#b9c0ee}
+.bc-src{background:var(--ac-soft);border-color:rgba(253,83,30,.28);color:#E7E7E5}
 /* pildora "sending" pulsa para indicar actividad */
 .pill.sending{position:relative}
 .pill.sending::after{
@@ -981,7 +1222,7 @@ img.preview{box-shadow:var(--sh-sm)}
 </style></head><body>
 
 <div id="login"><div class="box">
-  <div class="brand brand-lg"><svg viewBox="0 0 48 48" width="46" height="46" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div>
+  <div class="brand brand-lg"><svg viewBox="0 0 48 48" width="46" height="46" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div>
   <p style="text-align:center">Tu lista de precios, replicada y enviada en segundos.</p>
   <label>Usuario</label><input id="lu" autocomplete="username" value="admin">
   <label>Contraseña</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
@@ -990,7 +1231,7 @@ img.preview{box-shadow:var(--sh-sm)}
 </div></div>
 
 <div id="app">
- <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="conn_tg" class="pill" title="Estado del bot de Telegram" style="margin-right:6px"></span><span id="conn_wa" class="pill" title="Estado del servicio WhatsApp" style="margin-right:6px"></span><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span>
+ <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="conn_tg" class="pill" title="Estado del bot de Telegram" style="margin-right:6px"></span><span id="conn_wa" class="pill" title="Estado del servicio WhatsApp" style="margin-right:6px"></span><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span>
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
  <nav class="nav">
    <button data-tab="inicio" onclick="showTab('inicio')">🏠 Inicio</button>
@@ -1536,7 +1777,7 @@ function renderLists(ch){ const cont=$(listsBox(ch)); cont.innerHTML='';
   const active=new Set((TGT[ch]||{}).lists||[]);
   if(!LISTS[ch].length){ cont.innerHTML='<div class="hint">Sin listas todavía.</div>'; }
   LISTS[ch].forEach((l,i)=>{ const row=document.createElement('div');
-    row.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid #eee';
+    row.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid #3A3A39';
     row.innerHTML=`<label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin:0"><input type="checkbox" ${active.has(l.name)?'checked':''} style="width:auto" onchange="toggleListActive('${ch}',${i},this.checked)"> <b>${l.name}</b></label>`+
       `<span class="hint">${l.ids.length} miembros</span>`+
       `<button class="sec" onclick="addToList('${ch}',${i})">+ marcados</button>`+
