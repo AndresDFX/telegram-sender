@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replica · Design System (preview)</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<style>
+  /* Chrome del preview (namespaced .dspv-* para no chocar con los componentes) */
+  body{margin:0;background:var(--color-bg,#0a0e1a);color:var(--color-text,#e8eaf0);
+       font-family:var(--font-family,system-ui,-apple-system,Segoe UI,Roboto,sans-serif);line-height:1.5}
+  .dspv-top{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;
+       gap:16px;padding:14px 24px;background:var(--color-surface,#11151f);border-bottom:1px solid var(--color-border,#222);
+       backdrop-filter:blur(8px)}
+  .dspv-top h1{font-size:16px;margin:0;letter-spacing:.3px}
+  .dspv-top h1 b{color:var(--color-primary,#FD531E)}
+  .dspv-wrap{display:grid;grid-template-columns:200px 1fr;gap:0;align-items:start}
+  .dspv-nav{position:sticky;top:57px;align-self:start;padding:18px 12px;display:flex;flex-direction:column;gap:2px;
+       border-right:1px solid var(--color-border,#222);max-height:calc(100vh - 57px);overflow:auto}
+  .dspv-nav a{color:var(--color-text-muted,#8b93a7);text-decoration:none;padding:7px 12px;border-radius:8px;font-size:13px;text-transform:capitalize}
+  .dspv-nav a:hover{background:rgba(253,83,30,.10);color:var(--color-primary,#FD531E)}
+  .dspv-main{padding:24px 32px;max-width:1100px}
+  .dspv-section{margin:0 0 48px}
+  .dspv-section>h2{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--color-primary,#FD531E);
+       border-bottom:1px solid var(--color-border,#222);padding-bottom:8px;margin:0 0 20px;text-transform:capitalize}
+  .dspv-specimen{margin:0 0 28px}
+  .dspv-specimen h3{font-size:15px;margin:0 0 4px}
+  .dspv-anat{font-size:13px;color:var(--color-text-muted,#8b93a7);margin:0 0 6px}
+  .dspv-meta{font-size:12px;color:var(--color-text-muted,#8b93a7);margin:0 0 12px}
+  .dspv-stage{padding:22px;border:1px dashed var(--color-border,#333);border-radius:12px;
+       background:var(--color-surface-2,rgba(255,255,255,.02));display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
+  .dspv-props{width:100%;border-collapse:collapse;margin:12px 0 0;font-size:12.5px}
+  .dspv-props th,.dspv-props td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--color-border,#222);vertical-align:top}
+  .dspv-props th{color:var(--color-text-muted,#8b93a7);text-transform:uppercase;font-size:10.5px;letter-spacing:.5px}
+  .dspv-props code{font-size:12px}
+  .dspv-toggle{cursor:pointer;border:1px solid var(--color-border,#333);background:transparent;color:inherit;
+       padding:6px 12px;border-radius:999px;font-size:12px}
+</style>
+</head>
+<body>
+  <header class="dspv-top">
+    <h1><b>Replica</b> · Design System</h1>
+    <button class="dspv-toggle" onclick="var h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'">Tema claro / oscuro</button>
+  </header>
+  <div class="dspv-wrap">
+    <nav class="dspv-nav"><a href="#fam-botones-buttons-">Botones (Buttons)</a><a href="#fam-formularios">formularios</a><a href="#fam-tarjetas-cards-">Tarjetas (Cards)</a><a href="#fam-modales">Modales</a><a href="#fam-feedback">feedback</a><a href="#fam-navegacion">navegacion</a><a href="#fam-datos">datos</a></nav>
+    <main class="dspv-main">
+      <p style="color:var(--color-text-muted,#8b93a7);font-size:13px;max-width:680px">
+        Galeria viva de los componentes base. Algunos (modales, toasts) pueden requerir interaccion/JS para verse;
+        aqui se muestran en su estado por defecto. Editá <code>tokens.css</code> y todo se reescala.
+      </p>
+      <section id="fam-botones-buttons-" class="dspv-section"><h2>Botones (Buttons)</h2><article class="dspv-specimen">
+      <h3>Button</h3>
+      <p class="dspv-anat">Elemento contenedor interactivo (<button> o <a> con role=button) con: 1) contenedor raiz .btn que aporta layout flex inline, padding, tipografia y radio; 2) slot opcional de icono inicial .btn__icon (leading); 3) etiqueta de texto .btn__label; 4) slot opcional de icono final (trailing); 5) capa de spinner .btn__spinner que solo es visible en estado loading. El texto y los iconos se alinean en una sola fila con gap consistente. En estado loading el contenido visible se vuelve transparente y el spinner se centra por encima sin alterar el ancho del boton (evita layout shift).</p>
+      <p class="dspv-meta"><b>Variantes:</b> primary: accion principal, fondo solido de marca (--color-primary) sobre --color-on-primary, secondary: accion secundaria, fondo de superficie con borde (--color-surface / --color-border-strong), ghost (outline): sin relleno, solo borde sutil y texto atenuado; util en barras de herramientas, danger: accion destructiva, fondo solido --color-danger sobre blanco, link: apariencia de hipervinculo (sin fondo ni borde, subrayado al hover), respeta el alto del tamano para alinear con otros controles &nbsp;·&nbsp; <b>Estados:</b> default, hover, active (translateY 1px de feedback tactil), focus-visible (anillo de foco con --focus-ring, sin outline nativo), disabled (opacidad reducida, sin puntero, sin transform), loading (spinner visible, contenido transparente, aria-busy, no interactivo)</p>
+      <div class="dspv-stage"><!-- VARIANTES (tamano md por defecto) -->
+<button class="btn btn--primary" type="button">Guardar cambios</button>
+<button class="btn btn--secondary" type="button">Cancelar</button>
+<button class="btn btn--ghost" type="button">Ver detalles</button>
+<button class="btn btn--danger" type="button">Eliminar lista</button>
+<button class="btn btn--link" type="button">Olvide mi contrasena</button>
+
+<!-- TAMANOS -->
+<button class="btn btn--primary btn--sm" type="button">Pequeno</button>
+<button class="btn btn--primary btn--md" type="button">Mediano</button>
+<button class="btn btn--primary btn--lg" type="button">Grande</button>
+
+<!-- CON ICONO (leading / trailing) -->
+<button class="btn btn--primary" type="button">
+  <span class="btn__icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+  </span>
+  <span class="btn__label">Enviar ahora</span>
+</button>
+<button class="btn btn--secondary" type="button">
+  <span class="btn__label">Siguiente</span>
+  <span class="btn__icon" aria-hidden="true">&rarr;</span>
+</button>
+
+<!-- ANCHO COMPLETO -->
+<button class="btn btn--primary btn--block" type="submit">Entrar</button>
+
+<!-- ESTADOS -->
+<button class="btn btn--primary" type="button" disabled>Deshabilitado</button>
+<button class="btn btn--primary is-loading" type="button" aria-busy="true">
+  <span class="btn__label">Enviando</span>
+  <span class="btn__spinner" aria-hidden="true"></span>
+</button>
+
+<!-- COMO ENLACE (mismo aspecto, semantica de navegacion) -->
+<a class="btn btn--secondary" href="/estado" role="button">Ir al estado</a></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>variant</code></td><td>enum</td><td>primary | secondary | ghost | danger | link</td><td>primary</td></tr><tr><td><code>size</code></td><td>enum</td><td>sm | md | lg</td><td>md</td></tr><tr><td><code>type</code></td><td>enum (atributo HTML nativo)</td><td>button | submit | reset</td><td>button</td></tr><tr><td><code>disabled</code></td><td>boolean (atributo HTML nativo)</td><td>true | false</td><td>false</td></tr><tr><td><code>loading</code></td><td>boolean (mapea a clase .is-loading + aria-busy)</td><td>true | false</td><td>false</td></tr><tr><td><code>block</code></td><td>boolean (mapea a .btn--block, width 100%)</td><td>true | false</td><td>false</td></tr><tr><td><code>iconStart</code></td><td>slot/markup</td><td>cualquier icono SVG o emoji dentro de .btn__icon</td><td>vacio</td></tr><tr><td><code>iconEnd</code></td><td>slot/markup</td><td>cualquier icono SVG o emoji dentro de .btn__icon</td><td>vacio</td></tr><tr><td><code>aria-label</code></td><td>string</td><td>texto accesible cuando no hay label visible</td><td>(usa el texto del label)</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>IconButton</h3>
+      <p class="dspv-anat">Variante cuadrada del boton para una sola accion representada por un icono, sin etiqueta visible. Partes: 1) contenedor raiz .btn.btn--icon que fuerza relacion 1:1 (mismo alto y ancho) y centra el contenido; 2) .btn__icon con el glifo SVG/emoji. Es OBLIGATORIO aportar un nombre accesible mediante aria-label (o un title), ya que no hay texto. Reutiliza todas las variantes y estados de Button. En loading muestra el mismo spinner centrado.</p>
+      <p class="dspv-meta"><b>Variantes:</b> primary, secondary, ghost, danger, forma: cuadrada (radio del tamano) o circular con .btn--icon-round &nbsp;·&nbsp; <b>Estados:</b> default, hover, active, focus-visible, disabled, loading</p>
+      <div class="dspv-stage"><!-- ICON-BUTTONS: SIEMPRE con aria-label -->
+<button class="btn btn--icon btn--secondary" type="button" aria-label="Refrescar">
+  <span class="btn__icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg>
+  </span>
+</button>
+
+<button class="btn btn--icon btn--ghost btn--sm" type="button" aria-label="Editar">
+  <span class="btn__icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+  </span>
+</button>
+
+<button class="btn btn--icon btn--danger btn--lg btn--icon-round" type="button" aria-label="Eliminar">
+  <span class="btn__icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+  </span>
+</button>
+
+<!-- estados -->
+<button class="btn btn--icon btn--secondary" type="button" aria-label="Guardar" disabled>
+  <span class="btn__icon" aria-hidden="true">&#x1F4BE;</span>
+</button>
+<button class="btn btn--icon btn--primary is-loading" type="button" aria-label="Cargando" aria-busy="true">
+  <span class="btn__icon" aria-hidden="true">&#9654;</span>
+  <span class="btn__spinner" aria-hidden="true"></span>
+</button></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>variant</code></td><td>enum</td><td>primary | secondary | ghost | danger</td><td>secondary</td></tr><tr><td><code>size</code></td><td>enum</td><td>sm | md | lg</td><td>md</td></tr><tr><td><code>aria-label</code></td><td>string (OBLIGATORIO)</td><td>texto que describe la accion (p.ej. 'Eliminar', 'Refrescar')</td><td>(sin valor por defecto; requerido)</td></tr><tr><td><code>type</code></td><td>enum (atributo HTML nativo)</td><td>button | submit | reset</td><td>button</td></tr><tr><td><code>disabled</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>loading</code></td><td>boolean (clase .is-loading + aria-busy)</td><td>true | false</td><td>false</td></tr><tr><td><code>round</code></td><td>boolean (mapea a .btn--icon-round, radio circular)</td><td>true | false</td><td>false</td></tr></tbody></table>
+    </article></section><section id="fam-formularios" class="dspv-section"><h2>formularios</h2><article class="dspv-specimen">
+      <h3>Label</h3>
+      <p class="dspv-anat">Etiqueta de texto asociada a un control (1 a 1 via for/id). Opcionalmente contiene un indicador de obligatoriedad (.label__required) y/o un texto secundario inline (.label__optional).</p>
+      <p class="dspv-meta"><b>Variantes:</b> default, --md (mayor tamaño para formularios espaciados), con required, con optional &nbsp;·&nbsp; <b>Estados:</b> default, disabled (heredado del .field--disabled: baja opacidad)</p>
+      <div class="dspv-stage"><label class="label" for="email">Correo electronico <span class="label__required" aria-hidden="true">*</span></label>
+<label class="label label--md" for="alias">Alias <span class="label__optional">(opcional)</span></label></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>for</code></td><td>string</td><td>id del control asociado</td><td>(requerido)</td></tr><tr><td><code>required</code></td><td>boolean (visual via .label__required)</td><td>true | false</td><td>false</td></tr><tr><td><code>size</code></td><td>modificador</td><td>.label (sm, por defecto) | .label--md</td><td>.label</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Text input</h3>
+      <p class="dspv-anat">Control de texto de una linea (<input>). Vive dentro de un .field junto a .label, .hint y .field__error. Soporta affixes opcionales mediante envoltorio .input-group (icono/prefijo/sufijo).</p>
+      <p class="dspv-meta"><b>Variantes:</b> --sm, (base), --lg, dentro de .input-group con prefijo/sufijo &nbsp;·&nbsp; <b>Estados:</b> default, hover, focus, filled, disabled, error</p>
+      <div class="dspv-stage"><div class="field">
+  <label class="label" for="src">Canal fuente</label>
+  <input class="input" id="src" type="text" placeholder="username sin @" aria-describedby="src-hint">
+  <p class="hint" id="src-hint">Sin el simbolo <code>@</code>.</p>
+</div>
+
+<!-- error -->
+<div class="field field--error">
+  <label class="label" for="src2">Canal fuente</label>
+  <input class="input" id="src2" type="text" value="@@bad" aria-invalid="true" aria-describedby="src2-err">
+  <p class="field__error" id="src2-err" role="alert">No incluyas el simbolo @.</p>
+</div>
+
+<!-- disabled + tamaños -->
+<input class="input input--sm" type="text" placeholder="Pequeño">
+<input class="input input--lg" type="text" placeholder="Grande" disabled>
+
+<!-- con sufijo -->
+<div class="input-group">
+  <input class="input" type="number" placeholder="0">
+  <span class="input-group__affix">%</span>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>type</code></td><td>string</td><td>text | email | password | number | tel | url | search | date</td><td>text</td></tr><tr><td><code>size</code></td><td>modificador</td><td>.input--sm | .input | .input--lg</td><td>.input</td></tr><tr><td><code>disabled</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>aria-invalid</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>placeholder</code></td><td>string</td><td>texto guia</td><td>(vacio)</td></tr><tr><td><code>aria-describedby</code></td><td>string</td><td>id(s) de hint/error</td><td>(ninguno)</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Textarea</h3>
+      <p class="dspv-anat">Control de texto multilinea (<textarea>). Hereda el estilo base de control y añade alto minimo y redimension vertical. Puede combinarse con un contador de caracteres externo (.field__count).</p>
+      <p class="dspv-meta"><b>Variantes:</b> (base, resize vertical), --fixed (sin resize), --mono (monospace, util para plantillas/patrones) &nbsp;·&nbsp; <b>Estados:</b> default, hover, focus, filled, disabled, error</p>
+      <div class="dspv-stage"><div class="field">
+  <label class="label" for="footer">Footer de WhatsApp</label>
+  <textarea class="textarea" id="footer" rows="4" placeholder="Se añade al final de cada lista..." aria-describedby="footer-hint"></textarea>
+  <div class="field__foot">
+    <p class="hint" id="footer-hint">Soporta saltos de linea.</p>
+    <span class="field__count">0 / 500</span>
+  </div>
+</div>
+
+<textarea class="textarea textarea--mono" rows="5" placeholder="Un patron por linea..."></textarea>
+<textarea class="textarea textarea--fixed" rows="3" disabled>Solo lectura</textarea></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>rows</code></td><td>number</td><td>>=2</td><td>4</td></tr><tr><td><code>resize</code></td><td>modificador</td><td>.textarea (vertical) | .textarea--fixed (sin resize)</td><td>.textarea</td></tr><tr><td><code>mono</code></td><td>modificador</td><td>.textarea--mono (fuente monospace)</td><td>(no)</td></tr><tr><td><code>disabled</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>aria-invalid</code></td><td>boolean</td><td>true | false</td><td>false</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Select</h3>
+      <p class="dspv-anat">Lista desplegable nativa (<select>) con chevron dibujado en CSS (background-image SVG inline) para coherencia cross-browser. Hereda el control base y reserva padding a la derecha para el icono.</p>
+      <p class="dspv-meta"><b>Variantes:</b> --sm, (base), --lg &nbsp;·&nbsp; <b>Estados:</b> default, hover, focus, filled, disabled, error</p>
+      <div class="dspv-stage"><div class="field">
+  <label class="label" for="mode">Modo de envio</label>
+  <select class="select" id="mode">
+    <option value="bot">Bot — a suscriptores</option>
+    <option value="userbot">Userbot — desde mi cuenta</option>
+  </select>
+</div>
+
+<select class="select select--sm"><option>Compacto</option></select>
+<select class="select" disabled><option>Deshabilitado</option></select></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>size</code></td><td>modificador</td><td>.select--sm | .select | .select--lg</td><td>.select</td></tr><tr><td><code>disabled</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>aria-invalid</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>multiple</code></td><td>boolean</td><td>true | false</td><td>false</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Checkbox</h3>
+      <p class="dspv-anat">Casilla de verificacion. Dos modos: (1) nativo con accent-color de marca (.checkbox), y (2) custom totalmente estilizable (.checkbox--custom) compuesto por input visualmente oculto + caja .checkbox__box (con check SVG) + texto .checkbox__label. Se envuelve en <label class="choice"> para area clicable amplia.</p>
+      <p class="dspv-meta"><b>Variantes:</b> nativo (accent-color marca), --custom (caja estilizada con check SVG) &nbsp;·&nbsp; <b>Estados:</b> default, hover, focus, checked, indeterminate, disabled</p>
+      <div class="dspv-stage"><!-- nativo -->
+<label class="choice">
+  <input class="checkbox" type="checkbox" checked>
+  <span class="choice__text">Reenviar tambien por WhatsApp</span>
+</label>
+
+<!-- custom -->
+<label class="choice">
+  <input class="checkbox checkbox--custom" type="checkbox">
+  <span class="checkbox__box" aria-hidden="true"></span>
+  <span class="choice__text">Acepto los terminos</span>
+</label>
+
+<label class="choice">
+  <input class="checkbox" type="checkbox" disabled>
+  <span class="choice__text">Opcion no disponible</span>
+</label></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>checked</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>indeterminate</code></td><td>boolean (via JS .indeterminate)</td><td>true | false</td><td>false</td></tr><tr><td><code>disabled</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>variant</code></td><td>modificador</td><td>nativo (.checkbox) | .checkbox--custom</td><td>nativo</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Radio</h3>
+      <p class="dspv-anat">Boton de opcion para selecciones mutuamente excluyentes dentro de un .radio-group (con role=radiogroup recomendado). Dos modos: nativo (.radio con accent-color) y custom (.radio--custom + .radio__dot). Se envuelve en <label class="choice">.</p>
+      <p class="dspv-meta"><b>Variantes:</b> nativo (accent-color marca), --custom (circulo + punto), grupo vertical (.radio-group), grupo horizontal (.radio-group--inline) &nbsp;·&nbsp; <b>Estados:</b> default, hover, focus, checked, disabled</p>
+      <div class="dspv-stage"><div class="radio-group" role="radiogroup" aria-label="Frecuencia">
+  <label class="choice">
+    <input class="radio radio--custom" type="radio" name="freq" value="now" checked>
+    <span class="radio__dot" aria-hidden="true"></span>
+    <span class="choice__text">Enviar ahora</span>
+  </label>
+  <label class="choice">
+    <input class="radio radio--custom" type="radio" name="freq" value="sched">
+    <span class="radio__dot" aria-hidden="true"></span>
+    <span class="choice__text">Programar</span>
+  </label>
+  <label class="choice">
+    <input class="radio radio--custom" type="radio" name="freq" value="x" disabled>
+    <span class="radio__dot" aria-hidden="true"></span>
+    <span class="choice__text">No disponible</span>
+  </label>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>name</code></td><td>string</td><td>agrupador comun del set</td><td>(requerido)</td></tr><tr><td><code>value</code></td><td>string</td><td>valor de la opcion</td><td>(requerido)</td></tr><tr><td><code>checked</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>disabled</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>variant</code></td><td>modificador</td><td>nativo (.radio) | .radio--custom</td><td>nativo</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Toggle / Switch</h3>
+      <p class="dspv-anat">Interruptor on/off basado en <input type=checkbox role=switch> visualmente oculto + pista .switch__track + pomo .switch__thumb. Se usa para activar/desactivar funciones (p.ej. canal WhatsApp). Texto opcional .choice__text. Estado ON usa color primario.</p>
+      <p class="dspv-meta"><b>Variantes:</b> --sm, (base), --lg, con etiqueta de texto &nbsp;·&nbsp; <b>Estados:</b> default (off), checked (on), hover, focus, disabled</p>
+      <div class="dspv-stage"><label class="choice">
+  <span class="switch">
+    <input class="switch__input" type="checkbox" role="switch" checked>
+    <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+  </span>
+  <span class="choice__text">Reenviar por WhatsApp</span>
+</label>
+
+<label class="choice">
+  <span class="switch switch--sm">
+    <input class="switch__input" type="checkbox" role="switch">
+    <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+  </span>
+  <span class="choice__text">Notificaciones</span>
+</label>
+
+<label class="choice">
+  <span class="switch">
+    <input class="switch__input" type="checkbox" role="switch" disabled checked>
+    <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+  </span>
+  <span class="choice__text">Bloqueado</span>
+</label></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>checked</code></td><td>boolean</td><td>true | false (on/off)</td><td>false</td></tr><tr><td><code>disabled</code></td><td>boolean</td><td>true | false</td><td>false</td></tr><tr><td><code>size</code></td><td>modificador</td><td>.switch--sm | .switch | .switch--lg</td><td>.switch</td></tr><tr><td><code>role</code></td><td>string (a11y)</td><td>switch</td><td>switch</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Hint / Help</h3>
+      <p class="dspv-anat">Texto de ayuda secundario debajo de un control, enlazado por aria-describedby. Puede contener <code> para tokens/atajos. Variante con icono (.hint--icon).</p>
+      <p class="dspv-meta"><b>Variantes:</b> default (muted), --info (acento informativo), con <code> &nbsp;·&nbsp; <b>Estados:</b> default, disabled (heredado de .field--disabled)</p>
+      <div class="dspv-stage"><p class="hint" id="tok-hint">Pega el token de <code>@BotFather</code>. No se mostrara despues de guardar.</p>
+<p class="hint hint--info" id="url-hint">Usa la URL publica de tu servicio (https://...).</p></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>id</code></td><td>string</td><td>referenciado por aria-describedby del control</td><td>(requerido para a11y)</td></tr><tr><td><code>tone</code></td><td>modificador</td><td>.hint | .hint--info</td><td>.hint</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Mensaje de error</h3>
+      <p class="dspv-anat">Mensaje de validacion debajo del control. Reserva alto minimo para evitar saltos de layout al aparecer/desaparecer. Lleva role=alert para anuncio en lectores de pantalla y se enlaza con aria-describedby. Icono opcional (.field__error::before).</p>
+      <p class="dspv-meta"><b>Variantes:</b> default (error), con icono &nbsp;·&nbsp; <b>Estados:</b> oculto (sin mensaje), visible (error activo)</p>
+      <div class="dspv-stage"><div class="field field--error">
+  <label class="label" for="pct">Markup</label>
+  <input class="input" id="pct" type="number" value="-5" aria-invalid="true" aria-describedby="pct-err">
+  <p class="field__error" id="pct-err" role="alert">El porcentaje no puede ser negativo.</p>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>id</code></td><td>string</td><td>referenciado por aria-describedby</td><td>(requerido)</td></tr><tr><td><code>role</code></td><td>string (a11y)</td><td>alert</td><td>alert</td></tr><tr><td><code>visible</code></td><td>estado (presencia del nodo + .field--error)</td><td>true | false</td><td>false</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Field (campo / form group)</h3>
+      <p class="dspv-anat">Bloque organizador que agrupa label + control + hint/error con espaciado vertical consistente. Es el atomo de composicion de la familia. Variantes para layout en linea y modificadores de estado (error/disabled). Se combina con .form-row (grid de 2 columnas) y .fieldset para secciones.</p>
+      <p class="dspv-meta"><b>Variantes:</b> (stack vertical, base), --inline, dentro de .form-row (2 columnas), dentro de .fieldset (seccion con leyenda) &nbsp;·&nbsp; <b>Estados:</b> default, error, disabled</p>
+      <div class="dspv-stage"><form class="form">
+  <fieldset class="fieldset">
+    <legend class="fieldset__legend">Configuracion del bot</legend>
+
+    <div class="field">
+      <label class="label" for="tk">Token del bot <span class="label__required">*</span></label>
+      <input class="input" id="tk" type="password" placeholder="(pega el token)" aria-describedby="tk-hint">
+      <p class="hint" id="tk-hint">Obtenlo en <code>@BotFather</code>.</p>
+    </div>
+
+    <div class="form-row">
+      <div class="field">
+        <label class="label" for="aid">API ID</label>
+        <input class="input" id="aid" type="text">
+      </div>
+      <div class="field field--error">
+        <label class="label" for="ah">API Hash</label>
+        <input class="input" id="ah" type="text" aria-invalid="true" aria-describedby="ah-err">
+        <p class="field__error" id="ah-err" role="alert">Requerido.</p>
+      </div>
+    </div>
+
+    <div class="field field--inline field--disabled">
+      <label class="label" for="ro">Solo lectura</label>
+      <input class="input" id="ro" type="text" value="valor fijo" disabled>
+    </div>
+  </fieldset>
+</form></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>layout</code></td><td>modificador</td><td>.field | .field--inline (label a la izquierda del control)</td><td>.field</td></tr><tr><td><code>state</code></td><td>modificador</td><td>.field--error | .field--disabled</td><td>(ninguno)</td></tr></tbody></table>
+    </article></section><section id="fam-tarjetas-cards-" class="dspv-section"><h2>Tarjetas (Cards)</h2><article class="dspv-specimen">
+      <h3>Card</h3>
+      <p class="dspv-anat">Contenedor de superficie con tres regiones opcionales: .card__header (titulo/eyebrow + acciones), .card__body (contenido principal) y .card__footer (acciones o metadatos). Soporta un .card__media opcional al inicio y una banda de acento superior (.card--accent) generada con ::before. La cabecera puede contener .card__eyebrow (kicker en mayusculas), .card__title (h2/h3) y .card__actions alineadas a la derecha.</p>
+      <p class="dspv-meta"><b>Variantes:</b> card (base: superficie, borde sutil, sombra sm, radio lg), card--outlined (borde definido, sin sombra), card--elevated (sin borde, sombra md), card--raised (sombra lg con hover xl), card--flat (plana, sin borde ni sombra), card--ghost (transparente, hereda fondo de pagina), card--accent / --accent-success / --accent-warning / --accent-danger / --accent-info (banda superior de color), card--interactive (clicable con feedback), card--compact / --cozy / --spacious (densidad) &nbsp;·&nbsp; <b>Estados:</b> default, hover (solo si --interactive o --raised: eleva sombra y resalta borde), active (se hunde 1px si --interactive), focus-visible (anillo de foco; solo si interactiva), disabled/aria-disabled (opacidad reducida, sin puntero)</p>
+      <div class="dspv-stage"><!-- Card base con header/body/footer y banda de acento -->
+<article class="card card--accent card--cozy">
+  <header class="card__header">
+    <div>
+      <p class="card__eyebrow">Configuracion</p>
+      <h3 class="card__title">Canales de envio</h3>
+    </div>
+    <div class="card__actions">
+      <button class="card__action-btn" type="button" aria-label="Mas opciones">&#8943;</button>
+    </div>
+  </header>
+  <div class="card__body">
+    <p>Define a que plataformas se difunden los mensajes programados.</p>
+  </div>
+  <footer class="card__footer">
+    <span class="card__meta">Actualizado hace 2 min</span>
+    <button class="card__action-btn card__action-btn--primary" type="button">Guardar</button>
+  </footer>
+</article>
+
+<!-- Variante outlined, sin sombra -->
+<section class="card card--outlined">
+  <div class="card__body">Bloque con borde, sin elevacion.</div>
+</section>
+
+<!-- Variante elevated -->
+<section class="card card--elevated card--compact">
+  <div class="card__body">Tarjeta elevada y compacta.</div>
+</section>
+
+<!-- Card interactiva (toda la tarjeta es un enlace) -->
+<a class="card card--interactive card--raised" href="/lotes/42">
+  <header class="card__header"><h3 class="card__title">Lote #42</h3></header>
+  <div class="card__body">320 destinatarios &middot; 98% entregado</div>
+</a>
+
+<!-- Card deshabilitada -->
+<a class="card card--interactive" aria-disabled="true" href="#">
+  <div class="card__body">No disponible</div>
+</a></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>variante de borde/elevacion</code></td><td>modificador CSS (clase)</td><td>.card--outlined (borde, sin sombra) | .card--elevated (sombra md) | .card--raised (sombra lg, hover xl) | .card--flat (sin borde ni sombra) | .card--ghost (transparente)</td><td>.card (borde sutil + shadow-sm)</td></tr><tr><td><code>acento</code></td><td>modificador CSS (clase)</td><td>.card--accent (banda superior primaria) | .card--accent-success | .card--accent-warning | .card--accent-danger | .card--accent-info</td><td>sin acento</td></tr><tr><td><code>densidad/padding</code></td><td>modificador CSS (clase)</td><td>.card--compact (space-4) | .card--cozy (space-6) | .card--spacious (space-7)</td><td>.card--cozy</td></tr><tr><td><code>interactiva</code></td><td>modificador CSS (clase)</td><td>.card--interactive (hover/focus elevado, cursor pointer; usar en <a>/<button> envolvente o role=button)</td><td>no interactiva</td></tr><tr><td><code>aria-disabled</code></td><td>atributo (cuando es interactiva)</td><td>true | false</td><td>false</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>StatTile (KPI)</h3>
+      <p class="dspv-anat">Mosaico de metrica compuesto por: .stat-tile__label (descriptor superior corto), .stat-tile__value (cifra grande, tabular), .stat-tile__delta opcional (variacion con flecha up/down y color semantico), .stat-tile__caption opcional (subtexto) y .stat-tile__icon opcional. Se agrupan dentro de un contenedor .stat-grid que reparte el espacio. Reutiliza la superficie de Card pero con tratamiento de cifra protagonista y banda de acento superior por defecto.</p>
+      <p class="dspv-meta"><b>Variantes:</b> stat-tile (base con acento primario), stat-tile--primary / --success / --warning / --danger / --info (color de banda y de cifra), stat-tile--center / --start (alineacion), stat-tile--loading (skeleton), stat-grid / stat-grid--2 / --3 / --4 (contenedor) &nbsp;·&nbsp; <b>Estados:</b> default, loading (skeleton animado en el valor), con delta positivo (up, verde), con delta negativo (down, rojo), hover (sutil realce de borde cuando el grid es interactivo)</p>
+      <div class="dspv-stage"><!-- Rejilla de KPIs -->
+<div class="stat-grid stat-grid--4">
+  <article class="stat-tile stat-tile--primary">
+    <p class="stat-tile__label">Enviados (30 dias)</p>
+    <p class="stat-tile__value">12.480</p>
+    <p class="stat-tile__delta stat-tile__delta--up"><span aria-hidden="true">&#9650;</span> 8,2%</p>
+  </article>
+
+  <article class="stat-tile stat-tile--success">
+    <p class="stat-tile__label">Tasa de exito</p>
+    <p class="stat-tile__value">98,6%</p>
+    <p class="stat-tile__caption">Ultimas 24 h</p>
+  </article>
+
+  <article class="stat-tile stat-tile--warning">
+    <p class="stat-tile__label">Lotes pendientes</p>
+    <p class="stat-tile__value">3</p>
+    <p class="stat-tile__delta stat-tile__delta--down"><span aria-hidden="true">&#9660;</span> 2</p>
+  </article>
+
+  <!-- Estado de carga -->
+  <article class="stat-tile stat-tile--danger stat-tile--loading" aria-busy="true">
+    <p class="stat-tile__label">En DLQ</p>
+    <p class="stat-tile__value"><span class="stat-tile__skeleton"></span></p>
+  </article>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>tono del delta</code></td><td>modificador CSS (clase) en __delta</td><td>.stat-tile__delta--up (success) | .stat-tile__delta--down (danger) | .stat-tile__delta--neutral (muted)</td><td>--neutral</td></tr><tr><td><code>acento del tile</code></td><td>modificador CSS (clase)</td><td>.stat-tile--primary | --success | --warning | --danger | --info</td><td>.stat-tile--primary</td></tr><tr><td><code>alineacion</code></td><td>modificador CSS (clase)</td><td>.stat-tile--center | .stat-tile--start</td><td>.stat-tile--start</td></tr><tr><td><code>loading</code></td><td>modificador CSS (clase)</td><td>.stat-tile--loading (muestra skeleton en el valor)</td><td>sin loading</td></tr><tr><td><code>columnas del grid</code></td><td>modificador CSS (clase) en contenedor</td><td>.stat-grid--2 | --3 | --4 (auto-fit responsivo por defecto)</td><td>auto-fit (min 140px)</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Callout (Banner informativo)</h3>
+      <p class="dspv-anat">Bloque de mensaje contextual con: .callout__icon (glifo de estado dentro de un disco de color), .callout__content que envuelve .callout__title (negrita) y .callout__text (descripcion), y .callout__actions opcional (botones/enlaces) y .callout__dismiss opcional (cierre). Borde izquierdo grueso de color semantico que ancla la jerarquia. Es un patron de superficie hermano de Card pero pensado para avisos en linea, no para agrupar contenido.</p>
+      <p class="dspv-meta"><b>Variantes:</b> callout--info / --success / --warning / --danger / --neutral (tono semantico), callout--solid (fondo saturado), callout--dismissible (cerrable), callout--no-icon (sin glifo) &nbsp;·&nbsp; <b>Estados:</b> default, con acciones, dismissible (boton de cierre con hover/focus), hover/focus del boton de cierre</p>
+      <div class="dspv-stage"><!-- Banner informativo (suave) -->
+<div class="callout callout--info" role="status">
+  <span class="callout__icon" aria-hidden="true">i</span>
+  <div class="callout__content">
+    <p class="callout__title">Sincronizacion activa</p>
+    <p class="callout__text">Los mensajes de Telegram se replicaran en WhatsApp en tiempo real.</p>
+  </div>
+</div>
+
+<!-- Advertencia con acciones y cierre -->
+<div class="callout callout--warning callout--dismissible" role="alert">
+  <span class="callout__icon" aria-hidden="true">!</span>
+  <div class="callout__content">
+    <p class="callout__title">Cuota cercana al limite</p>
+    <p class="callout__text">Has usado el 92% del cupo mensual de envios.</p>
+    <div class="callout__actions">
+      <a class="callout__link" href="/plan">Ampliar plan</a>
+    </div>
+  </div>
+  <button class="callout__dismiss" type="button" aria-label="Descartar aviso">&times;</button>
+</div>
+
+<!-- Exito (suave) y Peligro (solido) -->
+<div class="callout callout--success" role="status">
+  <span class="callout__icon" aria-hidden="true">&#10003;</span>
+  <div class="callout__content"><p class="callout__text">Configuracion guardada correctamente.</p></div>
+</div>
+<div class="callout callout--danger callout--solid" role="alert">
+  <span class="callout__icon" aria-hidden="true">!</span>
+  <div class="callout__content"><p class="callout__text">No se pudo conectar con el bot de Telegram.</p></div>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>tono</code></td><td>modificador CSS (clase)</td><td>.callout--info | --success | --warning | --danger | --neutral</td><td>.callout--info</td></tr><tr><td><code>role/aria</code></td><td>atributo ARIA</td><td>role=status (info/success) | role=alert (warning/danger)</td><td>role=status</td></tr><tr><td><code>dismissible</code></td><td>modificador CSS + atributo</td><td>.callout--dismissible (reserva espacio para boton de cierre) ; el boton usa aria-label</td><td>no dismissible</td></tr><tr><td><code>enfasis</code></td><td>modificador CSS (clase)</td><td>.callout--solid (fondo de color saturado, texto on-color) | base (fondo suave)</td><td>base (suave)</td></tr><tr><td><code>con icono</code></td><td>modificador CSS (clase)</td><td>.callout--no-icon (oculta el disco de icono)</td><td>con icono</td></tr></tbody></table>
+    </article></section><section id="fam-modales" class="dspv-section"><h2>Modales</h2><article class="dspv-specimen">
+      <h3>Modal / Dialog</h3>
+      <p class="dspv-anat">Raiz overlay (.modal) que ocupa el viewport y pinta el scrim (--color-overlay). Dentro, un contenedor centrado (.modal__dialog) con superficie (--color-surface), radio y sombra. El dialog se compone de tres regiones opcionales: .modal__header (titulo .modal__title + boton de cierre .modal__close), .modal__body (contenido scrolleable) y .modal__footer (zona de acciones alineadas a la derecha). El header puede llevar un icono de tono semantico (.modal__icon) para variantes danger/success/info/warning. El conjunto se asocia por aria a un titulo y, opcionalmente, a una descripcion.</p>
+      <p class="dspv-meta"><b>Variantes:</b> Por tamano: .modal__dialog--sm (max 420px, confirmaciones), --md (max 560px, por defecto), --lg (max 760px, formularios densos), --full (casi pantalla completa con margenes minimos), Por tono semantico del header/icono: .modal__dialog--danger | --success | --warning | --info (afecta color del icono y del titulo), alertdialog: role="alertdialog" + data-dismissible="false" para confirmaciones criticas que no se cierran por scrim/Escape, Sin footer (solo body informativo) o sin header (contenido autocontenido) &nbsp;·&nbsp; <b>Estados:</b> cerrado: display:none, no participa del foco ni del tab order, abierto (data-open): visible, scrim opaco, dialog con animacion de entrada (escala + fade), scroll-body: cuando el contenido excede la altura, .modal__body hace scroll y header/footer quedan fijos, focus-trap activo: el foco queda confinado dentro del dialog (gestion via JS del consumidor), hover/active/focus-visible en .modal__close y en los botones del footer</p>
+      <div class="dspv-stage"><!-- Modal de confirmacion (alertdialog, tono danger, tamano sm, no dismissible) -->
+<div class="modal" data-open="true" data-dismissible="false">
+  <div class="modal__dialog modal__dialog--sm modal__dialog--danger"
+       role="alertdialog" aria-modal="true"
+       aria-labelledby="m1-title" aria-describedby="m1-desc">
+    <header class="modal__header">
+      <span class="modal__icon" aria-hidden="true">!</span>
+      <h2 class="modal__title" id="m1-title">Eliminar lista de difusion</h2>
+      <button type="button" class="modal__close" aria-label="Cerrar">&times;</button>
+    </header>
+    <div class="modal__body" id="m1-desc">
+      <p>Esta accion no se puede deshacer. Se eliminaran 1.240 contactos asociados a la lista.</p>
+    </div>
+    <footer class="modal__footer">
+      <button type="button" class="btn btn--ghost">Cancelar</button>
+      <button type="button" class="btn btn--danger">Eliminar definitivamente</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Modal de formulario (dialog, tamano lg, con scroll de body) -->
+<div class="modal" data-open="true" data-dismissible="true">
+  <div class="modal__dialog modal__dialog--lg"
+       role="dialog" aria-modal="true" aria-labelledby="m2-title">
+    <header class="modal__header">
+      <h2 class="modal__title" id="m2-title">Programar envio</h2>
+      <button type="button" class="modal__close" aria-label="Cerrar">&times;</button>
+    </header>
+    <div class="modal__body">
+      <p>Configura el canal, la audiencia y la hora exacta de la difusion.</p>
+    </div>
+    <footer class="modal__footer">
+      <button type="button" class="btn btn--ghost">Cancelar</button>
+      <button type="button" class="btn btn--primary">Guardar y programar</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Modal cerrado (sin data-open): no se muestra -->
+<div class="modal">
+  <div class="modal__dialog modal__dialog--md" role="dialog" aria-modal="true" aria-labelledby="m3-title">
+    <header class="modal__header"><h2 class="modal__title" id="m3-title">Ejemplo oculto</h2></header>
+  </div>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>tamano</code></td><td>enum (modifier)</td><td>sm | md | lg | full</td><td>md</td></tr><tr><td><code>tono</code></td><td>enum (modifier)</td><td>neutral | danger | success | warning | info</td><td>neutral</td></tr><tr><td><code>abierto</code></td><td>boolean (data-attr)</td><td>data-open="true" presente / ausente</td><td>ausente (cerrado)</td></tr><tr><td><code>dismissible</code></td><td>boolean (data-attr)</td><td>data-dismissible="true|false" (click en scrim / Escape cierran)</td><td>true</td></tr><tr><td><code>role</code></td><td>atributo ARIA</td><td>dialog | alertdialog</td><td>dialog</td></tr><tr><td><code>aria-modal</code></td><td>atributo ARIA</td><td>true</td><td>true</td></tr><tr><td><code>aria-labelledby</code></td><td>atributo ARIA (idref)</td><td>id del .modal__title</td><td>(requerido)</td></tr><tr><td><code>aria-describedby</code></td><td>atributo ARIA (idref)</td><td>id del .modal__body o de la descripcion</td><td>(opcional)</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Modal Trigger (disparador)</h3>
+      <p class="dspv-anat">Elemento accionador (normalmente un .btn) que abre un modal por referencia. Expone la relacion mediante atributos de control: aria-haspopup="dialog" y aria-controls apuntando al id del overlay .modal. Refleja el estado del modal con aria-expanded. No aporta estilos propios: reutiliza la familia de botones; aqui se documenta unicamente el contrato de atributos para que el JS del consumidor cablee apertura/cierre y la restauracion de foco.</p>
+      <p class="dspv-meta"><b>Variantes:</b> Cualquier variante de boton del DS puede actuar como trigger (.btn--primary, .btn--secondary, .btn--ghost, .btn--danger), Trigger de cierre interno: usar data-modal-close en cualquier elemento dentro del .modal (el propio .modal__close, botones del footer o el scrim) &nbsp;·&nbsp; <b>Estados:</b> reposo: aria-expanded="false", modal abierto: aria-expanded="true" (el consumidor lo actualiza al abrir), al cerrar el modal, el foco se restaura sobre este trigger (gestion del consumidor)</p>
+      <div class="dspv-stage"><!-- Disparador que abre el modal con id="dlg-programar" -->
+<button type="button"
+        class="btn btn--primary"
+        aria-haspopup="dialog"
+        aria-controls="dlg-programar"
+        aria-expanded="false"
+        data-modal-open="dlg-programar">
+  Programar envio
+</button>
+
+<!-- El scrim tambien cierra (cuando data-dismissible="true"): -->
+<div class="modal" id="dlg-programar" data-dismissible="true" data-modal-close>
+  <div class="modal__dialog modal__dialog--md" role="dialog" aria-modal="true"
+       aria-labelledby="dlg-programar-title" data-modal-stop>
+    <header class="modal__header">
+      <h2 class="modal__title" id="dlg-programar-title">Programar envio</h2>
+      <button type="button" class="modal__close" aria-label="Cerrar" data-modal-close>&times;</button>
+    </header>
+    <div class="modal__body"><p>Contenido del formulario.</p></div>
+    <footer class="modal__footer">
+      <button type="button" class="btn btn--ghost" data-modal-close>Cancelar</button>
+      <button type="button" class="btn btn--primary">Guardar</button>
+    </footer>
+  </div>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>aria-haspopup</code></td><td>atributo ARIA</td><td>dialog</td><td>dialog</td></tr><tr><td><code>aria-controls</code></td><td>atributo ARIA (idref)</td><td>id del .modal a abrir</td><td>(requerido)</td></tr><tr><td><code>aria-expanded</code></td><td>atributo ARIA</td><td>true | false</td><td>false</td></tr><tr><td><code>data-modal-open</code></td><td>data-attr (hook JS)</td><td>id del modal destino</td><td>(requerido para auto-cableado)</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Drawer (panel lateral)</h3>
+      <p class="dspv-anat">Variante de modal anclada a un borde del viewport. Comparte el overlay/scrim de .modal pero el contenedor es .drawer__panel: a pleno alto (o ancho, si es top/bottom), pegado a un lado, con su propio header (.drawer__header con .drawer__title y .drawer__close), cuerpo scrolleable (.drawer__body) y footer opcional (.drawer__footer). Entra deslizando desde el borde correspondiente.</p>
+      <p class="dspv-meta"><b>Variantes:</b> Por lado: .drawer__panel--right (por defecto), --left, --top, --bottom, Por tamano: .drawer__panel--sm (320px), --md (400px), --lg (520px) para left/right; para top/bottom controla la altura, Drawer sin footer (navegacion/filtros) o con footer de acciones (formulario lateral) &nbsp;·&nbsp; <b>Estados:</b> cerrado: el overlay esta en display:none, abierto (data-open): scrim visible + panel deslizando desde el borde, scroll-body: .drawer__body desborda y hace scroll con header/footer fijos, focus-trap + cierre por Escape / click en scrim (si dismissible), hover/active/focus-visible en .drawer__close y acciones del footer</p>
+      <div class="dspv-stage"><!-- Drawer derecho, tamano md (detalle de contacto / filtros) -->
+<div class="modal" id="drw-detalle" data-open="true" data-dismissible="true" data-modal-close>
+  <aside class="drawer__panel drawer__panel--right drawer__panel--md"
+         role="dialog" aria-modal="true" aria-labelledby="drw-title" data-modal-stop>
+    <header class="drawer__header">
+      <h2 class="drawer__title" id="drw-title">Detalle del contacto</h2>
+      <button type="button" class="drawer__close" aria-label="Cerrar" data-modal-close>&times;</button>
+    </header>
+    <div class="drawer__body">
+      <p>Informacion del contacto, canales suscritos y historial de envios.</p>
+    </div>
+    <footer class="drawer__footer">
+      <button type="button" class="btn btn--ghost" data-modal-close>Cerrar</button>
+      <button type="button" class="btn btn--primary">Guardar cambios</button>
+    </footer>
+  </aside>
+</div>
+
+<!-- Drawer izquierdo pequeno (navegacion movil) -->
+<div class="modal" id="drw-nav" data-dismissible="true" data-modal-close>
+  <aside class="drawer__panel drawer__panel--left drawer__panel--sm"
+         role="dialog" aria-modal="true" aria-labelledby="drw-nav-title" data-modal-stop>
+    <header class="drawer__header">
+      <h2 class="drawer__title" id="drw-nav-title">Menu</h2>
+      <button type="button" class="drawer__close" aria-label="Cerrar" data-modal-close>&times;</button>
+    </header>
+    <div class="drawer__body"><p>Navegacion principal.</p></div>
+  </aside>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>lado</code></td><td>enum (modifier)</td><td>right | left | top | bottom</td><td>right</td></tr><tr><td><code>tamano</code></td><td>enum (modifier)</td><td>sm | md | lg</td><td>md</td></tr><tr><td><code>abierto</code></td><td>boolean (data-attr en .modal)</td><td>data-open="true" / ausente</td><td>ausente</td></tr><tr><td><code>dismissible</code></td><td>boolean (data-attr en .modal)</td><td>data-dismissible="true|false"</td><td>true</td></tr><tr><td><code>role</code></td><td>atributo ARIA</td><td>dialog</td><td>dialog</td></tr><tr><td><code>aria-modal</code></td><td>atributo ARIA</td><td>true</td><td>true</td></tr><tr><td><code>aria-labelledby</code></td><td>atributo ARIA (idref)</td><td>id del .drawer__title</td><td>(requerido)</td></tr></tbody></table>
+    </article></section><section id="fam-feedback" class="dspv-section"><h2>feedback</h2><article class="dspv-specimen">
+      <h3>Badge / Tag</h3>
+      <p class="dspv-anat">Bloque .badge en linea. Partes opcionales: .badge__dot (punto/indicador de estado a la izquierda), .badge__label (texto, siempre presente), .badge__remove (boton 'x' para tags eliminables). Como atomo no contiene otros bloques del DS.</p>
+      <p class="dspv-meta"><b>Variantes:</b> Semanticas: badge--neutral, badge--primary, badge--info, badge--success, badge--warning, badge--danger, Apariencia: badge--soft (default), badge--solid, badge--outline, Forma/tamano: badge--pill, badge--sm, Compuesta de estado (panel: cola de envios): pill + dot + variante (ej. encolado=info, enviando=primary, completado=success, parcial=warning, fallido=danger) &nbsp;·&nbsp; <b>Estados:</b> default, with-dot (indicador de estado en vivo), removable (hover/active/focus-visible en .badge__remove), disabled (sobre la 'x' de un tag eliminable)</p>
+      <div class="dspv-stage"><!-- Variantes semanticas (soft, default) -->
+<span class="badge badge--neutral">Borrador</span>
+<span class="badge badge--info">Info</span>
+<span class="badge badge--success">Activo</span>
+<span class="badge badge--warning">Pausado</span>
+<span class="badge badge--danger">Error</span>
+<span class="badge badge--primary">Nuevo</span>
+
+<!-- Apariencias -->
+<span class="badge badge--success badge--solid">Solid</span>
+<span class="badge badge--info badge--outline">Outline</span>
+
+<!-- Pill de estado con punto (cola de envios) -->
+<span class="badge badge--pill badge--info badge--dot">
+  <span class="badge__dot" aria-hidden="true"></span>
+  <span class="badge__label">Encolado</span>
+</span>
+<span class="badge badge--pill badge--primary badge--dot">
+  <span class="badge__dot" aria-hidden="true"></span>
+  <span class="badge__label">Enviando</span>
+</span>
+<span class="badge badge--pill badge--success badge--dot">
+  <span class="badge__dot" aria-hidden="true"></span>
+  <span class="badge__label">Completado</span>
+</span>
+<span class="badge badge--pill badge--warning badge--dot">
+  <span class="badge__dot" aria-hidden="true"></span>
+  <span class="badge__label">Parcial</span>
+</span>
+<span class="badge badge--pill badge--danger badge--dot">
+  <span class="badge__dot" aria-hidden="true"></span>
+  <span class="badge__label">Fallido</span>
+</span>
+
+<!-- Tag eliminable (sm) -->
+<span class="badge badge--sm badge--neutral badge--pill">
+  <span class="badge__label">Lista A</span>
+  <button type="button" class="badge__remove" aria-label="Quitar Lista A">&times;</button>
+</span>
+<span class="badge badge--sm badge--neutral badge--pill">
+  <span class="badge__label">Lista B</span>
+  <button type="button" class="badge__remove" aria-label="Quitar Lista B" disabled>&times;</button>
+</span></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>variant</code></td><td>enum</td><td>neutral | primary | info | success | warning | danger</td><td>neutral</td></tr><tr><td><code>appearance</code></td><td>enum</td><td>soft (fondo suave + texto fuerte) | solid (fondo fuerte + texto on-color) | outline (solo borde)</td><td>soft</td></tr><tr><td><code>size</code></td><td>enum</td><td>sm | md</td><td>md</td></tr><tr><td><code>pill</code></td><td>boolean</td><td>true | false (true => radius-full)</td><td>false</td></tr><tr><td><code>dot</code></td><td>boolean</td><td>true | false (muestra .badge__dot)</td><td>false</td></tr><tr><td><code>removable</code></td><td>boolean</td><td>true | false (muestra .badge__remove)</td><td>false</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Toast / Notification</h3>
+      <p class="dspv-anat">Region contenedora .toast-region (posicion fija, apila multiples toasts, aria-live). Cada notificacion es .toast con: .toast__icon (glifo de estado), .toast__body que envuelve .toast__title y .toast__message, y .toast__close (boton cerrar). Opcional .toast__progress (barra de auto-dismiss).</p>
+      <p class="dspv-meta"><b>Variantes:</b> toast--info, toast--success, toast--warning, toast--danger, Region: toast-region--bottom-end (default), --top-end, --bottom-start, --top-start &nbsp;·&nbsp; <b>Estados:</b> hidden (estado inicial: opacity 0, desplazado), is-open (entrada animada), is-leaving (salida animada), hover sobre .toast__close (focus-visible/active) y [disabled]</p>
+      <div class="dspv-stage"><!-- Region viva: anuncia entradas de toasts -->
+<div class="toast-region toast-region--bottom-end" aria-live="polite" aria-relevant="additions">
+
+  <div class="toast toast--success is-open" role="status">
+    <span class="toast__icon" aria-hidden="true">&#10003;</span>
+    <div class="toast__body">
+      <p class="toast__title">Mensaje enviado</p>
+      <p class="toast__message">El envio se entrego a 1.245 destinatarios.</p>
+    </div>
+    <button type="button" class="toast__close" aria-label="Cerrar notificacion">&times;</button>
+    <span class="toast__progress" aria-hidden="true"></span>
+  </div>
+
+  <div class="toast toast--danger is-open" role="alert">
+    <span class="toast__icon" aria-hidden="true">&#9888;</span>
+    <div class="toast__body">
+      <p class="toast__title">Fallo el envio</p>
+      <p class="toast__message">Revisa el token del bot y reintenta.</p>
+    </div>
+    <button type="button" class="toast__close" aria-label="Cerrar notificacion">&times;</button>
+  </div>
+
+  <div class="toast toast--info is-open" role="status">
+    <span class="toast__icon" aria-hidden="true">&#9432;</span>
+    <div class="toast__body">
+      <p class="toast__title">Programado</p>
+      <p class="toast__message">Se enviara hoy a las 18:00.</p>
+    </div>
+    <button type="button" class="toast__close" aria-label="Cerrar notificacion" disabled>&times;</button>
+  </div>
+
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>variant</code></td><td>enum</td><td>info | success | warning | danger</td><td>info</td></tr><tr><td><code>placement</code></td><td>enum (en la region)</td><td>top-end | bottom-end | bottom-start | top-start</td><td>bottom-end</td></tr><tr><td><code>open</code></td><td>boolean (clase de estado)</td><td>true => .is-open (visible) | false (oculto)</td><td>false</td></tr><tr><td><code>dismissible</code></td><td>boolean</td><td>true | false (muestra .toast__close)</td><td>true</td></tr><tr><td><code>autoDismiss</code></td><td>boolean</td><td>true | false (muestra/anima .toast__progress)</td><td>true</td></tr><tr><td><code>role</code></td><td>enum (a11y)</td><td>status (info/success) | alert (warning/danger)</td><td>status</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Alert / Callout</h3>
+      <p class="dspv-anat">Bloque .alert (banner en flujo). Partes: .alert__icon (glifo), .alert__content que agrupa .alert__title, .alert__message y .alert__actions (botones opcionales); .alert__close (boton descartar opcional). Modificador .alert--banner para ancho completo sin radio (top-of-page).</p>
+      <p class="dspv-meta"><b>Variantes:</b> alert--info, alert--success, alert--warning, alert--danger, Enfasis: alert--subtle (default), alert--solid, Layout: alert--banner &nbsp;·&nbsp; <b>Estados:</b> default, dismissible (hover/active/focus-visible en .alert__close, [disabled]), with-actions (botones de seguimiento)</p>
+      <div class="dspv-stage"><!-- Callout de advertencia (panel: banner de WhatsApp opt-out) -->
+<div class="alert alert--warning" role="status">
+  <span class="alert__icon" aria-hidden="true">&#9888;</span>
+  <div class="alert__content">
+    <p class="alert__title">Algunos contactos estan en opt-out</p>
+    <p class="alert__message">12 numeros no recibiran este envio por haberse dado de baja.</p>
+    <div class="alert__actions">
+      <button type="button" class="btn btn--ghost btn--sm">Ver lista</button>
+    </div>
+  </div>
+  <button type="button" class="alert__close" aria-label="Descartar aviso">&times;</button>
+</div>
+
+<!-- Info subtle -->
+<div class="alert alert--info" role="status">
+  <span class="alert__icon" aria-hidden="true">&#9432;</span>
+  <div class="alert__content">
+    <p class="alert__message">El polling en vivo se actualiza cada 5 segundos.</p>
+  </div>
+</div>
+
+<!-- Danger -->
+<div class="alert alert--danger" role="alert">
+  <span class="alert__icon" aria-hidden="true">&#10005;</span>
+  <div class="alert__content">
+    <p class="alert__title">Envio auto-pausado</p>
+    <p class="alert__message">Se detecto una tasa de fallos del 30%. Revisa antes de reanudar.</p>
+  </div>
+  <button type="button" class="alert__close" aria-label="Descartar aviso" disabled>&times;</button>
+</div>
+
+<!-- Banner solid de exito, ancho completo -->
+<div class="alert alert--success alert--solid alert--banner" role="status">
+  <span class="alert__icon" aria-hidden="true">&#10003;</span>
+  <div class="alert__content">
+    <p class="alert__message">Onboarding completado. Ya puedes programar tu primer envio.</p>
+  </div>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>variant</code></td><td>enum</td><td>info | success | warning | danger</td><td>info</td></tr><tr><td><code>emphasis</code></td><td>enum</td><td>subtle (fondo *-bg) | solid (fondo de color fuerte)</td><td>subtle</td></tr><tr><td><code>dismissible</code></td><td>boolean</td><td>true | false (muestra .alert__close)</td><td>false</td></tr><tr><td><code>hasIcon</code></td><td>boolean</td><td>true | false (muestra .alert__icon)</td><td>true</td></tr><tr><td><code>banner</code></td><td>boolean</td><td>true => ancho completo, sin radio | false</td><td>false</td></tr><tr><td><code>role</code></td><td>enum (a11y)</td><td>alert (warning/danger urgentes) | region/status (info/success)</td><td>status</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Skeleton loader</h3>
+      <p class="dspv-anat">Atomo .skeleton (forma generica con shimmer). Modificadores de forma: --text (linea), --title (linea mas alta), --circle (avatar), --rect/--thumb (bloque). Composiciones de molecula: .skeleton-group (contenedor que apila lineas) y patrones de demostracion (skeleton de card/fila de tabla) hechos combinando atomos. Es presentacional: aria-hidden + texto sr-only de carga acompanante.</p>
+      <p class="dspv-meta"><b>Variantes:</b> skeleton--text, skeleton--title, skeleton--circle, skeleton--rect, skeleton--thumb, skeleton--static (sin shimmer), Composiciones: .skeleton-group, patron de card y patron de fila de tabla &nbsp;·&nbsp; <b>Estados:</b> loading (unico estado del propio skeleton: animacion shimmer activa), reduced-motion (shimmer desactivado por prefers-reduced-motion)</p>
+      <div class="dspv-stage"><!-- Bloque de carga accesible: el skeleton es decorativo, el texto anuncia -->
+<div aria-busy="true">
+  <span class="sr-only" role="status">Cargando contenido...</span>
+
+  <!-- Patron: skeleton de tarjeta -->
+  <div class="card" aria-hidden="true">
+    <div class="skeleton-card">
+      <span class="skeleton skeleton--circle"></span>
+      <div class="skeleton-group skeleton-group--grow">
+        <span class="skeleton skeleton--title" style="width:55%"></span>
+        <span class="skeleton skeleton--text"></span>
+        <span class="skeleton skeleton--text" style="width:80%"></span>
+      </div>
+    </div>
+    <span class="skeleton skeleton--thumb"></span>
+  </div>
+
+  <!-- Patron: filas de tabla -->
+  <div class="skeleton-row" aria-hidden="true">
+    <span class="skeleton skeleton--text" style="width:30%"></span>
+    <span class="skeleton skeleton--text" style="width:20%"></span>
+    <span class="skeleton skeleton--text" style="width:15%"></span>
+  </div>
+
+  <!-- Atomos sueltos -->
+  <span class="skeleton skeleton--text skeleton--static" style="width:40%"></span>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>shape</code></td><td>enum</td><td>text | title | circle | rect | thumb</td><td>text</td></tr><tr><td><code>lines</code></td><td>number (en .skeleton-group)</td><td>1..n lineas .skeleton--text apiladas</td><td>3</td></tr><tr><td><code>width</code></td><td>string (utilidad/inline)</td><td>porcentaje o medida (ej. 60%); por defecto 100%</td><td>100%</td></tr><tr><td><code>animated</code></td><td>boolean</td><td>true (shimmer) | false (.skeleton--static, sin animacion)</td><td>true</td></tr><tr><td><code>rounded</code></td><td>enum</td><td>sm | md | full (mapea a --radius-*)</td><td>sm</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Empty-state</h3>
+      <p class="dspv-anat">Region .empty centrada. Partes: .empty__media (icono/ilustracion), .empty__title (encabezado), .empty__message (texto de apoyo) y .empty__actions (CTA primaria/secundaria). Modificadores de densidad (--compact) y de contexto (--inline para encajar dentro de una tabla/card).</p>
+      <p class="dspv-meta"><b>Variantes:</b> empty--compact, empty--lg, empty--inline, empty--danger (vacio por error) &nbsp;·&nbsp; <b>Estados:</b> default (sin datos), error (tono danger: fallo de carga), interactive (CTAs con hover/active/focus-visible y [disabled])</p>
+      <div class="dspv-stage"><!-- Estado vacio estandar (sin envios todavia) -->
+<div class="empty" role="region" aria-label="Sin envios">
+  <div class="empty__media" aria-hidden="true">&#128232;</div>
+  <h3 class="empty__title">Aun no tienes envios</h3>
+  <p class="empty__message">Crea tu primer mensaje y prográmalo para empezar a llegar a tus listas.</p>
+  <div class="empty__actions">
+    <button type="button" class="btn btn--primary">Nuevo envio</button>
+    <button type="button" class="btn btn--ghost">Ver guia</button>
+  </div>
+</div>
+
+<!-- Inline dentro de tabla, compacto -->
+<div class="empty empty--inline empty--compact" role="status">
+  <p class="empty__message">No hay resultados para tu busqueda.</p>
+  <div class="empty__actions">
+    <button type="button" class="btn btn--secondary btn--sm">Limpiar filtros</button>
+  </div>
+</div>
+
+<!-- Estado de error (tono danger) -->
+<div class="empty empty--danger" role="alert">
+  <div class="empty__media" aria-hidden="true">&#9888;</div>
+  <h3 class="empty__title">No pudimos cargar los datos</h3>
+  <p class="empty__message">Hubo un problema de conexion. Intenta de nuevo.</p>
+  <div class="empty__actions">
+    <button type="button" class="btn btn--primary">Reintentar</button>
+    <button type="button" class="btn btn--ghost" disabled>Reportar</button>
+  </div>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>size</code></td><td>enum</td><td>compact | md | lg</td><td>md</td></tr><tr><td><code>context</code></td><td>enum</td><td>block (centrado en pagina/card) | inline (dentro de tabla/lista)</td><td>block</td></tr><tr><td><code>tone</code></td><td>enum</td><td>neutral | danger (estado de error vacio)</td><td>neutral</td></tr><tr><td><code>hasMedia</code></td><td>boolean</td><td>true | false (muestra .empty__media)</td><td>true</td></tr><tr><td><code>actions</code></td><td>slot</td><td>0..n botones del DS dentro de .empty__actions</td><td>0</td></tr></tbody></table>
+    </article></section><section id="fam-navegacion" class="dspv-section"><h2>navegacion</h2><article class="dspv-specimen">
+      <h3>Tabs / Segmented nav (ds-tabs)</h3>
+      <p class="dspv-anat">Contenedor <nav class="ds-tabs" role="tablist"> que envuelve una lista de pestanas. Cada pestana es <button class="ds-tabs__tab" role="tab"> con: opcional ds-tabs__icon (icono/emoji), ds-tabs__label (texto) y opcional ds-tabs__count (badge numerico). El indicador activo es: (a) en variante underline, una barra inferior dibujada con ::after sobre la pestana activa; (b) en variante segmented, el fondo redondeado de la pestana activa. Un ds-tabs__track interno opcional permite el scroll horizontal en moviles. Los paneles asociados van fuera del componente como <div role="tabpanel"> referenciados por aria-controls/id.</p>
+      <p class="dspv-meta"><b>Variantes:</b> underline (indicador como barra inferior, por defecto), segmented (indicador como pastilla/fondo activo, equivalente a un segmented control), sm / md / lg (densidad), wrap (multifila) vs scroll horizontal (por defecto), start / center / stretch (alineacion/distribucion) &nbsp;·&nbsp; <b>Estados:</b> default (en reposo, color text-muted), hover (texto mas oscuro + fondo surface-2 sutil), active/pressed (:active, ligera reduccion de opacidad/translate), selected (--active: color primario + indicador visible), focus-visible (focus ring de tokens), disabled (opacidad reducida, sin puntero)</p>
+      <div class="dspv-stage"><!-- Variante underline (por defecto), tamano md -->
+<nav class="ds-tabs ds-tabs--underline ds-tabs--md" role="tablist" aria-label="Secciones del panel">
+  <button class="ds-tabs__tab ds-tabs__tab--active" role="tab" aria-selected="true" aria-controls="panel-inicio" id="tab-inicio">
+    <span class="ds-tabs__icon" aria-hidden="true">🏠</span>
+    <span class="ds-tabs__label">Inicio</span>
+  </button>
+  <button class="ds-tabs__tab" role="tab" aria-selected="false" aria-controls="panel-mensaje" id="tab-mensaje">
+    <span class="ds-tabs__icon" aria-hidden="true">📝</span>
+    <span class="ds-tabs__label">Mensaje</span>
+  </button>
+  <button class="ds-tabs__tab" role="tab" aria-selected="false" aria-controls="panel-estado" id="tab-estado">
+    <span class="ds-tabs__label">Estado</span>
+    <span class="ds-tabs__count">3</span>
+  </button>
+  <button class="ds-tabs__tab" role="tab" aria-selected="false" disabled aria-disabled="true">
+    <span class="ds-tabs__label">Enviar</span>
+  </button>
+</nav>
+
+<!-- Variante segmented, tamano sm, centrada -->
+<nav class="ds-tabs ds-tabs--segmented ds-tabs--sm ds-tabs--center" role="tablist" aria-label="Vista">
+  <button class="ds-tabs__tab ds-tabs__tab--active" role="tab" aria-selected="true"><span class="ds-tabs__label">Telegram</span></button>
+  <button class="ds-tabs__tab" role="tab" aria-selected="false"><span class="ds-tabs__label">WhatsApp</span></button>
+</nav></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>variant</code></td><td>modificador de clase</td><td>ds-tabs--underline | ds-tabs--segmented</td><td>ds-tabs--underline</td></tr><tr><td><code>size</code></td><td>modificador de clase</td><td>ds-tabs--sm | ds-tabs--md | ds-tabs--lg</td><td>ds-tabs--md</td></tr><tr><td><code>wrap</code></td><td>modificador de clase (booleano)</td><td>ds-tabs--wrap (envuelve en varias filas en vez de hacer scroll)</td><td>sin modificador (scroll horizontal)</td></tr><tr><td><code>align</code></td><td>modificador de clase</td><td>ds-tabs--start | ds-tabs--center | ds-tabs--stretch</td><td>ds-tabs--start</td></tr><tr><td><code>role</code></td><td>atributo ARIA</td><td>tablist (en el contenedor) / tab (en cada boton)</td><td>tablist + tab</td></tr><tr><td><code>aria-selected</code></td><td>atributo ARIA (por tab)</td><td>true | false</td><td>false</td></tr><tr><td><code>aria-controls</code></td><td>atributo ARIA (por tab)</td><td>id del tabpanel asociado</td><td>(requerido)</td></tr><tr><td><code>disabled</code></td><td>atributo HTML (por tab)</td><td>presente | ausente</td><td>ausente</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>App header / Barra superior (ds-appbar)</h3>
+      <p class="dspv-anat">Elemento <header class="ds-appbar" role="banner"> sticky, dividido en tres zonas: (1) ds-appbar__brand con el logo (ds-appbar__logo, SVG) y el nombre de la app (ds-appbar__wordmark); (2) ds-appbar__center, zona central opcional para titulo de pagina o navegacion secundaria; (3) ds-appbar__actions a la derecha con un grupo de ds-appbar__badge (estado de conexiones/servicios, reutiliza el patron pill), datos de usuario (ds-appbar__user) y acciones/botones. Incluye ds-appbar__menu-btn (hamburguesa) que aparece en viewport estrecho para abrir un drawer de navegacion.</p>
+      <p class="dspv-meta"><b>Variantes:</b> solid (fondo opaco surface), blur (fondo translucido + backdrop-filter), bordered (borde inferior, por defecto), badge: success / warning / danger / info / neutral &nbsp;·&nbsp; <b>Estados:</b> default, scrolled (clase opcional ds-appbar--scrolled que intensifica sombra/borde al hacer scroll), badge: estatico por variante semantica; badge con punto pulsante via ds-appbar__badge--live, menu-btn: hover / active / focus-visible / aria-expanded=true</p>
+      <div class="dspv-stage"><header class="ds-appbar ds-appbar--blur ds-appbar--sticky" role="banner">
+  <div class="ds-appbar__brand">
+    <button class="ds-appbar__menu-btn" aria-label="Abrir menu" aria-expanded="false" aria-controls="main-nav">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <span class="ds-appbar__logo" aria-hidden="true">
+      <svg viewBox="0 0 48 48" width="30" height="30"><rect width="48" height="48" rx="12" fill="currentColor"/></svg>
+    </span>
+    <span class="ds-appbar__wordmark">Replica</span>
+  </div>
+
+  <div class="ds-appbar__center">
+    <span class="ds-appbar__title">Panel de control</span>
+  </div>
+
+  <div class="ds-appbar__actions">
+    <span class="ds-appbar__badge ds-appbar__badge--success" title="Telegram conectado">
+      <span class="ds-appbar__badge-dot" aria-hidden="true"></span>Telegram
+    </span>
+    <span class="ds-appbar__badge ds-appbar__badge--warning ds-appbar__badge--live" title="WhatsApp reconectando">
+      <span class="ds-appbar__badge-dot" aria-hidden="true"></span>WhatsApp
+    </span>
+    <span class="ds-appbar__badge ds-appbar__badge--danger" title="3 lotes en DLQ">DLQ 3</span>
+    <span class="ds-appbar__user">admin</span>
+    <button class="ds-appbar__action btn btn--ghost" type="button">Salir</button>
+  </div>
+</header></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>variant</code></td><td>modificador de clase</td><td>ds-appbar--solid | ds-appbar--blur (fondo translucido con blur) | ds-appbar--bordered</td><td>ds-appbar--bordered</td></tr><tr><td><code>sticky</code></td><td>modificador de clase (booleano)</td><td>ds-appbar--sticky</td><td>ds-appbar--sticky (activo)</td></tr><tr><td><code>badge variant (por badge)</code></td><td>modificador de clase</td><td>ds-appbar__badge--success | --warning | --danger | --info | --neutral</td><td>ds-appbar__badge--neutral</td></tr><tr><td><code>role</code></td><td>atributo ARIA</td><td>banner</td><td>banner</td></tr><tr><td><code>aria-expanded (menu-btn)</code></td><td>atributo ARIA</td><td>true | false</td><td>false</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Breadcrumb (ds-breadcrumb)</h3>
+      <p class="dspv-anat">Elemento <nav class="ds-breadcrumb" aria-label="Breadcrumb"> que contiene una lista ordenada <ol class="ds-breadcrumb__list">. Cada nivel es <li class="ds-breadcrumb__item">; los niveles navegables contienen <a class="ds-breadcrumb__link"> (con opcional ds-breadcrumb__icon), y el nivel actual es <span class="ds-breadcrumb__current" aria-current="page">. El separador entre items se genera con ::before en cada item salvo el primero (decorativo, no esta en el markup). Cuando hay demasiados niveles se puede colapsar el centro con un item ds-breadcrumb__item--ellipsis.</p>
+      <p class="dspv-meta"><b>Variantes:</b> sm (compacto, por defecto), md (mas espaciado), con icono inicial (ds-breadcrumb__icon, p.ej. home), colapsado con elipsis (ds-breadcrumb__item--ellipsis) &nbsp;·&nbsp; <b>Estados:</b> link default (color text-muted), link hover (color primario + subrayado), link active (:active), link focus-visible (focus ring), current (color text, no clicable, font-weight medio)</p>
+      <div class="dspv-stage"><nav class="ds-breadcrumb ds-breadcrumb--sm" aria-label="Breadcrumb">
+  <ol class="ds-breadcrumb__list">
+    <li class="ds-breadcrumb__item">
+      <a class="ds-breadcrumb__link" href="/">
+        <span class="ds-breadcrumb__icon" aria-hidden="true">🏠</span>
+        <span>Inicio</span>
+      </a>
+    </li>
+    <li class="ds-breadcrumb__item">
+      <a class="ds-breadcrumb__link" href="/whatsapp">WhatsApp</a>
+    </li>
+    <li class="ds-breadcrumb__item ds-breadcrumb__item--ellipsis" aria-hidden="true">
+      <span>…</span>
+    </li>
+    <li class="ds-breadcrumb__item">
+      <span class="ds-breadcrumb__current" aria-current="page">Lista de difusion</span>
+    </li>
+  </ol>
+</nav></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>separator</code></td><td>variable CSS local</td><td>cualquier glifo via --ds-breadcrumb-separator (p.ej. '/', '›', '•')</td><td>'/'</td></tr><tr><td><code>size</code></td><td>modificador de clase</td><td>ds-breadcrumb--sm | ds-breadcrumb--md</td><td>ds-breadcrumb--sm</td></tr><tr><td><code>aria-current (item actual)</code></td><td>atributo ARIA</td><td>page</td><td>page (en ds-breadcrumb__current)</td></tr><tr><td><code>aria-label (nav)</code></td><td>atributo ARIA</td><td>texto descriptivo</td><td>Breadcrumb</td></tr></tbody></table>
+    </article></section><section id="fam-datos" class="dspv-section"><h2>datos</h2><article class="dspv-specimen">
+      <h3>Table</h3>
+      <p class="dspv-anat">Contenedor con scroll horizontal (.table-wrap) que envuelve un <table class="table"> con elemento <caption> opcional (titulo accesible/visible). El <thead> contiene una fila <tr> de <th> (encabezados, scope=col). El <tbody> agrupa las filas de datos (<tr> con <td>). Soporta <tfoot> para totales. Las celdas numericas usan el modificador .table__cell--num (alineadas a la derecha, tabular-nums). Una celda puede contener .table__empty para el estado sin datos (colspan).</p>
+      <p class="dspv-meta"><b>Variantes:</b> table (base, solo lineas inferiores), table--zebra (filas alternas con --color-surface-2), table--bordered (bordes completos en todas las celdas), table--hover (resalta la fila bajo el cursor), table--compact (densidad reducida), table--sticky (thead fijo durante scroll) &nbsp;·&nbsp; <b>Estados:</b> default (reposo), row:hover (solo con table--hover), th[aria-sort] (columna ordenada asc/desc), th:focus-visible (encabezado ordenable enfocado por teclado), loading (fila/celda con Spinner inline), empty (.table__empty: sin resultados), selected (fila marcada con .is-selected)</p>
+      <div class="dspv-stage"><div class="table-wrap">
+  <table class="table table--zebra table--hover table--sticky">
+    <caption class="table__caption">Entregas por canal (ultimos 30 dias)</caption>
+    <thead>
+      <tr>
+        <th scope="col">Canal</th>
+        <th scope="col">Estado</th>
+        <th scope="col" class="table__cell--num">
+          <button type="button" class="table__sort" aria-sort="descending">Enviados</button>
+        </th>
+        <th scope="col" class="table__cell--num">Tasa</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th scope="row">Telegram</th>
+        <td>Activo</td>
+        <td class="table__cell--num">12.480</td>
+        <td class="table__cell--num">98,2%</td>
+      </tr>
+      <tr class="is-selected">
+        <th scope="row">WhatsApp</th>
+        <td>Pausado</td>
+        <td class="table__cell--num">3.106</td>
+        <td class="table__cell--num">91,7%</td>
+      </tr>
+      <tr>
+        <th scope="row">Email</th>
+        <td><span class="spinner spinner--sm" role="status" aria-label="Cargando"></span> Sincronizando</td>
+        <td class="table__cell--num">—</td>
+        <td class="table__cell--num">—</td>
+      </tr>
+    </tbody>
+    <tfoot>
+      <tr>
+        <th scope="row">Total</th>
+        <td></td>
+        <td class="table__cell--num">15.586</td>
+        <td class="table__cell--num">96,8%</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+<!-- Estado vacio -->
+<div class="table-wrap">
+  <table class="table">
+    <thead><tr><th scope="col">Lote</th><th scope="col">Fecha</th></tr></thead>
+    <tbody>
+      <tr><td class="table__empty" colspan="2">No hay lotes en cola.</td></tr>
+    </tbody>
+  </table>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>variant</code></td><td>modificador de clase</td><td>(base) | table--zebra | table--bordered | table--compact</td><td>(base)</td></tr><tr><td><code>hover</code></td><td>modificador de clase</td><td>table--hover (resalta fila al pasar el cursor)</td><td>no aplicado (sin hover)</td></tr><tr><td><code>stickyHeader</code></td><td>modificador de clase</td><td>table--sticky (encabezado fijo en scroll vertical)</td><td>no aplicado</td></tr><tr><td><code>density</code></td><td>modificador de clase</td><td>table--compact (padding reducido)</td><td>densidad normal</td></tr><tr><td><code>cell-align</code></td><td>modificador de clase (en th/td)</td><td>table__cell--num | table__cell--center</td><td>alineado a la izquierda</td></tr><tr><td><code>sort</code></td><td>atributo HTML (en th)</td><td>aria-sort="ascending" | "descending" | "none"</td><td>none (omitido si no es ordenable)</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Progress bar</h3>
+      <p class="dspv-anat">Bloque .progress que opcionalmente agrupa una cabecera .progress__header con .progress__label (texto del canal) y .progress__value (porcentaje/conteo). La pista .progress__track es el carril de fondo; dentro va .progress__bar (relleno) cuyo width refleja el avance. El conjunto es el elemento ARIA con role=progressbar y aria-valuenow/min/max. Variante por canal mediante modificador (progress--telegram, progress--whatsapp) o color semantico (progress--success/--warning/--danger). Soporta modo indeterminado (progress--indeterminate, sin aria-valuenow).</p>
+      <p class="dspv-meta"><b>Variantes:</b> progress (base, color primario), progress--telegram / progress--whatsapp (color por canal), progress--success / --warning / --danger / --info (tono semantico), progress--sm / --md / --lg (altura de la pista), progress--striped (rayas animadas), progress--indeterminate (carga sin porcentaje conocido) &nbsp;·&nbsp; <b>Estados:</b> default (0-100 estable), in-progress (animacion de transicion del width), indeterminate (barra deslizante continua), complete (100%, opcionalmente con .is-complete -> tono success), error (.is-error -> tono danger), disabled ([aria-disabled=true], atenuado)</p>
+      <div class="dspv-stage"><!-- Por canal, con cabecera y porcentaje -->
+<div class="progress progress--telegram progress--md">
+  <div class="progress__header">
+    <span class="progress__label">Telegram</span>
+    <span class="progress__value">72%</span>
+  </div>
+  <div class="progress__track" role="progressbar"
+       aria-valuenow="72" aria-valuemin="0" aria-valuemax="100"
+       aria-label="Envio por Telegram">
+    <div class="progress__bar" style="--progress-value:72%"></div>
+  </div>
+</div>
+
+<!-- WhatsApp completo -->
+<div class="progress progress--whatsapp progress--md is-complete">
+  <div class="progress__header">
+    <span class="progress__label">WhatsApp</span>
+    <span class="progress__value">100%</span>
+  </div>
+  <div class="progress__track" role="progressbar"
+       aria-valuenow="100" aria-valuemin="0" aria-valuemax="100">
+    <div class="progress__bar" style="--progress-value:100%"></div>
+  </div>
+</div>
+
+<!-- Tono danger con error -->
+<div class="progress progress--sm is-error">
+  <div class="progress__track" role="progressbar"
+       aria-valuenow="34" aria-valuemin="0" aria-valuemax="100" aria-label="Lote fallido">
+    <div class="progress__bar" style="--progress-value:34%"></div>
+  </div>
+</div>
+
+<!-- Indeterminado (rayas) -->
+<div class="progress progress--md progress--indeterminate progress--striped">
+  <div class="progress__track" role="progressbar" aria-label="Procesando">
+    <div class="progress__bar"></div>
+  </div>
+</div></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>value</code></td><td>atributo HTML (aria)</td><td>0-100 via aria-valuenow + style="--progress-value:NN%"</td><td>0</td></tr><tr><td><code>channel</code></td><td>modificador de clase</td><td>progress--telegram | progress--whatsapp</td><td>(usa --color-primary)</td></tr><tr><td><code>tone</code></td><td>modificador de clase</td><td>progress--success | progress--warning | progress--danger | progress--info</td><td>(primary)</td></tr><tr><td><code>size</code></td><td>modificador de clase</td><td>progress--sm | progress--md | progress--lg</td><td>progress--md</td></tr><tr><td><code>indeterminate</code></td><td>modificador de clase</td><td>progress--indeterminate</td><td>false (determinado)</td></tr><tr><td><code>striped</code></td><td>modificador de clase</td><td>progress--striped (textura diagonal animada)</td><td>false</td></tr><tr><td><code>showLabel</code></td><td>estructura HTML</td><td>incluir/omitir .progress__header</td><td>omitido</td></tr></tbody></table>
+    </article><article class="dspv-specimen">
+      <h3>Spinner / loader inline</h3>
+      <p class="dspv-anat">Elemento unico .spinner: un circulo con borde parcial que rota (role=status para anuncio accesible). Puede acompanarse de texto visible (.spinner-inline agrupa spinner + .spinner__text) o de texto solo para lectores de pantalla (.sr-only). Variante de tamano por modificador y color heredado (currentColor) o por tono. Para botones en carga se reutiliza dentro del boton (el componente Boton expone .btn--loading; aqui se ofrece el atomo reutilizable).</p>
+      <p class="dspv-meta"><b>Variantes:</b> spinner--xs / --sm / --md / --lg (tamano), spinner--primary / --muted / --on-primary / --current (color), spinner-inline (spinner + texto en linea) &nbsp;·&nbsp; <b>Estados:</b> spinning (estado unico activo: girando continuamente), en boton (.btn--loading reutiliza el atomo y oculta el contenido), reduced-motion (giro deshabilitado, se muestra estatico)</p>
+      <div class="dspv-stage"><!-- Spinner inline con texto -->
+<span class="spinner-inline">
+  <span class="spinner spinner--sm spinner--current" role="status" aria-hidden="true"></span>
+  <span class="spinner__text">Cargando datos…</span>
+</span>
+
+<!-- Solo spinner, etiqueta para lector de pantalla -->
+<span class="spinner spinner--md spinner--primary" role="status">
+  <span class="sr-only">Cargando</span>
+</span>
+
+<!-- Tamanos -->
+<span class="spinner spinner--xs" role="status" aria-label="Cargando"></span>
+<span class="spinner spinner--lg spinner--muted" role="status" aria-label="Cargando"></span>
+
+<!-- Reutilizado en un boton en carga (atomo dentro del componente Boton) -->
+<button type="button" class="btn btn--primary" disabled aria-busy="true">
+  <span class="spinner spinner--sm spinner--on-primary" aria-hidden="true"></span>
+  Enviando…
+</button></div>
+      <table class="dspv-props"><thead><tr><th>prop</th><th>tipo</th><th>valores</th><th>default</th></tr></thead><tbody><tr><td><code>size</code></td><td>modificador de clase</td><td>spinner--xs | spinner--sm | spinner--md | spinner--lg</td><td>spinner--md</td></tr><tr><td><code>tone</code></td><td>modificador de clase</td><td>spinner--primary | spinner--muted | spinner--on-primary | spinner--current</td><td>spinner--current (hereda currentColor)</td></tr><tr><td><code>thickness</code></td><td>variable CSS</td><td>--spinner-thickness (ej. 2px, 3px)</td><td>ligado al tamano</td></tr><tr><td><code>label</code></td><td>atributo HTML</td><td>aria-label="..." o texto en .sr-only</td><td>"Cargando"</td></tr><tr><td><code>inline</code></td><td>estructura HTML</td><td>envolver en .spinner-inline para alinear con texto</td><td>spinner suelto</td></tr></tbody></table>
+    </article></section>
+    </main>
+  </div>
+</body>
+</html>
