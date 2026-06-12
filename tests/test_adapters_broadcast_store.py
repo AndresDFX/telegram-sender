@@ -80,5 +80,19 @@ class MetricasTests(unittest.TestCase):
         self.assertEqual(len(m["serie"]), 2)           # dos días distintos
 
 
+class EstructuraStoresTests(unittest.TestCase):
+    """Guardas contra mezclar métodos entre clases (un editor mal anclado lo causó una vez)."""
+
+    def test_plan_y_audit_listar_no_se_mezclan(self):
+        import inspect
+
+        from adapters.dynamodb import DynamoDbAuditStore, DynamoDbPlanStore
+
+        self.assertIn("_META", inspect.getsource(DynamoDbPlanStore.listar))   # listar de planes
+        self.assertNotIn("_META", inspect.getsource(DynamoDbAuditStore.listar))  # listar de auditoría
+        self.assertTrue(hasattr(DynamoDbPlanStore, "cancelar_pendientes"))
+        self.assertTrue(hasattr(DynamoDbAuditStore, "registrar"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -777,50 +777,6 @@ class DynamoDbPlanStore:
             n += 1
         return n
 
-
-class DynamoDbAuditStore:
-    """Bitácora de acciones del panel (quién hizo qué). Best-effort: nunca rompe la acción."""
-
-    def __init__(self, table_name: str | None = None, endpoint: str | None = None):
-        self._name = table_name or os.environ.get("AUDIT_TABLE", "Audit")
-        self._endpoint = endpoint or os.environ.get("DYNAMODB_ENDPOINT")
-
-    def _t(self):
-        return _table(self._name, self._endpoint)
-
-    def registrar(self, action: str, detail: str = "", user: str = "admin", ttl_days: int = 90) -> None:
-        now = int(time.time())
-        try:
-            self._t().put_item(
-                Item={
-                    "id": uuid.uuid4().hex,
-                    "ts": now,
-                    "action": str(action)[:60],
-                    "detail": str(detail or "")[:300],
-                    "user": str(user or "")[:60],
-                    "ttl": now + ttl_days * 86400,
-                }
-            )
-        except Exception:
-            logger = __import__("logging").getLogger(__name__)
-            logger.exception("No se pudo registrar auditoría (no afecta la acción)")
-
-    def listar(self, limit: int = 50) -> list[dict]:
-        items, start = [], None
-        while True:
-            kwargs = {"ExclusiveStartKey": start} if start else {}
-            resp = self._t().scan(**kwargs)
-            items.extend(resp.get("Items", []))
-            start = resp.get("LastEvaluatedKey")
-            if not start:
-                break
-        items.sort(key=lambda a: int(a.get("ts", 0)), reverse=True)
-        return [
-            {"ts": int(a.get("ts", 0)), "action": a.get("action", ""), "detail": a.get("detail", ""),
-             "user": a.get("user", "")}
-            for a in items[:limit]
-        ]
-
     def listar(self, limit: int = 20) -> list[dict]:
         """Planes (PLAN) más recientes, con su bitácora, para la vista de programación."""
         from boto3.dynamodb.conditions import Attr
@@ -868,3 +824,47 @@ class DynamoDbAuditStore:
                 }
             )
         return salida
+
+
+class DynamoDbAuditStore:
+    """Bitácora de acciones del panel (quién hizo qué). Best-effort: nunca rompe la acción."""
+
+    def __init__(self, table_name: str | None = None, endpoint: str | None = None):
+        self._name = table_name or os.environ.get("AUDIT_TABLE", "Audit")
+        self._endpoint = endpoint or os.environ.get("DYNAMODB_ENDPOINT")
+
+    def _t(self):
+        return _table(self._name, self._endpoint)
+
+    def registrar(self, action: str, detail: str = "", user: str = "admin", ttl_days: int = 90) -> None:
+        now = int(time.time())
+        try:
+            self._t().put_item(
+                Item={
+                    "id": uuid.uuid4().hex,
+                    "ts": now,
+                    "action": str(action)[:60],
+                    "detail": str(detail or "")[:300],
+                    "user": str(user or "")[:60],
+                    "ttl": now + ttl_days * 86400,
+                }
+            )
+        except Exception:
+            logger = __import__("logging").getLogger(__name__)
+            logger.exception("No se pudo registrar auditoría (no afecta la acción)")
+
+    def listar(self, limit: int = 50) -> list[dict]:
+        items, start = [], None
+        while True:
+            kwargs = {"ExclusiveStartKey": start} if start else {}
+            resp = self._t().scan(**kwargs)
+            items.extend(resp.get("Items", []))
+            start = resp.get("LastEvaluatedKey")
+            if not start:
+                break
+        items.sort(key=lambda a: int(a.get("ts", 0)), reverse=True)
+        return [
+            {"ts": int(a.get("ts", 0)), "action": a.get("action", ""), "detail": a.get("detail", ""),
+             "user": a.get("user", "")}
+            for a in items[:limit]
+        ]
