@@ -9,7 +9,9 @@ import shutil
 import subprocess
 import sys
 
-ROOT = "/work"
+# /work dentro de Docker (package-lambda.ps1); en CI (GitHub Actions, runner Linux) se pasa
+# BUILD_ROOT=$GITHUB_WORKSPACE y se construye nativo sin Docker.
+ROOT = os.environ.get("BUILD_ROOT", "/work")
 SRC = os.path.join(ROOT, "src", "lambda")
 PKG = os.path.join(ROOT, ".build", "pkg")
 REQ = os.path.join(SRC, "requirements.txt")
@@ -17,6 +19,9 @@ REQ = os.path.join(SRC, "requirements.txt")
 shutil.rmtree(PKG, ignore_errors=True)
 os.makedirs(PKG)
 
+# Instala en un entorno LINUX (Docker local vía package-lambda.ps1, o runner Linux de CI):
+# así las wheels y rutas del zip son nativas de Lambda. No usar --platform/--only-binary aquí:
+# algunas deps puras (p.ej. pyaes, dep de telethon) son sdist-only y romperían esa resolución.
 subprocess.check_call(
     [sys.executable, "-m", "pip", "install", "--no-cache-dir", "-q", "-r", REQ, "-t", PKG]
 )

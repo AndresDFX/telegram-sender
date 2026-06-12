@@ -1018,6 +1018,10 @@ img.preview{box-shadow:var(--sh-sm)}
      <button class="sec" onclick="loadDashboard()">Refrescar</button>
    </div>
   </div>
+  <div class="card" data-tab="inicio" id="dash_steps_card"><h2>Primeros pasos <span id="steps_n" class="hint"></span></h2>
+   <div class="hint">Configuración guiada. Cada paso te lleva a su pestaña.</div>
+   <div id="dash_steps" style="margin-top:10px">cargando…</div>
+  </div>
   <div class="card" data-tab="msg"><h2>Aumento (markup)</h2>
    <div class="markup"><input id="markup_percentage" type="number" step="0.1"><div>
      <div style="font-size:13px">% que se suma a cada precio</div>
@@ -1456,6 +1460,23 @@ function connStartPolling(){ if(CONN_TIMER) return; refreshConn();
 // --- Expiración de sesión (cliente): re-login tras 8h o inactividad larga ---
 const SESSION_MAX_MS=8*3600*1000;
 function sessionFresca(){ try{ const t=parseInt(sessionStorage.getItem('cred_ts')||'0',10); return t && (Date.now()-t)<SESSION_MAX_MS; }catch(e){ return true; } }
+// --- Onboarding: checklist de primeros pasos (desde la config) ---
+function renderSteps(c){
+  const steps=[
+    {ok: !!(c.bot_token_set||c.telethon_session_set), t:'Conectar cuenta o bot de Telegram', tab:'telegram'},
+    {ok: !!(c.source_channel&&String(c.source_channel).trim()), t:'Definir el canal fuente', tab:'msg'},
+    {ok: ((c.telegram_lists||[]).length>0 || (c.whatsapp_lists||[]).length>0), t:'Crear listas o elegir destinatarios', tab:'telegram'},
+    {ok: !!c.whatsapp_enabled, t:'Conectar WhatsApp', tab:'whatsapp', opt:true},
+    {ok: c.sending_enabled!==false, t:'Activar los envíos', tab:'prog'},
+  ];
+  const done=steps.filter(s=>s.ok).length;
+  if($('steps_n')) $('steps_n').textContent='· '+done+'/'+steps.length+(done===steps.length?' ✓':'');
+  if($('dash_steps')) $('dash_steps').innerHTML=steps.map(s=>
+    `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--bd)">`+
+    `<span style="font-size:15px">${s.ok?'✅':(s.opt?'⚪':'⬜')}</span>`+
+    `<span style="flex:1;color:${s.ok?'var(--mut)':'var(--tx)'}">${s.t}${s.opt?' <span class="hint">(opcional)</span>':''}</span>`+
+    `<button class="ghost" style="padding:5px 11px" onclick="showTab('${s.tab}')">Ir</button></div>`).join('');
+}
 // --- Dashboard / Inicio (KPIs + estado de un vistazo) ---
 async function loadDashboard(){
   try{
@@ -1465,6 +1486,7 @@ async function loadDashboard(){
     let pend=0; (pl.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running') pend+=Math.max(0,(p.tg.batches|0)-(p.tg.next|0))+Math.max(0,((p.wa&&p.wa.batches)|0)-((p.wa&&p.wa.next)|0)); });
     if($('k_pend')) $('k_pend').textContent=pend;
     if($('k_dlq')) $('k_dlq').textContent=q.dlq;
+    renderSteps(c);
     const on=c.sending_enabled!==false; const de=$('dash_estado');
     if(de){ de.className='callout '+(on?'ok':'warn');
       de.innerHTML='Envíos: <b>'+(on?'ACTIVOS':'PAUSADOS')+'</b> · '+(c.window_enabled?('ventana '+c.window_start+'–'+c.window_end):'24 h')+' · WhatsApp '+(c.whatsapp_enabled?'activo':'desactivado')+' · lote '+(c.batch_size|0); }

@@ -63,20 +63,26 @@ de bot/cuenta (bot o userbot) · panel admin moderno (Basic Auth). 163 tests.
   `GET /api/metrics`. (Falta el desglose de "top fallos" por razón → ola 2.)
 - ✅ **Programar envío a hora/fecha exacta** — `not_before` en el plan; el dispatcher difiere hasta
   esa hora; input datetime en el compositor.
-- 🔜 **[P1·M] Opt-out / bloqueados de WhatsApp** — *ola 2* (requiere que el servicio reporte los jids
-  que rechazaron/bloquearon).
+- ✅ **Opt-out / bloqueados de WhatsApp** — el servicio cuenta fallos por jid y **auto-excluye** a los
+  que fallan ≥ umbral (3); endpoints `/blocked` + `/blocked/clear`; tarjeta "Auto-excluidos por
+  fallos" en la pestaña WhatsApp (ver / reincluir).
 - 🔜 **[P2·L] Plantillas y personalización** (`Hola {nombre}`).
 
 ### UI / UX
 - ✅ **Dashboard / Home (pestaña Inicio)** — estado, KPIs (30 d), mini-gráfico de actividad, último
   envío, accesos rápidos.
 - ✅ **Aviso de sesión expirada + re-login** (8 h) — hecho en Fase 0.
-- 🔜 **[P1·M] Onboarding / wizard** de primera vez · **accesibilidad** + **responsive** · **tema claro**
-  · **import/export CSV** → ola 2/P2.
+- ✅ **Onboarding / wizard** — tarjeta "Primeros pasos" en Inicio (checklist: cuenta/bot → canal →
+  listas → WhatsApp → activar). Pendiente (P2): accesibilidad, tema claro, import/export CSV.
 
 ### Seguridad / Ops
-- 🔜 **[P1·M] Audit log** · **[P1·M] HTTPS + dominio + WAF** · **[P1·L] CI/CD** + staging/prod ·
-  **[P1·L] logs estructurados** → ola 2 (varios requieren acción tuya: dominio, secrets de GitHub).
+- ✅ **Audit log** — `DynamoDbAuditStore` (tabla `Audit`, TTL 90 d) registra acciones del panel
+  (config, envíos, cancelaciones, DLQ); `GET /api/audit` + tarjeta "Auditoría" en Estado.
+- ✅ **CI/CD** — `.github/workflows/deploy.yml` (tests siempre; deploy a CFN gated por la variable
+  `DEPLOY_ENABLED`). *Acción tuya: añadir los secrets de AWS + `DEPLOY_ENABLED=true` para activar el
+  auto-deploy.*
+- 🔜 **[P1·M] HTTPS + dominio + WAF** (requiere registrar dominio) · **[P1·L] logs estructurados** ·
+  staging/prod → ola 4.
 - ✅ **Alarmas por email** — suscripción de `castano.julian@correounivalle.edu.co` al tópico SNS
   (pendiente: confirmar el correo de AWS).
 

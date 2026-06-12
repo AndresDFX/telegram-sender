@@ -1,0 +1,103 @@
+name: test-and-deploy
+
+# CI/CD del backend AWS (Lambdas + CloudFormation). El servicio de WhatsApp (whatsapp-service/)
+# se despliega aparte en Render (auto en push). Este workflow: corre los tests y, en push a main,
+# empaqueta la Lambda (nativo Linux), sube el zip a S3 con key hasheada por contenido y hace
+# `cloudformation deploy` con los parámetros desde GitHub Secrets.
+#
+# Secrets requeridos (Settings > Secrets and variables > Actions):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY   (cuenta 438095550710, permisos de deploy)
+#   TELEGRAM_BOT_TOKEN, WEBHOOK_SECRET_TOKEN, ADMIN_PASSWORD
+#   TELETHON_API_ID, TELETHON_API_HASH, TELETHON_SESSION
+# Variables (Settings > Variables):
+#   DEPLOY_ENABLED = "true"   -> habilita el job de deploy (sin esto SOLO corren los tests)
+#   ALERT_EMAIL    = email para alarmas (opcional; si falta, no se suscribe nadie)
+#
+# OJO: WorkerReservedConcurrency=0 (límite de la cuenta) y SEND_MODE=userbot, igual que scripts/deploy.ps1.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/lambda/**"
+      - "infra/cloudformation/**"
+      - "scripts/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    # Solo despliega si está habilitado por variable (evita fallos en rojo antes de configurar
+    # los secrets). Pon la variable DEPLOY_ENABLED="true" cuando los secrets estén listos.
+    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    concurrency:
+      group: deploy-telegram-sync-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Empaquetar Lambda (nativo Linux)
+        env:
+          BUILD_ROOT: ${{ github.workspace }}
+        run: python scripts/_build_lambda_pkg.py
+      - name: Subir a S3 y desplegar CloudFormation
+        env:
+          ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          WEBHOOK_SECRET_TOKEN: ${{ secrets.WEBHOOK_SECRET_TOKEN }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          TELETHON_API_ID: ${{ secrets.TELETHON_API_ID }}
+          TELETHON_API_HASH: ${{ secrets.TELETHON_API_HASH }}
+          TELETHON_SESSION: ${{ secrets.TELETHON_SESSION }}
+        run: |
+          set -euo pipefail
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="telegram-sync-lambda-${ACCOUNT}-us-east-1"
+          ZIP="${GITHUB_WORKSPACE}/.build/telegram-broadcaster.zip"
+          HASH=$(sha256sum "$ZIP" | cut -c1-12)
+          KEY="lambda/telegram-broadcaster-${HASH}.zip"
+          echo "Subiendo s3://${BUCKET}/${KEY}"
+          aws s3 cp "$ZIP" "s3://${BUCKET}/${KEY}"
+          aws cloudformation deploy \
+            --stack-name telegram-sync-dev \
+            --template-file infra/cloudformation/template.yaml \
+            --parameter-overrides \
+              ProjectName=telegram-sync \
+              EnvironmentName=dev \
+              LambdaCodeS3Bucket="${BUCKET}" \
+              LambdaCodeS3Key="${KEY}" \
+              WorkerReservedConcurrency=0 \
+              BroadcastBatchSize=150 \
+              AlertEmail="${ALERT_EMAIL:-}" \
+              SendMode=userbot \
+              AdminUser=admin \
+              AdminPassword="${ADMIN_PASSWORD}" \
+              TelegramBotToken="${TELEGRAM_BOT_TOKEN}" \
+              WebhookSecretToken="${WEBHOOK_SECRET_TOKEN}" \
+              TelethonApiId="${TELETHON_API_ID}" \
+              TelethonApiHash="${TELETHON_API_HASH}" \
+              TelethonSession="${TELETHON_SESSION}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region us-east-1
