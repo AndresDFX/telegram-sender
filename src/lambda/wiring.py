@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from adapters import config
 from adapters.dynamodb import (
+    DynamoDbAuditStore,
     DynamoDbBroadcastStore,
     DynamoDbConfigStore,
     DynamoDbDedupStore,
@@ -97,6 +98,10 @@ def build_broadcast_store() -> DynamoDbBroadcastStore:
 
 def build_plan_store() -> DynamoDbPlanStore:
     return DynamoDbPlanStore()
+
+
+def build_audit_store() -> DynamoDbAuditStore:
+    return DynamoDbAuditStore()
 
 
 def build_dedup() -> DynamoDbDedupStore:

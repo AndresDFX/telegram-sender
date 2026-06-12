@@ -30,6 +30,12 @@ let reconnectTimer = null // única reconexión pendiente
 let gen = 0 // generación del socket activo (ignora eventos de sockets viejos)
 let chain = Promise.resolve() // mutex: serializa los (re)arranques en vez de descartarlos
 const contacts = {} // jid -> nombre
+// Opt-out anti-baneo: jid -> nº de fallos de envío consecutivos. Al alcanzar BLOQUEO_UMBRAL el
+// contacto se auto-excluye de los envíos (deja de reintentarse). Se reinicia a 0 al enviar OK.
+const failures = {}
+const BLOQUEO_UMBRAL = Number(process.env.BLOQUEO_UMBRAL || 3)
+let persistFailuresFn = null
+let failuresSaveTimer = null
 
 const log = pino({ level: 'info' })
 
@@ -69,6 +75,19 @@ function scheduleSaveContacts() {
       await persistContactsFn({ ...contacts })
     } catch (e) {
       log.error({ err: String(e) }, 'persistir contactos falló')
+    }
+  }, 4000)
+}
+
+// Guarda el conteo de fallos (opt-out) en DynamoDB con debounce.
+function scheduleSaveFailures() {
+  if (failuresSaveTimer || !persistFailuresFn) return
+  failuresSaveTimer = setTimeout(async () => {
+    failuresSaveTimer = null
+    try {
+      await persistFailuresFn({ ...failures })
+    } catch (e) {
+      log.error({ err: String(e) }, 'persistir fallos falló')
     }
   }, 4000)
 }
@@ -121,14 +140,20 @@ async function doStart() {
   }
 
   try {
-    const { state, saveCreds, loadContacts, saveContacts } = await useDynamoAuthState(TABLE, SESSION_ID)
+    const { state, saveCreds, loadContacts, saveContacts, loadFailures, saveFailures } = await useDynamoAuthState(TABLE, SESSION_ID)
     persistContactsFn = saveContacts
+    persistFailuresFn = saveFailures
     // Carga y FUSIONA los contactos persistidos en cada arranque (también en /reconnect):
     // así un host que retoma la sesión obtiene los contactos guardados por otro host.
     try {
       Object.assign(contacts, await loadContacts())
     } catch (e) {
       log.error({ err: String(e) }, 'cargar contactos falló')
+    }
+    try {
+      Object.assign(failures, await loadFailures())
+    } catch (e) {
+      log.error({ err: String(e) }, 'cargar fallos falló')
     }
     // fetchLatestBaileysVersion es una llamada de red SIN timeout; si se cuelga, bloquearía
     // toda la cadena de arranques. La acotamos y caemos a la versión por defecto de Baileys.
@@ -388,6 +413,21 @@ app.get('/contacts', auth, (req, res) => {
   res.json({ contacts: list })
 })
 
+// Opt-out: contactos auto-excluidos por fallos repetidos de envío (>= BLOQUEO_UMBRAL).
+app.get('/blocked', auth, (req, res) => {
+  const blocked = Object.keys(failures)
+    .filter((id) => (failures[id] || 0) >= BLOQUEO_UMBRAL)
+    .map((id) => ({ id, name: contacts[id] || id.split('@')[0], fallos: failures[id] }))
+  res.json({ umbral: BLOQUEO_UMBRAL, total: blocked.length, con_fallos: Object.keys(failures).length, blocked })
+})
+
+// Reinicia el conteo de fallos (re-incluye a los auto-excluidos).
+app.post('/blocked/clear', auth, (req, res) => {
+  for (const k of Object.keys(failures)) delete failures[k]
+  scheduleSaveFailures()
+  res.json({ ok: true })
+})
+
 // Resuelve a quién enviar según el modo de targeting y las listas de distribución.
 // mode: "all" | "only" (whitelist sobre list_ids) | "except" (blacklist sobre list_ids).
 // Compara contra el jid completo y contra el número (id sin @dominio).
@@ -401,6 +441,7 @@ function resolverTargets(mode, list_ids, exclude) {
     .filter((id) => {
       if (!id.endsWith('@s.whatsapp.net')) return false
       if (ex.has(id) || ex.has(id.split('@')[0])) return false
+      if ((failures[id] || 0) >= BLOQUEO_UMBRAL) return false // opt-out: auto-excluido por fallos
       if (mode === 'only') return enSeleccion(id)
       if (mode === 'except') return !enSeleccion(id)
       return true
@@ -466,9 +507,11 @@ async function enviarLote(text, image_url, targets, track) {
         await sock.sendMessage(jid, { text })
       }
       sent++; sentDelta++
+      if (failures[jid]) { delete failures[jid]; scheduleSaveFailures() } // envío OK -> limpia fallos
       await new Promise((r) => setTimeout(r, delayAleatorio(delayMin, delayMax))) // anti-baneo (jitter)
     } catch (e) {
       failed++; failedDelta++
+      failures[jid] = (failures[jid] || 0) + 1; scheduleSaveFailures() // opt-out: cuenta el fallo
       log.error({ jid, err: String(e) }, 'fallo enviando')
     }
     if (sentDelta + failedDelta >= 20) { // progreso parcial cada ~20

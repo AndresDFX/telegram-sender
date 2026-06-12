@@ -56,26 +56,29 @@ de bot/cuenta (bot o userbot) · panel admin moderno (Basic Auth). 163 tests.
 
 ---
 
-## 📈 FASE 1 — Producto serio
+## 📈 FASE 1 — Producto serio (ola 1 ✅ desplegada)
 
 ### Funcional
-- **[P1·M] Métricas y reportes de entrega:** entregados/fallidos/bloqueados por envío + tendencia +
-  "top fallos". Hoy hay contadores sin histórico.
-- **[P1·M] Opt-out / bloqueados de WhatsApp:** dejar de reenviar a quien bloqueó (anti-baneo).
-- **[P1·M] Programar envío a hora/fecha exacta** ("el 15 a las 6pm"), no solo "ahora"/ventana.
-- **[P2·L] Plantillas y personalización por contacto** (`Hola {nombre}`).
+- ✅ **Métricas de entrega** — `metricas(días)` agrega enviados/fallidos/tasa + serie diaria;
+  `GET /api/metrics`. (Falta el desglose de "top fallos" por razón → ola 2.)
+- ✅ **Programar envío a hora/fecha exacta** — `not_before` en el plan; el dispatcher difiere hasta
+  esa hora; input datetime en el compositor.
+- 🔜 **[P1·M] Opt-out / bloqueados de WhatsApp** — *ola 2* (requiere que el servicio reporte los jids
+  que rechazaron/bloquearon).
+- 🔜 **[P2·L] Plantillas y personalización** (`Hola {nombre}`).
 
 ### UI / UX
-- **[P1·L] Dashboard / Home con KPIs** (último envío, pendientes, estado de conexiones, interruptor)
-  al entrar. Hoy se entra directo a pestañas sin resumen.
-- **[P1·M] Onboarding / wizard** de primera vez (bot → canal → listas → prueba).
-- **[P1·M] Accesibilidad** (ARIA, teclado, foco) y **responsive** tablet/móvil.
-- **[P1·S] Aviso de sesión expirada + re-login** sin recargar.
-- **[P2] Tooltips/ayuda, empty states, tema claro, import/export de contactos (CSV).**
+- ✅ **Dashboard / Home (pestaña Inicio)** — estado, KPIs (30 d), mini-gráfico de actividad, último
+  envío, accesos rápidos.
+- ✅ **Aviso de sesión expirada + re-login** (8 h) — hecho en Fase 0.
+- 🔜 **[P1·M] Onboarding / wizard** de primera vez · **accesibilidad** + **responsive** · **tema claro**
+  · **import/export CSV** → ola 2/P2.
 
 ### Seguridad / Ops
-- **[P1·M] Audit log** (quién hizo qué en el panel) · **[P1·M] HTTPS + dominio propio + WAF.**
-- **[P1·L] CI/CD** (tests + deploy en push) + **staging/prod** · **[P1·L] logs estructurados.**
+- 🔜 **[P1·M] Audit log** · **[P1·M] HTTPS + dominio + WAF** · **[P1·L] CI/CD** + staging/prod ·
+  **[P1·L] logs estructurados** → ola 2 (varios requieren acción tuya: dominio, secrets de GitHub).
+- ✅ **Alarmas por email** — suscripción de `castano.julian@correounivalle.edu.co` al tópico SNS
+  (pendiente: confirmar el correo de AWS).
 
 ---
 

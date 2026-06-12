@@ -338,6 +338,29 @@ Resources:
         - Key: Environment
           Value: !Ref EnvironmentName
 
+  # Bitácora de acciones del panel (auditoría) con TTL.
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${EnvironmentName}-audit"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
   # --- Cola de broadcast + DLQ -------------------------------------------------
   BroadcastDLQ:
     Type: AWS::SQS::Queue
@@ -916,6 +939,12 @@ Resources:
                   - !GetAtt PlansTable.Arn
               - Effect: Allow
                 Action:
+                  - dynamodb:PutItem # registrar acción en auditoría
+                  - dynamodb:Scan # listar auditoría
+                Resource:
+                  - !GetAtt AuditTable.Arn
+              - Effect: Allow
+                Action:
                   - s3:PutObject # subir la imagen de la lista
                   - s3:GetObject # firmar URL temporal (adjuntar imagen en envío manual)
                 Resource:
@@ -943,6 +972,7 @@ Resources:
           BROADCAST_DLQ_URL: !Ref BroadcastDLQ
           BROADCASTS_TABLE: !Ref BroadcastsTable
           PLANS_TABLE: !Ref PlansTable
+          AUDIT_TABLE: !Ref AuditTable
           BROADCAST_BATCH_SIZE: !Ref BroadcastBatchSize
           IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
           ADMIN_USER: !Ref AdminUser

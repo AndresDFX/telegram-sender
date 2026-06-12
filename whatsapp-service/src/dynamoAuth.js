@@ -49,10 +49,17 @@ export async function useDynamoAuthState(table, sessionId, region) {
   const loadContacts = async () => (await read('__contacts__')) || {}
   const saveContacts = async (map) => write('__contacts__', map)
 
+  // Conteo de fallos de envío por jid (opt-out anti-baneo): jids que fallan repetidamente se
+  // auto-excluyen de los envíos. Persistido bajo el prefijo de sesión (clearAll también lo borra).
+  const loadFailures = async () => (await read('__failures__')) || {}
+  const saveFailures = async (map) => write('__failures__', map)
+
   return {
     clearAll,
     loadContacts,
     saveContacts,
+    loadFailures,
+    saveFailures,
     state: {
       creds,
       keys: {

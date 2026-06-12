@@ -39,6 +39,7 @@ queue_stats = None
 image_store = None
 broadcast_store = None
 plan_store = None
+audit_store = None
 
 _CAMPOS_EDITABLES = (
     "source_channel",
@@ -85,7 +86,7 @@ _NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token", "bot_to
 
 
 def _ensure() -> None:
-    global config, subscribers, queue_stats, image_store, broadcast_store, plan_store
+    global config, subscribers, queue_stats, image_store, broadcast_store, plan_store, audit_store
     if config is None:
         config = wiring.build_config_store()
     if subscribers is None:
@@ -98,6 +99,16 @@ def _ensure() -> None:
         broadcast_store = wiring.build_broadcast_store()
     if plan_store is None:
         plan_store = wiring.build_plan_store()
+    if audit_store is None:
+        audit_store = wiring.build_audit_store()
+
+
+def _audit(action: str, detail: str = "") -> None:
+    """Registra una acción del panel (best-effort; nunca rompe la operación)."""
+    try:
+        audit_store.registrar(action, detail, admin_user())
+    except Exception:
+        logger.exception("No se pudo auditar %s", action)
 
 
 def _planes_con_progreso() -> list[dict]:
@@ -341,7 +352,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if sub == "/api/config" and method == "GET":
             return _json(_config_publico())
         if sub == "/api/config" and method == "POST":
-            return _json(config.set(_sanea_config(_body(event))))
+            cambios = _sanea_config(_body(event))
+            _audit("config", "campos: " + (", ".join(sorted(cambios.keys())) or "(ninguno)"))
+            return _json(config.set(cambios))
         if sub == "/api/image" and method == "POST":
             cuerpo = _body(event)
             datos = cuerpo.get("image", "")
@@ -384,21 +397,28 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if sub == "/api/dlq" and method == "GET":
             return _json({"sample": queue_stats.dlq_muestra(5), "depth": queue_stats.profundidades().get("dlq", 0)})
         if sub == "/api/dlq/redrive" and method == "POST":
+            _audit("dlq_redrive")
             return _json(queue_stats.dlq_redrive())
         if sub == "/api/dlq/purge" and method == "POST":
+            _audit("dlq_purge")
             return _json(queue_stats.dlq_purgar())
         if sub == "/api/broadcasts" and method == "GET":
             return _json({"broadcasts": broadcast_store.listar()})
         if sub == "/api/metrics" and method == "GET":
             return _json(broadcast_store.metricas(30))
+        if sub == "/api/audit" and method == "GET":
+            return _json({"audit": audit_store.listar(50)})
         if sub == "/api/plans" and method == "GET":
             return _json({"plans": _planes_con_progreso()})
         if sub == "/api/plans/cancel" and method == "POST":
             pid = str(_body(event).get("pid", "")).strip()
             if pid:  # cancelar un envío puntual (en tiempo real)
                 plan_store.cancelar(pid)
+                _audit("cancelar_envio", pid)
                 return _json({"ok": True, "canceled": 1, "pid": pid})
-            return _json({"ok": True, "canceled": plan_store.cancelar_pendientes()})
+            n = plan_store.cancelar_pendientes()
+            _audit("cancelar_pendientes", f"{n} difusiones")
+            return _json({"ok": True, "canceled": n})
         if sub == "/api/telegram/me" and method == "GET":
             return _telegram_api("getMe", {})  # verifica el token + muestra el bot
         if sub == "/api/telegram/webhook" and method == "GET":
@@ -441,6 +461,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 )
             except ValueError as e:
                 return _json({"error": str(e)}, 400)
+            canales = "+".join([c for c, on in (("tg", a_tg), ("wa", a_wa)) if on])
+            _audit("broadcast" + (" (programado)" if sched else ""), f"[{canales}] {texto[:60]}")
             return _json({"ok": True, **res})
         if sub == "/api/broadcast/preview" and method == "POST":
             cuerpo = _body(event)
@@ -463,6 +485,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _whatsapp_proxy("/status")
         if sub == "/api/whatsapp/contacts" and method == "GET":
             return _whatsapp_proxy("/contacts", timeout=25)
+        if sub == "/api/whatsapp/blocked" and method == "GET":
+            return _whatsapp_proxy("/blocked")
+        if sub == "/api/whatsapp/blocked/clear" and method == "POST":
+            _audit("whatsapp_blocked_clear")
+            return _whatsapp_proxy("/blocked/clear", body={})
         if sub == "/api/whatsapp/pair" and method == "POST":
             return _whatsapp_proxy("/pair", timeout=25, body={"number": _body(event).get("number", "")})
     except Exception:
@@ -1085,6 +1112,11 @@ img.preview{box-shadow:var(--sh-sm)}
      <button class="ghost" onclick="dlqPurge()">🗑 Descartar todo</button>
    </div>
   </div>
+  <div class="card" data-tab="estado"><h2>Auditoría <span id="audit_n" class="hint"></span></h2>
+   <div class="hint">Últimas acciones realizadas en el panel (config, envíos, cancelaciones, DLQ).</div>
+   <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>cuándo</th><th>usuario</th><th>acción</th><th>detalle</th></tr></thead><tbody id="audit_rows"></tbody></table></div>
+   <button class="sec" style="margin-top:12px" onclick="loadAudit()">Refrescar</button>
+  </div>
   <div class="card" data-tab="telegram"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
    <input id="subsearch" placeholder="🔎 Buscar por nombre o número..." oninput="onSearch()" style="margin-top:10px">
@@ -1127,6 +1159,14 @@ img.preview{box-shadow:var(--sh-sm)}
    </div>
    <table><thead><tr><th></th><th>nombre</th><th>estado</th></tr></thead><tbody id="wa_subs"></tbody></table>
    <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button class="sec" onclick="waPrev()">◀</button><span id="wa_pageinfo" class="hint"></span><button class="sec" onclick="waNext()">▶</button></div>
+  </div>
+  <div class="card" data-tab="whatsapp"><h2>Auto-excluidos por fallos <span id="wa_blk_n" class="hint"></span></h2>
+   <div class="hint">Los contactos que fallan al enviar de forma repetida (≥ umbral) se excluyen <b>solos</b> de los próximos envíos para proteger tu número. Limpia el conteo para reincluirlos.</div>
+   <div id="wa_blk_list" class="hint" style="margin-top:10px">—</div>
+   <div style="display:flex;gap:8px;margin-top:12px">
+     <button class="sec" onclick="loadBlocked()">Ver / refrescar</button>
+     <button class="ghost" onclick="clearBlocked()">Reincluir a todos</button>
+   </div>
   </div>
   <div class="card" data-tab="whatsapp"><h2>Listas de distribución · WhatsApp</h2>
    <div class="hint">"+ marcados" usa los contactos marcados arriba en <b>Destinatarios WhatsApp</b>.</div>
@@ -1380,6 +1420,25 @@ async function dlqPurge(){
   if(!confirm('¿Descartar TODOS los mensajes fallidos? No se podrán recuperar.')) return;
   try{ await api('/api/dlq/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ DLQ descartada'); setTimeout(loadDlq,1500); }
   catch(e){ toast('Error al descartar',true); }
+}
+// --- Opt-out WhatsApp: contactos auto-excluidos por fallos ---
+async function loadBlocked(){
+  try{ const r=await api('/api/whatsapp/blocked'); $('wa_blk_n').textContent='· '+(r.total||0)+' (umbral '+(r.umbral||3)+')';
+    const b=r.blocked||[]; if($('wa_blk_list')) $('wa_blk_list').innerHTML = b.length? b.map(x=>bcEsc(x.name)+' — '+x.fallos+' fallos').join('<br>') : 'Ninguno por ahora.';
+  }catch(e){ if($('wa_blk_n')) $('wa_blk_n').textContent='· servicio inaccesible'; if($('wa_blk_list')) $('wa_blk_list').textContent='—'; }
+}
+async function clearBlocked(){
+  if(!confirm('¿Reincluir a TODOS los auto-excluidos? Volverán a recibir envíos.')) return;
+  try{ await api('/api/whatsapp/blocked/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ Reincluidos'); loadBlocked(); }
+  catch(e){ toast('Error',true); }
+}
+// --- Auditoría (acciones del panel) ---
+async function loadAudit(){
+  try{ const r=await api('/api/audit'); const a=r.audit||[];
+    if($('audit_n')) $('audit_n').textContent='· '+a.length;
+    const t=$('audit_rows'); if(!t) return;
+    t.innerHTML = a.length ? a.map(x=>`<tr><td>${bcFmtTime(x.ts)}</td><td>${bcEsc(x.user)}</td><td><b>${bcEsc(x.action)}</b></td><td style="color:var(--mut)">${bcEsc(x.detail)}</td></tr>`).join('') : '<tr><td colspan="4" class="hint">Sin registros aún.</td></tr>';
+  }catch(e){}
 }
 // --- Estado de conexiones (Telegram bot + WhatsApp) en el header ---
 async function refreshConn(){
@@ -1744,7 +1803,7 @@ function plStartPolling(){
     if(vis) loadPlans(); }, BC_POLL);
 }
 (function(){ const _s=window.showTab;
-  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='inicio') loadDashboard(); if(t==='prog') loadPlans(); if(t==='estado'){ loadQueue(); loadDlq(); } }; }
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='inicio') loadDashboard(); if(t==='prog') loadPlans(); if(t==='whatsapp') loadBlocked(); if(t==='estado'){ loadQueue(); loadDlq(); loadAudit(); } }; }
   const start=()=>{ if(CRED){ plStartPolling(); qStartPolling(); } };
   if(document.readyState!=='loading') start();
   else document.addEventListener('DOMContentLoaded', start);

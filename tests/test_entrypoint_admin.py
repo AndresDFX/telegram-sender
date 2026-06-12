@@ -61,6 +61,17 @@ class FakeQueueStats:
         return {"ok": True, "purged": True}
 
 
+class FakeAudit:
+    def __init__(self):
+        self.entries = []
+
+    def registrar(self, action, detail="", user="admin"):
+        self.entries.append({"ts": 1, "action": action, "detail": detail, "user": user})
+
+    def listar(self, limit=50):
+        return list(reversed(self.entries))[:limit]
+
+
 class FakeImageStore:
     def __init__(self):
         self.saved = None
@@ -92,11 +103,12 @@ class AdminTests(unittest.TestCase):
         admin.subscribers = FakeSubs()
         admin.queue_stats = FakeQueueStats()
         admin.image_store = FakeImageStore()
+        admin.audit_store = FakeAudit()
         os.environ["ADMIN_USER"] = "admin"
         os.environ["ADMIN_PASSWORD"] = "secret123"
 
     def tearDown(self):
-        admin.config = admin.subscribers = admin.queue_stats = admin.image_store = None
+        admin.config = admin.subscribers = admin.queue_stats = admin.image_store = admin.audit_store = None
         os.environ.pop("ADMIN_USER", None)
         os.environ.pop("ADMIN_PASSWORD", None)
 
@@ -164,6 +176,15 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 200)
         # markup 15% aplicado (config fake: 15%, símbolo $)
         self.assertIn("$374.000", json.loads(resp["body"])["processed"])
+
+    def test_auditoria_registra_y_lista(self):
+        # guardar config -> queda auditado; /api/audit lo lista
+        admin.lambda_handler(_event("POST", "/admin/api/config", {"source_channel": "x"}), None)
+        acciones = [e["action"] for e in admin.audit_store.entries]
+        self.assertIn("config", acciones)
+        resp = admin.lambda_handler(_event("GET", "/admin/api/audit"), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertTrue(len(json.loads(resp["body"])["audit"]) >= 1)
 
     def test_dlq_get_y_acciones(self):
         g = admin.lambda_handler(_event("GET", "/admin/api/dlq"), None)
