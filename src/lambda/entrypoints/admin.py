@@ -848,12 +848,12 @@ input,textarea,select{
   border-radius:var(--r-sm);padding:11px 12px;font-size:14px;font-family:inherit;
   transition:border-color .15s,box-shadow .15s,background .15s;
 }
-input::placeholder,textarea::placeholder{color:var(--mut2)}
+input::placeholder,textarea::placeholder{color:var(--mut)}
 input:hover,textarea:hover,select:hover{border-color:var(--bd2)}
 input:focus,textarea:focus,select:focus{outline:0;border-color:var(--ac);box-shadow:var(--ring);background:#262625}
 textarea{min-height:88px;resize:vertical;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:13px;line-height:1.55}
 select{appearance:none;-webkit-appearance:none;
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237c87a8' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>");
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23A8A8A5' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>");
   background-repeat:no-repeat;background-position:right 12px center;padding-right:36px;cursor:pointer}
 input[type=file]{padding:9px 12px;color:var(--mut);cursor:pointer}
 input[type=file]::file-selector-button{
@@ -877,6 +877,8 @@ button.sec{background:#3A3A39;color:var(--tx2);border-color:var(--bd2)}
 button.sec:hover{background:#4A4A49}
 button.ghost{background:transparent;border:1px solid var(--bd2);color:var(--mut)}
 button.ghost:hover{background:rgba(255,255,255,.04);color:var(--tx2)}
+button.danger{background:var(--color-danger);color:#fff;border-color:transparent}
+button.danger:hover{background:#C02B24}
 
 /* ---------- markup widget ---------- */
 .markup{display:flex;align-items:center;gap:18px;background:var(--elev);border:1px solid var(--bd);border-radius:var(--r);padding:18px}
@@ -1101,7 +1103,7 @@ main>.card.show{display:block}
 /* refuerzo visual de los empties existentes */
 .bc-empty, #subsempty{
   border:1px dashed var(--bd2);border-radius:var(--r);
-  background:rgba(255,255,255,.012);
+  background:rgba(255,255,255,.04);
 }
 /* skeleton shimmer (el front puede inyectar .skeleton .sk-line al cargar) */
 .skeleton{pointer-events:none}
@@ -1191,9 +1193,9 @@ th input[type=checkbox],td input[type=checkbox]{transform:scale(1.05)}
 .chan.tg.on .dot,.chan.wa.on .dot{transform:scale(1.25)}
 /* zebra muy tenue en tablas largas de contactos/destinatarios */
 #subs tr:nth-child(even) td, #wa_subs tr:nth-child(even) td{
-  background:rgba(255,255,255,.012);
+  background:rgba(255,255,255,.04);
 }
-tbody tr:hover td{background:rgba(255,255,255,.03)}
+tbody tr:hover td{background:rgba(255,255,255,.07)}
 /* badge de origen del envio mas legible */
 .bc-src{background:var(--ac-soft);border-color:rgba(253,83,30,.28);color:#E7E7E5}
 /* pildora "sending" pulsa para indicar actividad */
@@ -1354,7 +1356,7 @@ img.preview{box-shadow:var(--sh-sm)}
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
      <button class="sec" onclick="loadDlq()">Ver / refrescar</button>
      <button class="sec" onclick="dlqRedrive()">↩ Reintentar todo</button>
-     <button class="ghost" onclick="dlqPurge()">🗑 Descartar todo</button>
+     <button class="danger" onclick="dlqPurge()">🗑 Descartar todo</button>
    </div>
   </div>
   <div class="card" data-tab="estado"><h2>Auditoría <span id="audit_n" class="hint"></span></h2>
@@ -1488,7 +1490,7 @@ img.preview{box-shadow:var(--sh-sm)}
    <div class="hint" style="margin-top:10px">Apágalo para <b>PAUSAR al instante todos los envíos</b> (Telegram y WhatsApp). Las difusiones quedan en espera; nada sale hasta reactivar. Útil como freno de emergencia.</div>
    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bd)">
      <div class="hint" style="margin-top:0">¿Hay difusiones en cola que NO quieres enviar? Cancélalas (no se enviarán, ni al reactivar).</div>
-     <button class="ghost" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>
+     <button class="danger" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>
    </div>
   </div>
   <div class="card accent" data-tab="prog"><h2>Anti-baneo · lotes y ritmo</h2>
@@ -2033,7 +2035,7 @@ function plCard(p){
   const waI=(p.wa&&p.wa.enabled)?`🟢 ${p.wa.next|0}/${p.wa.batches|0} lotes`+(!p.wa.resolved?' (resolviendo…)':''):'';
   const lines=(p.log||[]).map(plBatchLine).join('') || '<div class="hint" style="margin-top:6px">Aún sin lotes despachados (esperando ventana/turno).</div>';
   const activo=(st==='pending'||st==='running');
-  const cancelBtn=activo?`<button class="ghost" style="padding:6px 12px" onclick="cancelPlan('${p.pid}')">🛑 Cancelar este envío</button>`:'';
+  const cancelBtn=activo?`<button class="danger" style="padding:6px 12px" onclick="cancelPlan('${p.pid}')">🛑 Cancelar este envío</button>`:'';
   // Mensaje EXACTO que se envía (ya procesado: markup, sin IPRO PARTS, footer). Scrollable para revisar.
   return `<div class="card" style="margin-bottom:12px;background:var(--elev);padding:16px">`+
     `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center">`+
