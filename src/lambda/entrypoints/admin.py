@@ -736,6 +736,16 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 n = broadcast_store.borrar_terminados()
                 _audit("broadcasts:borrar", f"terminados {n}")
                 return _json({"ok": True, "deleted": n})
+            ids = cuerpo.get("ids")
+            if isinstance(ids, list) and ids:
+                n = 0
+                for x in ids:
+                    try:
+                        broadcast_store.borrar(str(x)); n += 1
+                    except Exception:
+                        pass
+                _audit("broadcasts:borrar", f"masivo {n}")
+                return _json({"ok": True, "deleted": n})
             bid = str(cuerpo.get("id", "")).strip()
             if not bid:
                 return _json({"error": "id requerido"}, 400)
@@ -1511,6 +1521,11 @@ img.preview{box-shadow:var(--sh-sm)}
 #fuentes_subnav button:hover{color:var(--tx2)}
 #fuentes_subnav button.on{background:rgba(253,83,30,.14);color:#FFE0D3;border-color:rgba(253,83,30,.4)}
 .card.subhide{display:none !important}
+/* Tablas con selección masiva (patrón reutilizable: checkbox + barra de acciones) */
+tbody tr.sel-row td{background:rgba(253,83,30,.12)}
+.tbl-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+.tbl-toolbar .grow{flex:1}
+th.selcol,td.selcol{width:34px;text-align:center}
 </style></head><body>
 
 <div id="login"><div class="box">
@@ -1797,11 +1812,16 @@ img.preview{box-shadow:var(--sh-sm)}
   <div class="card" data-tab="envios"><h2>📡 Envíos <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
    <div class="hint">Estado y progreso de cada difusión. Se actualiza automáticamente mientras hay envíos en curso.</div>
    <div style="overflow-x:auto;margin-top:12px">
-     <table id="bc_table"><thead><tr><th>Mensaje</th><th>Estado</th><th>Progreso</th><th></th></tr></thead>
+     <table id="bc_table"><thead><tr><th class="selcol"><input type="checkbox" id="bc_selall" onchange="bcSelAll(this.checked)"></th><th>Mensaje</th><th>Estado</th><th>Progreso</th><th></th></tr></thead>
        <tbody id="bc_rows"></tbody></table>
    </div>
    <div class="bc-empty" id="bc_empty" style="display:none">Aún no hay envíos. Crea uno en <b>Componer y enviar</b>.</div>
-   <div style="margin-top:14px"><button class="sec" onclick="loadBroadcasts()">Refrescar</button> <button class="danger" onclick="bcClearFinished()">🗑 Limpiar terminados</button></div>
+   <div class="tbl-toolbar">
+     <button class="danger" id="bc_delsel" onclick="bcDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
+     <button class="danger" onclick="bcClearFinished()">🗑 Limpiar terminados</button>
+     <span class="grow"></span>
+     <button class="sec" onclick="loadBroadcasts()">Refrescar</button>
+   </div>
   </div>
   <div class="card accent" data-tab="envios"><h2>⏰ Programar un mensaje</h2>
    <div class="hint">Crea mensajes que se envían solos a la hora indicada, por las conexiones existentes de Telegram y WhatsApp. Una vez, a diario o semanal. Respetan el ritmo anti-baneo, la ventana horaria y el interruptor maestro.</div>
@@ -2550,6 +2570,7 @@ function bcRow(b){
   const txt=(b.text||'').trim()||'(solo imagen)';
   const tr=document.createElement('tr');
   tr.innerHTML=
+    `<td class="selcol"><input type="checkbox" class="bcsel" data-id="${b.id}" onchange="bcSelChanged()"></td>`+
     `<td class="bc-msg"><b title="${bcEsc(txt)}">${bcEsc(txt)}</b>`+
       `<div class="bc-meta"><span class="bc-src">${bcEsc(b.source||'manual')}</span><span>${bcFmtTime(b.created_at)}</span></div></td>`+
     `<td><span class="pill ${st}">${bcEsc(label)}</span></td>`+
@@ -2565,6 +2586,7 @@ async function loadBroadcasts(){
     $('bc_empty').style.display=list.length?'none':'block';
     let active=false;
     list.forEach(b=>{ rows.appendChild(bcRow(b)); if(b.status==='queued'||b.status==='sending') active=true; });
+    if($('bc_selall')) $('bc_selall').checked=false; bcSelChanged();
     const live=$('bc_live'); live.classList.toggle('on', active);
     $('bc_live_t').textContent = active ? 'en vivo' : 'al día';
   }catch(e){ /* silencioso: no romper el polling por un fallo puntual */ }
@@ -2577,6 +2599,20 @@ async function bcDelete(id){
 async function bcClearFinished(){
   if(!confirm('¿Borrar DEFINITIVAMENTE todos los envíos terminados? Se conservan los que están en cola o enviándose.')) return;
   try{ const r=await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({finished:true})}); toast('✓ '+(r.deleted||0)+' envíos borrados'); loadBroadcasts(); }
+  catch(e){ toast('Error al borrar',true); }
+}
+// Selección masiva (patrón de tabla reutilizable: checkbox por fila + barra de acciones).
+function bcSelAll(v){ document.querySelectorAll('.bcsel').forEach(c=>c.checked=v); bcSelChanged(); }
+function bcSelectedIds(){ return [...document.querySelectorAll('.bcsel:checked')].map(c=>c.dataset.id); }
+function bcSelChanged(){
+  document.querySelectorAll('.bcsel').forEach(c=>{ const tr=c.closest('tr'); if(tr) tr.classList.toggle('sel-row', c.checked); });
+  const n=bcSelectedIds().length, b=$('bc_delsel');
+  if(b){ b.disabled=n===0; b.textContent='🗑 Borrar seleccionados'+(n?' ('+n+')':''); }
+}
+async function bcDeleteSelected(){
+  const ids=bcSelectedIds(); if(!ids.length) return;
+  if(!confirm('¿Borrar DEFINITIVAMENTE '+ids.length+' envío(s) seleccionados? No se puede deshacer.')) return;
+  try{ const r=await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})}); toast('✓ '+(r.deleted||0)+' borrados'); loadBroadcasts(); }
   catch(e){ toast('Error al borrar',true); }
 }
 function bcStartPolling(){
