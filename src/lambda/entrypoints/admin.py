@@ -542,6 +542,46 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             schedule_store.borrar(sid)
             _audit("schedule:borrar", sid)
             return _json({"ok": True})
+        if sub == "/api/telethon/send-code" and method == "POST":
+            from adapters import telethon_login
+            cfg = config.get()
+            api_id, api_hash = cfg.get("telethon_api_id"), cfg.get("telethon_api_hash")
+            if not (api_id and api_hash):
+                return _json({"error": "Configura primero el API ID y API HASH de Telegram (my.telegram.org)."}, 400)
+            phone = str(_body(event).get("phone", "")).strip()
+            try:
+                r = telethon_login.enviar_codigo(api_id, api_hash, phone)
+            except telethon_login.TelethonLoginError as e:
+                return _json({"error": str(e)}, 400)
+            config.set_login_temp(r["session"], r["phone_code_hash"], phone)
+            _audit("telethon:send-code", phone[-4:] if phone else "")
+            return _json({"ok": True, "sent": True})
+        if sub == "/api/telethon/sign-in" and method == "POST":
+            from adapters import telethon_login
+            cfg = config.get()
+            api_id, api_hash = cfg.get("telethon_api_id"), cfg.get("telethon_api_hash")
+            tmp = config.get_login_temp()
+            if not tmp.get("session"):
+                return _json({"error": "Primero envía el código (paso anterior)."}, 400)
+            cuerpo = _body(event)
+            code = str(cuerpo.get("code", "")).strip()
+            password = cuerpo.get("password") or None
+            if not code and not password:
+                return _json({"error": "Ingresa el código que te llegó por Telegram."}, 400)
+            try:
+                res = telethon_login.confirmar(
+                    api_id, api_hash, tmp["session"], tmp["phone"], tmp["phone_code_hash"],
+                    code=code or None, password=password,
+                )
+            except telethon_login.TelethonLoginError as e:
+                return _json({"error": str(e)}, 400)
+            if res.get("status") == "needs_password":
+                config.update_login_session(res["session"])  # sesión tras aceptar el código (para el 2FA)
+                return _json({"ok": True, "needs_password": True})
+            config.set({"telethon_session": res["session"], "send_mode": "userbot"})  # sesión definitiva + userbot
+            config.clear_login_temp()
+            _audit("telethon:sign-in", "conectado @" + str((res.get("me") or {}).get("username") or ""))
+            return _json({"ok": True, "connected": True, "me": res.get("me")})
         if sub == "/api/broadcast/preview" and method == "POST":
             cuerpo = _body(event)
 
@@ -1368,9 +1408,23 @@ img.preview{box-shadow:var(--sh-sm)}
      <div><label>API ID</label><input id="telethon_api_id"></div>
      <div><label>API Hash</label><input id="telethon_api_hash"></div>
    </div>
-   <label>StringSession <span id="sess_status" class="hint"></span></label>
+   <label>Sesión de la cuenta <span id="sess_status" class="hint"></span></label>
+   <div class="hint">Conéctate <b>sin scripts</b>: guarda primero el API ID y API Hash (botón de abajo), luego ingresa tu número, recibe el código por Telegram y confírmalo aquí mismo. La plataforma genera y guarda la sesión sola.</div>
+   <div class="row" style="margin-top:8px">
+     <div><label>Teléfono (formato internacional)</label><input id="tl_phone" placeholder="+57 300 123 4567"></div>
+     <div style="display:flex;align-items:flex-end"><button class="sec" id="tl_send" onclick="tlSendCode()" style="width:100%">Enviar código</button></div>
+   </div>
+   <div id="tl_step2" style="display:none;margin-top:10px">
+     <div class="row">
+       <div><label>Código recibido</label><input id="tl_code" inputmode="numeric" placeholder="12345"></div>
+       <div id="tl_pwd_wrap" style="display:none"><label>Contraseña (verificación en 2 pasos)</label><input id="tl_password" type="password" placeholder="contraseña 2FA"></div>
+     </div>
+     <button id="tl_confirm" onclick="tlSignIn()" style="margin-top:8px">Confirmar y conectar</button>
+     <span id="tl_status" class="hint" style="margin-left:10px"></span>
+   </div>
+   <div class="section-label" style="margin-top:14px">Avanzado: pegar StringSession</div>
    <input id="telethon_session" type="password" placeholder="(pega para unir/cambiar la cuenta)">
-   <div class="hint">Genérala con <code>scripts/generar_sesion.py</code> usando la cuenta que quieras unir. Da acceso total a esa cuenta: trátala como secreto.</div>
+   <div class="hint">Alternativa manual: genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a esa cuenta: trátala como secreto.</div>
    <button onclick="saveAccount()">Guardar cuenta</button>
   </div>
   <div class="card" data-tab="ajustes"><h2>WhatsApp (reenvío)</h2>
@@ -1746,6 +1800,30 @@ async function saveAccount(){ const b={ send_mode:$('send_mode').value, telethon
   const bt=$('bot_token').value.trim(); if(bt) b.bot_token=bt;
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
     toast('✓ Cuenta guardada'); $('telethon_session').value=''; $('bot_token').value=''; loadCfg(); loadSubs(); } catch(e){ toast('Error',true); } }
+async function tlSendCode(){
+  const phone=$('tl_phone').value.trim(); if(!phone){ toast('Ingresa el número de teléfono',true); return; }
+  $('tl_send').disabled=true; toast('Enviando código…','info');
+  try{
+    const r=await fetch(BASE+'/api/telethon/send-code',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({phone})});
+    const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status));
+    $('tl_step2').style.display='block'; $('tl_status').textContent='Código enviado a tu app de Telegram.'; toast('✓ Código enviado');
+  }catch(e){ toast(e.message||'No se pudo enviar el código',true); }
+  finally{ $('tl_send').disabled=false; }
+}
+async function tlSignIn(){
+  const code=$('tl_code').value.trim(); const pwd=$('tl_password').value;
+  const pwdVisible=$('tl_pwd_wrap').style.display!=='none';
+  if(!code && !(pwdVisible&&pwd)){ toast('Ingresa el código recibido',true); return; }
+  const body={}; if(code) body.code=code; if(pwdVisible&&pwd) body.password=pwd;
+  $('tl_confirm').disabled=true; $('tl_status').textContent='Conectando…';
+  try{
+    const r=await fetch(BASE+'/api/telethon/sign-in',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify(body)});
+    const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status));
+    if(j.needs_password){ $('tl_pwd_wrap').style.display='block'; $('tl_status').textContent='Esta cuenta tiene verificación en dos pasos: ingresa tu contraseña y confirma de nuevo.'; toast('Ingresa tu contraseña 2FA','warn'); return; }
+    if(j.connected){ $('tl_status').textContent='✅ Conectado'+(j.me&&j.me.username?(' como @'+j.me.username):''); toast('✓ Cuenta conectada'); $('tl_code').value=''; $('tl_password').value=''; $('tl_step2').style.display='none'; loadCfg(); loadSubs(); }
+  }catch(e){ toast(e.message||'No se pudo iniciar sesión',true); $('tl_status').textContent=e.message||''; }
+  finally{ $('tl_confirm').disabled=false; }
+}
 async function tgVerify(){ $('tg_state').textContent='verificando...';
   try{ const r=await api('/api/telegram/me'); $('tg_state').textContent = (r.ok && r.result) ? ('bot ✓ @'+(r.result.username||r.result.id)) : ('error: '+(r.description||'token inválido')); }
   catch(e){ $('tg_state').textContent='error verificando (¿token guardado?)'; } }

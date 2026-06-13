@@ -185,6 +185,7 @@ class DynamoDbConfigStore(ConfigStore):
         "window_tz",
     )
     _CONTACTS_ID = "__contacts__"
+    _LOGIN_ID = "__telethon_login__"  # sesión temporal del login userbot (entre código y confirmación)
 
     def __init__(self, table_name: str | None = None, endpoint: str | None = None, config_id: str = "default"):
         self._name = table_name or os.environ.get("CONFIG_TABLE", "Config")
@@ -361,6 +362,41 @@ class DynamoDbConfigStore(ConfigStore):
                 ExpressionAttributeValues=values,
             )
         return self.get()
+
+    # --- login userbot desde el panel (sesión temporal entre "enviar código" y "confirmar") ---
+
+    def set_login_temp(self, session: str, phone_code_hash: str, phone: str) -> None:
+        self._t().put_item(
+            Item={
+                "configId": self._LOGIN_ID,
+                "session": session,
+                "phone_code_hash": phone_code_hash,
+                "phone": phone,
+                "ttl": int(time.time()) + 900,  # 15 min (si la tabla tiene TTL habilitado)
+            }
+        )
+
+    def get_login_temp(self) -> dict:
+        item = self._t().get_item(Key={"configId": self._LOGIN_ID}).get("Item") or {}
+        return {
+            "session": item.get("session", ""),
+            "phone_code_hash": item.get("phone_code_hash", ""),
+            "phone": item.get("phone", ""),
+        }
+
+    def update_login_session(self, session: str) -> None:
+        self._t().update_item(
+            Key={"configId": self._LOGIN_ID},
+            UpdateExpression="SET #s = :s",
+            ExpressionAttributeNames={"#s": "session"},
+            ExpressionAttributeValues={":s": session},
+        )
+
+    def clear_login_temp(self) -> None:
+        try:
+            self._t().delete_item(Key={"configId": self._LOGIN_ID})
+        except Exception:
+            pass
 
 
 class DynamoDbBroadcastStore:

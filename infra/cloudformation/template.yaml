@@ -945,6 +945,8 @@ Resources:
                 Action:
                   - dynamodb:GetItem # leer config
                   - dynamodb:UpdateItem # guardar config
+                  - dynamodb:PutItem # sesión temporal del login userbot
+                  - dynamodb:DeleteItem # limpiar la sesión temporal tras conectar
                 Resource:
                   - !GetAtt ConfigTable.Arn
               - Effect: Allow
