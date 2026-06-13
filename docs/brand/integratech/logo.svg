@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 72" role="img" aria-label="IntegraTech">
+  <defs>
+    <linearGradient id="itFlow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Isotipo: dos nodos que se integran a traves de un flujo en S -->
+  <g transform="translate(8 8)">
+    <!-- Flujo de integracion entre nodos (conexion) -->
+    <path d="M16 18 C16 33 40 23 40 38" fill="none" stroke="url(#itFlow)" stroke-width="7" stroke-linecap="round"/>
+    <!-- Nodo superior (primario) -->
+    <circle cx="16" cy="18" r="11" fill="#2563EB"/>
+    <circle cx="16" cy="18" r="4.5" fill="#EFF4FF"/>
+    <!-- Nodo inferior (secundario / dato) -->
+    <circle cx="40" cy="38" r="11" fill="#06B6D4"/>
+    <circle cx="40" cy="38" r="4.5" fill="#ECFDFF"/>
+  </g>
+
+  <!-- Wordmark: "Integra" en azul, "Tech" en cian -->
+  <g font-family="'Space Grotesk','Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif" font-size="28" font-weight="700" letter-spacing="-0.5">
+    <text x="74" y="46" fill="#1A40A8">Integra<tspan fill="#0E7490">Tech</tspan></text>
+  </g>
+</svg>

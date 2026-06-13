@@ -1,0 +1,197 @@
+:root {
+  /* ============================================================
+     IntegraTech — Design Tokens
+     Marca: tech, integracion, confianza, moderno.
+     Primario  : Azul integracion (#2563EB) — confianza + tecnologia.
+     Secundario: Cian/Teal conexion (#06B6D4) — flujo de datos/integracion.
+     Neutros calidos-frios equilibrados; semanticos accesibles (WCAG AA).
+     Prefijo de tokens: --it-
+     ============================================================ */
+
+  /* ------------------------------------------------------------
+     PALETA PRIMARIA — Azul (#2563EB = --it-color-primary-500)
+     Tints (50..400) hacia blanco; shades (600..900) hacia negro azulado.
+     ------------------------------------------------------------ */
+  --it-color-primary-50:  #EFF4FF;
+  --it-color-primary-100: #DBE6FE;
+  --it-color-primary-200: #BFD2FE;
+  --it-color-primary-300: #93B4FD;
+  --it-color-primary-400: #608AFA;
+  --it-color-primary-500: #2563EB; /* base de marca */
+  --it-color-primary-600: #1D4FD0;
+  --it-color-primary-700: #1A40A8;
+  --it-color-primary-800: #1A3782;
+  --it-color-primary-900: #18305F;
+
+  /* Alias semanticos de marca (primario) */
+  --it-color-primary:        var(--it-color-primary-500);
+  --it-color-primary-hover:  var(--it-color-primary-600);
+  --it-color-primary-active: var(--it-color-primary-700);
+  --it-color-on-primary:     #FFFFFF; /* texto sobre primario */
+
+  /* ------------------------------------------------------------
+     PALETA SECUNDARIA — Cian/Teal (#06B6D4 = --it-color-secondary-500)
+     Connota conexion, flujo de datos e integracion entre sistemas.
+     ------------------------------------------------------------ */
+  --it-color-secondary-50:  #ECFDFF;
+  --it-color-secondary-100: #CFF9FE;
+  --it-color-secondary-200: #A5F0FC;
+  --it-color-secondary-300: #67E2F9;
+  --it-color-secondary-400: #22CCEE;
+  --it-color-secondary-500: #06B6D4; /* base secundaria */
+  --it-color-secondary-600: #0892B3;
+  --it-color-secondary-700: #0E7490;
+  --it-color-secondary-800: #155E75;
+  --it-color-secondary-900: #164E63;
+
+  /* Alias semanticos de marca (secundario) */
+  --it-color-secondary:        var(--it-color-secondary-500);
+  --it-color-secondary-hover:  var(--it-color-secondary-600);
+  --it-color-secondary-active: var(--it-color-secondary-700);
+  --it-color-on-secondary:     #06222B; /* texto sobre secundario (alto contraste) */
+
+  /* ------------------------------------------------------------
+     ESCALA DE GRISES — neutro tech con leve matiz frio (slate).
+     Equilibra el azul primario sin tornarse plano.
+     ------------------------------------------------------------ */
+  --it-color-gray-50:  #F8FAFC;
+  --it-color-gray-100: #F1F5F9;
+  --it-color-gray-200: #E2E8F0;
+  --it-color-gray-300: #CBD5E1;
+  --it-color-gray-400: #94A3B8;
+  --it-color-gray-500: #64748B;
+  --it-color-gray-600: #475569;
+  --it-color-gray-700: #334155;
+  --it-color-gray-800: #1E293B;
+  --it-color-gray-900: #0F172A;
+
+  /* Utilitarios base */
+  --it-color-white: #FFFFFF;
+  --it-color-black: #0A0F1C;
+
+  /* ------------------------------------------------------------
+     COLORES SEMANTICOS (texto fuerte + fondo suave + borde)
+     ------------------------------------------------------------ */
+  --it-color-success:        #15803D;
+  --it-color-success-bg:     #E7F6EC;
+  --it-color-success-border: #A7E0BC;
+
+  --it-color-warning:        #B45309;
+  --it-color-warning-bg:     #FCF1DD;
+  --it-color-warning-border: #F2D49A;
+
+  --it-color-danger:         #DC2626;
+  --it-color-danger-bg:      #FCE9E9;
+  --it-color-danger-border:  #F3B4B4;
+
+  --it-color-info:           #2563EB;
+  --it-color-info-bg:        #E8F0FE;
+  --it-color-info-border:    #AECBFA;
+
+  /* ------------------------------------------------------------
+     SUPERFICIE / TEXTO — Tema CLARO (por defecto)
+     ------------------------------------------------------------ */
+  --it-color-bg:            var(--it-color-gray-50);   /* fondo de pagina */
+  --it-color-surface:       var(--it-color-white);     /* tarjetas, paneles */
+  --it-color-surface-2:     var(--it-color-gray-100);  /* superficie elevada/zebra */
+  --it-color-text:          var(--it-color-gray-900);  /* texto principal */
+  --it-color-text-muted:    var(--it-color-gray-500);  /* texto secundario */
+  --it-color-border:        var(--it-color-gray-200);  /* bordes sutiles */
+  --it-color-border-strong: var(--it-color-gray-300);
+  --it-color-ring:          var(--it-color-primary-500); /* focus ring */
+  --it-color-overlay:       rgba(15, 23, 42, 0.55);    /* scrim de modales */
+
+  /* ------------------------------------------------------------
+     TIPOGRAFIA
+     Familia UI moderna geometrica (Inter) con fallbacks de sistema.
+     Mono tecnica para codigo/IDs/payloads.
+     ------------------------------------------------------------ */
+  --it-font-family-base: "Inter", system-ui, -apple-system, "Segoe UI",
+                         Roboto, "Helvetica Neue", Arial, "Noto Sans",
+                         sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --it-font-family-display: "Space Grotesk", "Inter", system-ui,
+                         -apple-system, "Segoe UI", Roboto, sans-serif;
+  --it-font-family-mono: "JetBrains Mono", ui-monospace, SFMono-Regular,
+                         "SF Mono", Menlo, Consolas, "Liberation Mono",
+                         monospace;
+
+  /* Escala de tamaños (base 16px, ratio ~1.25 Major Third) */
+  --it-font-size-xs:   0.75rem;   /* 12px */
+  --it-font-size-sm:   0.875rem;  /* 14px */
+  --it-font-size-base: 1rem;      /* 16px */
+  --it-font-size-md:   1.125rem;  /* 18px */
+  --it-font-size-lg:   1.25rem;   /* 20px */
+  --it-font-size-xl:   1.5rem;    /* 24px */
+  --it-font-size-2xl:  1.875rem;  /* 30px */
+  --it-font-size-3xl:  2.25rem;   /* 36px */
+  --it-font-size-4xl:  3rem;      /* 48px */
+
+  /* Pesos */
+  --it-font-weight-regular:  400;
+  --it-font-weight-medium:   500;
+  --it-font-weight-semibold: 600;
+  --it-font-weight-bold:     700;
+
+  /* Line-heights */
+  --it-font-leading-none:    1;
+  --it-font-leading-tight:   1.25;
+  --it-font-leading-snug:    1.375;
+  --it-font-leading-normal:  1.5;
+  --it-font-leading-relaxed: 1.625;
+
+  /* Letter-spacing */
+  --it-font-tracking-tight:  -0.02em;
+  --it-font-tracking-normal: 0em;
+  --it-font-tracking-wide:   0.025em;
+
+  /* ------------------------------------------------------------
+     RADIOS — esquinas suaves modernas
+     ------------------------------------------------------------ */
+  --it-radius-xs:   0.125rem; /* 2px  */
+  --it-radius-sm:   0.25rem;  /* 4px  */
+  --it-radius-md:   0.5rem;   /* 8px  */
+  --it-radius-lg:   0.75rem;  /* 12px */
+  --it-radius-xl:   1rem;     /* 16px */
+  --it-radius-2xl:  1.5rem;   /* 24px */
+  --it-radius-full: 9999px;
+
+  /* ------------------------------------------------------------
+     FOCUS RING (accesibilidad)
+     ------------------------------------------------------------ */
+  --it-focus-ring-width:  2px;
+  --it-focus-ring-offset: 2px;
+  --it-focus-ring: 0 0 0 var(--it-focus-ring-offset) var(--it-color-surface),
+                   0 0 0 calc(var(--it-focus-ring-offset) + var(--it-focus-ring-width)) var(--it-color-ring);
+}
+
+/* ============================================================
+   TEMA OSCURO — via atributo explicito [data-theme="dark"]
+   ============================================================ */
+[data-theme="dark"] {
+  --it-color-bg:            var(--it-color-gray-900);
+  --it-color-surface:       var(--it-color-gray-800);
+  --it-color-surface-2:     #243049;            /* entre 800 y 700 */
+  --it-color-text:          var(--it-color-gray-50);
+  --it-color-text-muted:    var(--it-color-gray-400);
+  --it-color-border:        #2B3A53;            /* entre 800 y 700 */
+  --it-color-border-strong: var(--it-color-gray-600);
+  --it-color-ring:          var(--it-color-primary-400);
+  --it-color-overlay:       rgba(0, 0, 0, 0.65);
+
+  /* Primario/secundario aclarados para legibilidad sobre fondos oscuros */
+  --it-color-primary:        var(--it-color-primary-400);
+  --it-color-primary-hover:  var(--it-color-primary-300);
+  --it-color-primary-active: var(--it-color-primary-500);
+  --it-color-on-primary:     #0A0F1C;
+
+  --it-color-secondary:        var(--it-color-secondary-400);
+  --it-color-secondary-hover:  var(--it-color-secondary-300);
+  --it-color-secondary-active: var(--it-color-secondary-500);
+  --it-color-on-secondary:     #06222B;
+
+  /* Semanticos: fondos suaves re-derivados a baja luminancia */
+  --it-color-success-bg: #102A1B;
+  --it-color-warning-bg: #2E2008;
+  --it-color-danger-bg:  #34110F;
+  --it-color-info-bg:    #102143;
+}
