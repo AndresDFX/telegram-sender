@@ -843,6 +843,7 @@ Resources:
                   - dynamodb:GetItem # ids de cada lote / metadatos
                   - dynamodb:UpdateItem # avanzar cursor, in_flight, bitácora
                   - dynamodb:PutItem # crear plan al materializar un mensaje programado
+                  - dynamodb:BatchWriteItem # lotes del plan (PlanStore.crear usa batch_writer)
                 Resource:
                   - !GetAtt PlansTable.Arn
               - Effect: Allow
@@ -891,6 +892,7 @@ Resources:
           PLANS_TABLE: !Ref PlansTable
           BROADCASTS_TABLE: !Ref BroadcastsTable
           BROADCAST_QUEUE_URL: !Ref BroadcastQueue
+          SEND_MODE: !Ref SendMode
           SCHEDULES_TABLE: !Ref SchedulesTable
           SUBSCRIBERS_TABLE: !Ref SubscribersTable
           SUBSCRIBERS_STATUS_INDEX: StatusIndex
