@@ -1014,7 +1014,7 @@ main>.card.show{display:block}
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
 /* ===========================================================
-   NUEVO — Componer y Envíos (data-tab="enviar")
+   NUEVO — Componer y Envíos (data-tab="envios")
    =========================================================== */
 /* contador de caracteres */
 .charcount{float:right;font-size:11px;color:var(--mut);font-weight:500;margin-top:-2px;font-variant-numeric:tabular-nums}
@@ -1306,7 +1306,7 @@ img.preview{box-shadow:var(--sh-sm)}
 
 <div id="login"><div class="box">
   <div class="brand brand-lg"><svg viewBox="0 0 48 48" width="46" height="46" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div>
-  <p style="text-align:center">Tu lista de precios, replicada y enviada en segundos.</p>
+  <p style="text-align:center">Captura listas de precios y envíalas a tus contactos — Telegram y WhatsApp, al instante o programado.</p>
   <label>Usuario</label><input id="lu" autocomplete="username" value="admin">
   <label>Contraseña</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
   <div class="err" id="lerr"></div>
@@ -1318,16 +1318,13 @@ img.preview{box-shadow:var(--sh-sm)}
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
  <nav class="nav">
    <button data-tab="inicio" onclick="showTab('inicio')">🏠 Inicio</button>
-   <button data-tab="msg" onclick="showTab('msg')">📝 Mensaje</button>
-   <button data-tab="telegram" onclick="showTab('telegram')">✈️ Telegram</button>
-   <button data-tab="whatsapp" onclick="showTab('whatsapp')">🟢 WhatsApp</button>
-   <button data-tab="prog" onclick="showTab('prog')">⏱️ Programación</button>
-   <button data-tab="estado" onclick="showTab('estado')">📊 Estado</button>
-   <button data-tab="enviar" onclick="showTab('enviar')">📨 Enviar</button>
-   <button data-tab="programados" onclick="showTab('programados')">⏰ Programados</button>
+   <button data-tab="fuentes" onclick="showTab('fuentes')">📋 Fuentes y listas</button>
+   <button data-tab="envios" onclick="showTab('envios')">📨 Envíos</button>
+   <button data-tab="ajustes" onclick="showTab('ajustes')">⚙️ Ajustes y estado</button>
  </nav>
  <main>
   <div class="card accent" data-tab="inicio"><h2>Resumen</h2>
+   <div class="hint" style="margin:-4px 0 12px">Replica captura la lista de un canal fuente (con markup) <b>y</b> envía tus propios mensajes a listas de contactos por Telegram y WhatsApp — al instante o programados. Gestiona fuentes y listas en <b>📋 Fuentes y listas</b> y los envíos en <b>📨 Envíos</b>.</div>
    <div id="dash_estado" class="callout">cargando…</div>
    <div class="stats" style="margin-top:14px">
      <div class="stat"><b id="k_sent">–</b><span>enviados (30 días)</span></div>
@@ -1338,8 +1335,8 @@ img.preview{box-shadow:var(--sh-sm)}
    <div id="dash_serie" style="margin-top:16px"></div>
    <div id="dash_last" class="hint" style="margin-top:14px"></div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
-     <button onclick="showTab('enviar')">📨 Componer y enviar</button>
-     <button class="sec" onclick="showTab('prog')">⏱️ Programación</button>
+     <button onclick="showTab('envios')">📨 Componer y enviar</button>
+     <button class="sec" onclick="showTab('ajustes')">⚙️ Ajustes y estado</button>
      <button class="sec" onclick="loadDashboard()">Refrescar</button>
    </div>
   </div>
@@ -1347,12 +1344,12 @@ img.preview{box-shadow:var(--sh-sm)}
    <div class="hint">Configuración guiada. Cada paso te lleva a su pestaña.</div>
    <div id="dash_steps" style="margin-top:10px">cargando…</div>
   </div>
-  <div class="card" data-tab="msg"><h2>Aumento (markup)</h2>
+  <div class="card" data-tab="fuentes"><h2>Aumento (markup)</h2>
    <div class="markup"><input id="markup_percentage" type="number" step="0.1"><div>
      <div style="font-size:13px">% que se suma a cada precio</div>
      <div class="hint">Ej: $325.000 + 15% → $374.000 (redondeo al mil ↑)</div></div></div>
   </div>
-  <div class="card accent" data-tab="telegram"><h2>Cuenta de Telegram</h2>
+  <div class="card accent" data-tab="ajustes"><h2>Cuenta de Telegram</h2>
    <label>Modo de envío</label>
    <select id="send_mode"><option value="bot">Bot — a suscriptores que dan /start</option><option value="userbot">Userbot — desde mi cuenta a mis contactos</option></select>
 
@@ -1376,7 +1373,7 @@ img.preview{box-shadow:var(--sh-sm)}
    <div class="hint">Genérala con <code>scripts/generar_sesion.py</code> usando la cuenta que quieras unir. Da acceso total a esa cuenta: trátala como secreto.</div>
    <button onclick="saveAccount()">Guardar cuenta</button>
   </div>
-  <div class="card" data-tab="whatsapp"><h2>WhatsApp (reenvío)</h2>
+  <div class="card" data-tab="ajustes"><h2>WhatsApp (reenvío)</h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="whatsapp_enabled" style="width:auto"> Reenviar también cada lista por WhatsApp</label>
    <label>URL del servicio WhatsApp</label><input id="whatsapp_service_url" placeholder="https://...onrender.com">
    <label>Token del servicio <span id="wa_tok_status" class="hint"></span></label>
@@ -1404,35 +1401,35 @@ img.preview{box-shadow:var(--sh-sm)}
    </div>
    <div class="callout warn">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza con listas pequeñas. Las <b>exclusiones</b> se gestionan por nombre abajo, en <b>Destinatarios WhatsApp</b>.</div>
   </div>
-  <div class="card" data-tab="msg"><h2>Canal y mensaje</h2>
+  <div class="card" data-tab="fuentes"><h2>Canal y mensaje</h2>
    <label>Canal fuente (username sin @)</label><input id="source_channel">
    <label>Símbolos de moneda</label><input id="currency_symbols">
    <label>Footer WhatsApp (se añade al final de cada lista)</label><textarea id="whatsapp_footer"></textarea>
    <label>Patrones a quitar (ubicación), uno por línea</label><textarea id="strip_patterns"></textarea>
    <button onclick="saveCfg()">Guardar cambios</button>
   </div>
-  <div class="card" data-tab="msg"><h2>Probar procesamiento del mensaje</h2>
+  <div class="card" data-tab="fuentes"><h2>Probar procesamiento del mensaje</h2>
    <div class="hint">Pega un mensaje tal como lo publica el canal y mira cómo quedará <b>ya procesado</b> (markup aplicado, sin ubicación/marca/teléfonos, con footer). Así verificas las reglas antes de enviar.</div>
    <textarea id="pp_in" style="min-height:90px;margin-top:10px" placeholder="Pega aquí el texto original del canal..."></textarea>
    <button class="sec" style="margin-top:8px" onclick="probarProcesado()">Procesar</button>
    <div class="hint" style="margin-top:10px">Resultado (lo que se enviaría):</div>
    <div id="pp_out" style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-top:4px;min-height:40px;font-size:13px;color:var(--tx2)">—</div>
   </div>
-  <div class="card" data-tab="msg"><h2>Imagen de la lista</h2>
+  <div class="card" data-tab="fuentes"><h2>Imagen de la lista</h2>
    <div class="hint">Se envía como foto antes de cada lista. Sube un archivo o pega una URL.</div>
    <input type="file" id="imgfile" accept="image/*" style="margin-top:10px" onchange="uploadImg()">
    <img id="imgprev" class="preview" style="display:none">
    <label>…o URL externa</label><input id="image_url" placeholder="https://...">
    <button class="sec" onclick="saveCfg()">Guardar URL</button>
   </div>
-  <div class="card" data-tab="estado"><h2>Cola de mensajes</h2>
+  <div class="card" data-tab="ajustes"><h2>Cola de mensajes</h2>
    <div class="stats"><div class="stat"><b id="q_p">–</b><span>lotes programados pendientes</span></div>
      <div class="stat"><b id="q_b">–</b><span>en cola SQS (en vuelo)</span></div>
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
    <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>⏱️ Programación</b>.</div>
    <button class="sec" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
   </div>
-  <div class="card" data-tab="estado"><h2>Cola de fallidos (DLQ) <span id="dlq_n" class="hint"></span></h2>
+  <div class="card" data-tab="ajustes"><h2>Cola de fallidos (DLQ) <span id="dlq_n" class="hint"></span></h2>
    <div class="hint">Lotes que agotaron reintentos. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
    <div id="dlq_list" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
@@ -1441,12 +1438,12 @@ img.preview{box-shadow:var(--sh-sm)}
      <button class="danger" onclick="dlqPurge()">🗑 Descartar todo</button>
    </div>
   </div>
-  <div class="card" data-tab="estado"><h2>Auditoría <span id="audit_n" class="hint"></span></h2>
+  <div class="card" data-tab="ajustes"><h2>Auditoría <span id="audit_n" class="hint"></span></h2>
    <div class="hint">Últimas acciones realizadas en el panel (config, envíos, cancelaciones, DLQ).</div>
    <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>cuándo</th><th>usuario</th><th>acción</th><th>detalle</th></tr></thead><tbody id="audit_rows"></tbody></table></div>
    <button class="sec" style="margin-top:12px" onclick="loadAudit()">Refrescar</button>
   </div>
-  <div class="card" data-tab="telegram"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
+  <div class="card" data-tab="fuentes"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
    <input id="subsearch" placeholder="🔎 Buscar por nombre o número..." oninput="onSearch()" style="margin-top:10px">
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
@@ -1465,7 +1462,7 @@ img.preview{box-shadow:var(--sh-sm)}
      <button class="sec" onclick="nextPage()">▶</button>
    </div>
   </div>
-  <div class="card" data-tab="telegram"><h2>Listas de distribución · Telegram</h2>
+  <div class="card" data-tab="fuentes"><h2>Listas de distribución · Telegram</h2>
    <div class="hint">Agrupa contactos en listas con nombre y elige a quién enviar. "+ marcados" usa los contactos marcados arriba en <b>Destinatarios</b>.</div>
    <div id="tg_lists" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;margin-top:10px"><input id="tg_newlist" placeholder="Nombre de nueva lista"><button class="sec" onclick="addList('telegram')">Crear lista</button></div>
@@ -1476,7 +1473,7 @@ img.preview{box-shadow:var(--sh-sm)}
    </div>
    <button onclick="saveLists('telegram')">Guardar listas Telegram</button>
   </div>
-  <div class="card" data-tab="whatsapp"><h2>Destinatarios WhatsApp <span id="wa_c_count" class="hint"></span></h2>
+  <div class="card" data-tab="fuentes"><h2>Destinatarios WhatsApp <span id="wa_c_count" class="hint"></span></h2>
    <div class="hint">Carga tus contactos (servicio conectado), busca por nombre, y marca para <b>excluir/incluir</b>. Los excluidos NO reciben las difusiones por WhatsApp.</div>
    <button class="sec" style="margin-top:10px" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button>
    <input id="wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="renderWa()" style="margin-top:10px">
@@ -1489,7 +1486,7 @@ img.preview{box-shadow:var(--sh-sm)}
    <table><thead><tr><th></th><th>nombre</th><th>estado</th></tr></thead><tbody id="wa_subs"></tbody></table>
    <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button class="sec" onclick="waPrev()">◀</button><span id="wa_pageinfo" class="hint"></span><button class="sec" onclick="waNext()">▶</button></div>
   </div>
-  <div class="card" data-tab="whatsapp"><h2>Auto-excluidos por fallos <span id="wa_blk_n" class="hint"></span></h2>
+  <div class="card" data-tab="fuentes"><h2>Auto-excluidos por fallos <span id="wa_blk_n" class="hint"></span></h2>
    <div class="hint">Los contactos que fallan al enviar de forma repetida (≥ umbral) se excluyen <b>solos</b> de los próximos envíos para proteger tu número. Limpia el conteo para reincluirlos.</div>
    <div id="wa_blk_list" class="hint" style="margin-top:10px">—</div>
    <div style="display:flex;gap:8px;margin-top:12px">
@@ -1497,7 +1494,7 @@ img.preview{box-shadow:var(--sh-sm)}
      <button class="ghost" onclick="clearBlocked()">Reincluir a todos</button>
    </div>
   </div>
-  <div class="card" data-tab="whatsapp"><h2>Listas de distribución · WhatsApp</h2>
+  <div class="card" data-tab="fuentes"><h2>Listas de distribución · WhatsApp</h2>
    <div class="hint">"+ marcados" usa los contactos marcados arriba en <b>Destinatarios WhatsApp</b>.</div>
    <div id="wa_lists" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;margin-top:10px"><input id="wa_newlist" placeholder="Nombre de nueva lista"><button class="sec" onclick="addList('whatsapp')">Crear lista</button></div>
@@ -1508,7 +1505,7 @@ img.preview{box-shadow:var(--sh-sm)}
    </div>
    <button onclick="saveLists('whatsapp')">Guardar listas WhatsApp</button>
   </div>
-  <div class="card" data-tab="enviar"><h2>✍️ Componer y enviar</h2>
+  <div class="card" data-tab="envios"><h2>✍️ Componer y enviar</h2>
    <div class="hint">Escribe un mensaje y envíalo de inmediato a los canales seleccionados. Respeta las listas y exclusiones configuradas en cada canal.</div>
    <label>Mensaje <span id="bc_count" class="charcount">0 caracteres</span></label>
    <textarea id="bc_text" style="min-height:120px" placeholder="Escribe aquí el mensaje a difundir..." oninput="bcCount()"></textarea>
@@ -1555,7 +1552,7 @@ img.preview{box-shadow:var(--sh-sm)}
      <span id="bc_status" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="enviar"><h2>📡 Envíos <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
+  <div class="card" data-tab="envios"><h2>📡 Envíos <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
    <div class="hint">Estado y progreso de cada difusión. Se actualiza automáticamente mientras hay envíos en curso.</div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="bc_table"><thead><tr><th>Mensaje</th><th>Estado</th><th>Progreso</th></tr></thead>
@@ -1564,7 +1561,7 @@ img.preview{box-shadow:var(--sh-sm)}
    <div class="bc-empty" id="bc_empty" style="display:none">Aún no hay envíos. Crea uno en <b>Componer y enviar</b>.</div>
    <div style="margin-top:14px"><button class="sec" onclick="loadBroadcasts()">Refrescar</button></div>
   </div>
-  <div class="card accent" data-tab="programados"><h2>⏰ Programar un mensaje</h2>
+  <div class="card accent" data-tab="envios"><h2>⏰ Programar un mensaje</h2>
    <div class="hint">Crea mensajes que se envían solos a la hora indicada, por las conexiones existentes de Telegram y WhatsApp. Una vez, a diario o semanal. Respetan el ritmo anti-baneo, la ventana horaria y el interruptor maestro.</div>
    <label>Nombre (opcional)</label>
    <input id="sg_name" placeholder="p. ej. Lista de la mañana" maxlength="80">
@@ -1610,7 +1607,7 @@ img.preview{box-shadow:var(--sh-sm)}
      <span id="sg_status" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="programados"><h2>📅 Mensajes programados <span id="sg_n" class="hint"></span></h2>
+  <div class="card" data-tab="envios"><h2>📅 Mensajes programados <span id="sg_n" class="hint"></span></h2>
    <div class="hint">Próximos envíos automáticos. Puedes pausarlos/activarlos o eliminarlos.</div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="sg_table"><thead><tr><th>Mensaje</th><th>Canales</th><th>Cuándo</th><th>Próximo</th><th></th></tr></thead>
@@ -1619,7 +1616,7 @@ img.preview{box-shadow:var(--sh-sm)}
    <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Crea uno arriba para enviarlo automáticamente.</p></div>
    <div style="margin-top:14px"><button class="sec" onclick="loadSchedules()">Refrescar</button></div>
   </div>
-  <div class="card accent" data-tab="prog"><h2>Interruptor de envíos</h2>
+  <div class="card accent" data-tab="ajustes"><h2>Interruptor de envíos</h2>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
      <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos activos</b></label>
      <span id="sys_badge" class="pill">—</span>
@@ -1630,7 +1627,7 @@ img.preview{box-shadow:var(--sh-sm)}
      <button class="danger" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>
    </div>
   </div>
-  <div class="card accent" data-tab="prog"><h2>Anti-baneo · lotes y ritmo</h2>
+  <div class="card accent" data-tab="ajustes"><h2>Anti-baneo · lotes y ritmo</h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="scheduling_enabled" style="width:auto"> Envío fraccionado y secuencial (procesa un lote a la vez)</label>
    <div class="row">
      <div><label>Tamaño de lote (máx 150)</label><input id="batch_size" type="number" min="1" max="150"></div>
@@ -1647,7 +1644,7 @@ img.preview{box-shadow:var(--sh-sm)}
    <div class="callout">El delay entre mensajes es <b>aleatorio</b> dentro del rango (evita patrones predecibles). El dispatcher libera <b>un lote por minuto</b> y espera a que termine el anterior antes de soltar el siguiente.</div>
    <button onclick="saveSched()">Guardar anti-baneo</button>
   </div>
-  <div class="card" data-tab="prog"><h2>Ventana de envío (horario permitido)</h2>
+  <div class="card" data-tab="ajustes"><h2>Ventana de envío (horario permitido)</h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="window_enabled" style="width:auto"> Enviar solo dentro del horario permitido</label>
    <div class="row">
      <div><label>Desde (HH:MM)</label><input id="window_start" placeholder="08:00"></div>
@@ -1656,7 +1653,7 @@ img.preview{box-shadow:var(--sh-sm)}
    <div class="hint">Fuera del horario, los lotes quedan <b>encolados</b> y se procesan de forma diferida al reabrir la ventana. Soporta cruzar medianoche (p.ej. 22:00 → 06:00).</div>
    <button onclick="saveSched()">Guardar ventana</button>
   </div>
-  <div class="card" data-tab="prog"><h2>📦 Envíos fraccionados <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
+  <div class="card" data-tab="envios"><h2>📦 Envíos fraccionados <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
    <div class="hint">De cada lote programado se muestra <b>cuántos mensajes se han enviado</b>. El sistema procesa un lote a la vez, en orden.</div>
    <div id="pl_list" style="margin-top:12px"></div>
    <div class="bc-empty" id="pl_empty" style="display:none">No hay envíos programados todavía. Crea uno en <b>Enviar</b> o espera al próximo del canal.</div>
@@ -1778,7 +1775,7 @@ let Q_TIMER=null;
 function qStartPolling(){
   if(Q_TIMER) return; loadQueue();
   Q_TIMER=setInterval(()=>{ if(!CRED||document.hidden) return;
-    const vis=document.querySelector('main>.card[data-tab="estado"]')?.classList.contains('show');
+    const vis=document.querySelector('main>.card[data-tab="ajustes"]')?.classList.contains('show');
     if(vis) loadQueue(); }, BC_POLL);
 }
 // --- Probar procesamiento del mensaje (preview ya procesado) ---
@@ -1843,11 +1840,11 @@ function sessionFresca(){ try{ const t=parseInt(sessionStorage.getItem('cred_ts'
 // --- Onboarding: checklist de primeros pasos (desde la config) ---
 function renderSteps(c){
   const steps=[
-    {ok: !!(c.bot_token_set||c.telethon_session_set), t:'Conectar cuenta o bot de Telegram', tab:'telegram'},
-    {ok: !!(c.source_channel&&String(c.source_channel).trim()), t:'Definir el canal fuente', tab:'msg'},
-    {ok: ((c.telegram_lists||[]).length>0 || (c.whatsapp_lists||[]).length>0), t:'Crear listas o elegir destinatarios', tab:'telegram'},
-    {ok: !!c.whatsapp_enabled, t:'Conectar WhatsApp', tab:'whatsapp', opt:true},
-    {ok: c.sending_enabled!==false, t:'Activar los envíos', tab:'prog'},
+    {ok: !!(c.bot_token_set||c.telethon_session_set), t:'Conectar cuenta o bot de Telegram', tab:'ajustes'},
+    {ok: !!(c.source_channel&&String(c.source_channel).trim()), t:'Definir el canal fuente', tab:'fuentes'},
+    {ok: ((c.telegram_lists||[]).length>0 || (c.whatsapp_lists||[]).length>0), t:'Crear listas o elegir destinatarios', tab:'fuentes'},
+    {ok: !!c.whatsapp_enabled, t:'Conectar WhatsApp', tab:'ajustes', opt:true},
+    {ok: c.sending_enabled!==false, t:'Activar los envíos', tab:'ajustes'},
   ];
   const done=steps.filter(s=>s.ok).length;
   if($('steps_n')) $('steps_n').textContent='· '+done+'/'+steps.length+(done===steps.length?' ✓':'');
@@ -1967,9 +1964,9 @@ function showTab(t){
   document.querySelectorAll('main>.card').forEach(c=>c.classList.toggle('show', c.dataset.tab===t));
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===t));
   try{ localStorage.setItem('tab',t); }catch(e){}
-  if(t==='programados'){ sgFillLists(); sgChan(); sgType(); loadSchedules(); }
+  if(t==='envios'){ sgFillLists(); sgChan(); sgType(); loadSchedules(); }
   window.scrollTo(0,0); }
-function boot(){ showTab((()=>{try{return localStorage.getItem('tab')}catch(e){return null}})()||'inicio'); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
+function boot(){ showTab((()=>{try{const s=localStorage.getItem('tab');return ['inicio','fuentes','envios','ajustes'].includes(s)?s:'inicio'}catch(e){return 'inicio'}})()); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
 if(CRED && !sessionFresca()){ logout(); }
 else if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } else { logout(); } }).catch(()=>{}); }
 
@@ -2081,14 +2078,14 @@ async function sendBroadcast(){
     // "programado" != "entregado": el envío se fracciona y la ENTREGA real se confirma abajo en Envíos.
     toast(body.scheduled_at?'✓ Programado para más tarde':'✓ Programado — la entrega se confirma abajo en Envíos','info'); $('bc_status').textContent='';
     bcClear();
-    showTab('enviar');
+    showTab('envios');
     loadBroadcasts();
   }catch(e){ $('bc_status').textContent=''; toast('Error al programar',true); }
   finally{ btn.disabled=false; }
 }
 // Al abrir la pestaña Enviar: rellenar listas + previsualizar (hook aditivo sobre showTab).
 (function(){ const _s=window.showTab;
-  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='enviar'){ try{ bcFillLists(); bcChan(); }catch(e){} } }; }
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='envios'){ try{ bcFillLists(); bcChan(); }catch(e){} } }; }
 })();
 // ===== Envíos: listado + polling (GET /api/broadcasts) =====
 let BC_TIMER=null;
@@ -2216,7 +2213,7 @@ function bcStartPolling(){
   loadBroadcasts();
   BC_TIMER=setInterval(()=>{
     if(!CRED || document.hidden) return;            // sin sesión o pestaña del navegador oculta
-    const visible=document.querySelector('main>.card[data-tab="enviar"]')?.classList.contains('show');
+    const visible=document.querySelector('main>.card[data-tab="envios"]')?.classList.contains('show');
     if(visible) loadBroadcasts();
   }, BC_POLL);
 }
@@ -2224,7 +2221,7 @@ function bcStartPolling(){
 (function(){
   const _showTab=window.showTab;
   if(typeof _showTab==='function'){
-    window.showTab=function(t){ _showTab(t); if(t==='enviar') loadBroadcasts(); };
+    window.showTab=function(t){ _showTab(t); if(t==='envios') loadBroadcasts(); };
   }
   const start=()=>{ if(CRED) bcStartPolling(); };
   if(document.readyState!=='loading') start();
@@ -2277,11 +2274,11 @@ let PL_TIMER=null;
 function plStartPolling(){
   if(PL_TIMER) return; loadPlans();
   PL_TIMER=setInterval(()=>{ if(!CRED||document.hidden) return;
-    const vis=document.querySelector('main>.card[data-tab="prog"]')?.classList.contains('show');
+    const vis=document.querySelector('main>.card[data-tab="envios"]')?.classList.contains('show');
     if(vis) loadPlans(); }, BC_POLL);
 }
 (function(){ const _s=window.showTab;
-  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='inicio') loadDashboard(); if(t==='prog') loadPlans(); if(t==='whatsapp') loadBlocked(); if(t==='estado'){ loadQueue(); loadDlq(); loadAudit(); } }; }
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='inicio') loadDashboard(); if(t==='envios') loadPlans(); if(t==='fuentes') loadBlocked(); if(t==='ajustes'){ loadQueue(); loadDlq(); loadAudit(); } }; }
   const start=()=>{ if(CRED){ plStartPolling(); qStartPolling(); } };
   if(document.readyState!=='loading') start();
   else document.addEventListener('DOMContentLoaded', start);
