@@ -186,6 +186,8 @@ class DynamoDbConfigStore(ConfigStore):
     )
     _CONTACTS_ID = "__contacts__"
     _LOGIN_ID = "__telethon_login__"  # sesión temporal del login userbot (entre código y confirmación)
+    _USERS_ID = "__users__"  # usuarios del panel (username -> {email, hash, created_at})
+    _RESET_ID = "__reset__"  # códigos de reseteo de contraseña (username -> {code_hash, exp, attempts})
 
     def __init__(self, table_name: str | None = None, endpoint: str | None = None, config_id: str = "default"):
         self._name = table_name or os.environ.get("CONFIG_TABLE", "Config")
@@ -397,6 +399,22 @@ class DynamoDbConfigStore(ConfigStore):
             self._t().delete_item(Key={"configId": self._LOGIN_ID})
         except Exception:
             pass
+
+    # --- usuarios del panel (multi-usuario, cada uno independiente) ---
+
+    def get_users(self) -> dict:
+        item = self._t().get_item(Key={"configId": self._USERS_ID}).get("Item") or {}
+        return dict(item.get("users", {}))
+
+    def set_users(self, users: dict) -> None:
+        self._t().put_item(Item={"configId": self._USERS_ID, "users": users})
+
+    def get_resets(self) -> dict:
+        item = self._t().get_item(Key={"configId": self._RESET_ID}).get("Item") or {}
+        return dict(item.get("codes", {}))
+
+    def set_resets(self, codes: dict) -> None:
+        self._t().put_item(Item={"configId": self._RESET_ID, "codes": codes})
 
 
 class DynamoDbBroadcastStore:

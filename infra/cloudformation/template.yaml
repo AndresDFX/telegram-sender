@@ -1001,6 +1001,11 @@ Resources:
                   - s3:GetObject # firmar URL temporal (adjuntar imagen en envío manual)
                 Resource:
                   - !Sub "arn:aws:s3:::${LambdaCodeS3Bucket}/images/*"
+              - Effect: Allow
+                Action:
+                  - sns:Publish # código de reseteo de contraseña al email suscrito
+                Resource:
+                  - !Ref AlertsTopic
 
   AdminFunction:
     Type: AWS::Lambda::Function
@@ -1026,6 +1031,7 @@ Resources:
           PLANS_TABLE: !Ref PlansTable
           AUDIT_TABLE: !Ref AuditTable
           SCHEDULES_TABLE: !Ref SchedulesTable
+          ALERTS_TOPIC_ARN: !Ref AlertsTopic
           BROADCAST_BATCH_SIZE: !Ref BroadcastBatchSize
           IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
           ADMIN_USER: !Ref AdminUser

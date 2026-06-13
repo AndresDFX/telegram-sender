@@ -21,6 +21,7 @@ import time
 
 import wiring
 from adapters.config import admin_user
+from domain import auth as auth_dom
 from domain.message import componer_mensaje
 from domain.schedules import hhmm, proximo_run
 
@@ -153,9 +154,6 @@ def _auth_fallo() -> None:
 def _autorizado(event: dict[str, Any]) -> bool:
     if _auth_bloqueado():
         return False  # en cooldown tras demasiados intentos fallidos
-    password = os.environ.get("ADMIN_PASSWORD")
-    if not password:
-        return False  # fail-closed
     headers = {str(k).lower(): v for k, v in (event.get("headers") or {}).items()}
     auth = headers.get("authorization", "")
     if not auth.startswith("Basic "):
@@ -165,13 +163,103 @@ def _autorizado(event: dict[str, Any]) -> bool:
     except (binascii.Error, UnicodeDecodeError):
         _auth_fallo()
         return False
-    ok = hmac.compare_digest(usuario, admin_user()) and hmac.compare_digest(clave, password)
+    ok = _verificar(usuario, clave)
     if ok:
         _AUTH["fails"] = 0
         _AUTH["locked_until"] = 0.0
     else:
         _auth_fallo()
     return ok
+
+
+def _verificar(usuario: str, clave: str) -> bool:
+    """Valida contra los usuarios del panel (hash PBKDF2) y, como bootstrap, contra el usuario
+    de entorno (ADMIN_USER/ADMIN_PASSWORD): así nunca se queda uno bloqueado del panel."""
+    try:
+        u = (config.get_users() or {}).get(usuario)
+    except Exception:
+        u = None
+    if u and auth_dom.verify_password(clave, str(u.get("hash", ""))):
+        return True
+    envpw = os.environ.get("ADMIN_PASSWORD")
+    return bool(envpw and hmac.compare_digest(usuario, admin_user()) and hmac.compare_digest(clave, envpw))
+
+
+def _usuario_actual(event: dict[str, Any]) -> str:
+    headers = {str(k).lower(): v for k, v in (event.get("headers") or {}).items()}
+    auth = headers.get("authorization", "")
+    if not auth.startswith("Basic "):
+        return ""
+    try:
+        return base64.b64decode(auth[6:]).decode("utf-8").partition(":")[0]
+    except Exception:
+        return ""
+
+
+def _enviar_reset_email(email: str, usuario: str, code: str) -> None:
+    """Envía el código de reseteo por SNS (al endpoint suscrito al tópico de alertas)."""
+    arn = os.environ.get("ALERTS_TOPIC_ARN", "")
+    if not arn:
+        logger.warning("ALERTS_TOPIC_ARN no configurado; no se envió el código de reseteo")
+        return
+    try:
+        import boto3
+
+        boto3.client("sns").publish(
+            TopicArn=arn,
+            Subject="Replica - codigo para restablecer contrasena",
+            Message=(
+                f"Codigo para restablecer la contrasena del usuario '{usuario}': {code}\n"
+                f"Valido por 15 minutos. Si no lo solicitaste, ignora este mensaje.\n"
+                f"(Cuenta: {email})"
+            ),
+        )
+    except Exception:
+        logger.exception("No se pudo publicar el codigo de reseteo por SNS")
+
+
+def _auth_forgot(body: dict) -> dict[str, Any]:
+    """Genera y envía un código de reseteo (respuesta genérica para no revelar usuarios)."""
+    usuario = str(body.get("username", "")).strip()
+    try:
+        u = (config.get_users() or {}).get(usuario)
+        if u and u.get("email"):
+            code = auth_dom.gen_code(6)
+            resets = config.get_resets() or {}
+            resets[usuario] = {"code_hash": auth_dom.hash_password(code), "exp": int(time.time()) + 900, "attempts": 0}
+            config.set_resets(resets)
+            _enviar_reset_email(str(u.get("email")), usuario, code)
+    except Exception:
+        logger.exception("Fallo en /api/auth/forgot")
+    return _json({"ok": True})
+
+
+def _auth_reset(body: dict) -> dict[str, Any]:
+    usuario = str(body.get("username", "")).strip()
+    code = str(body.get("code", "")).strip()
+    nueva = body.get("new") or ""
+    if not auth_dom.password_valida(nueva):
+        return _json({"error": "La nueva contraseña debe tener al menos 8 caracteres."}, 400)
+    resets = config.get_resets() or {}
+    r = resets.get(usuario)
+    if not r:
+        return _json({"error": "Solicita un código primero."}, 400)
+    if int(r.get("exp", 0)) < int(time.time()):
+        resets.pop(usuario, None); config.set_resets(resets)
+        return _json({"error": "El código expiró; solicita uno nuevo."}, 400)
+    if int(r.get("attempts", 0)) >= 5:
+        resets.pop(usuario, None); config.set_resets(resets)
+        return _json({"error": "Demasiados intentos; solicita un código nuevo."}, 400)
+    if not auth_dom.verify_password(code, str(r.get("code_hash", ""))):
+        r["attempts"] = int(r.get("attempts", 0)) + 1; resets[usuario] = r; config.set_resets(resets)
+        return _json({"error": "Código incorrecto."}, 400)
+    users = config.get_users() or {}
+    u = users.get(usuario) or {"email": "", "created_at": int(time.time())}
+    u["hash"] = auth_dom.hash_password(nueva)
+    users[usuario] = u; config.set_users(users)
+    resets.pop(usuario, None); config.set_resets(resets)
+    _audit("user:reset", usuario)
+    return _json({"ok": True})
 
 
 # --- helpers ----------------------------------------------------------------
@@ -347,12 +435,67 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if sub == "" and method == "GET":
         return _html_resp()
 
+    # Recuperación de contraseña: rutas PÚBLICAS (sin sesión). El reseteo tiene tope de
+    # intentos + caducidad; forgot responde genérico (no revela si el usuario existe).
+    if sub == "/api/auth/forgot" and method == "POST":
+        return _auth_forgot(_body(event))
+    if sub == "/api/auth/reset" and method == "POST":
+        return _auth_reset(_body(event))
+
     if not _autorizado(event):
         return _json({"error": "unauthorized"}, 401)
 
     try:
         if sub == "/api/me" and method == "GET":
-            return _json({"ok": True, "user": admin_user()})
+            return _json({"ok": True, "user": _usuario_actual(event) or admin_user()})
+        if sub == "/api/users" and method == "GET":
+            users = config.get_users() or {}
+            return _json({"me": _usuario_actual(event), "users": [
+                {"username": k, "email": v.get("email", ""), "created_at": int(v.get("created_at", 0) or 0)}
+                for k, v in users.items()]})
+        if sub == "/api/users" and method == "POST":
+            c = _body(event)
+            username = str(c.get("username", "")).strip()
+            pw = c.get("password") or ""
+            if not username:
+                return _json({"error": "El usuario es obligatorio."}, 400)
+            if not auth_dom.password_valida(pw):
+                return _json({"error": "La contraseña debe tener al menos 8 caracteres."}, 400)
+            users = config.get_users() or {}
+            if username in users:
+                return _json({"error": "Ya existe un usuario con ese nombre."}, 400)
+            users[username] = {"email": str(c.get("email", "")).strip(), "hash": auth_dom.hash_password(pw), "created_at": int(time.time())}
+            config.set_users(users)
+            _audit("user:crear", username)
+            return _json({"ok": True})
+        if sub == "/api/users/delete" and method == "POST":
+            username = str(_body(event).get("username", "")).strip()
+            users = config.get_users() or {}
+            if username not in users:
+                return _json({"error": "Usuario no encontrado."}, 400)
+            if len(users) <= 1:
+                return _json({"error": "No puedes borrar el último usuario."}, 400)
+            if username == _usuario_actual(event):
+                return _json({"error": "No puedes borrar el usuario con el que iniciaste sesión."}, 400)
+            del users[username]
+            config.set_users(users)
+            _audit("user:borrar", username)
+            return _json({"ok": True})
+        if sub == "/api/auth/change-password" and method == "POST":
+            c = _body(event)
+            me = _usuario_actual(event)
+            nueva = c.get("new") or ""
+            if not auth_dom.password_valida(nueva):
+                return _json({"error": "La nueva contraseña debe tener al menos 8 caracteres."}, 400)
+            if not _verificar(me, c.get("current") or ""):
+                return _json({"error": "La contraseña actual es incorrecta."}, 400)
+            users = config.get_users() or {}
+            u = users.get(me) or {"email": "", "created_at": int(time.time())}
+            u["hash"] = auth_dom.hash_password(nueva)
+            users[me] = u
+            config.set_users(users)
+            _audit("user:cambiar-clave", me)
+            return _json({"ok": True})
         if sub == "/api/config" and method == "GET":
             return _json(_config_publico())
         if sub == "/api/config" and method == "POST":
@@ -1367,10 +1510,21 @@ img.preview{box-shadow:var(--sh-sm)}
 <div id="login"><div class="box">
   <div class="brand brand-lg"><svg viewBox="0 0 48 48" width="46" height="46" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div>
   <p style="text-align:center">Captura listas de precios y envíalas a tus contactos — Telegram y WhatsApp, al instante o programado.</p>
-  <label>Usuario</label><input id="lu" autocomplete="username" value="admin">
+  <label>Usuario</label><input id="lu" autocomplete="username" placeholder="usuario o correo">
   <label>Contraseña</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
   <div class="err" id="lerr"></div>
   <button style="width:100%;margin-top:8px" onclick="doLogin()">Entrar</button>
+  <div style="text-align:center;margin-top:12px"><a href="#" onclick="fpToggle();return false" style="color:var(--ac);font-size:13px;text-decoration:none">¿Olvidaste tu contraseña?</a></div>
+  <div id="fp_box" style="display:none;margin-top:14px;border-top:1px solid var(--bd);padding-top:14px">
+    <label>Usuario o correo</label><input id="fp_user" placeholder="tu usuario">
+    <button class="sec" style="width:100%;margin-top:8px" onclick="fpSend()">Enviar código</button>
+    <div id="fp_step2" style="display:none;margin-top:10px">
+      <label>Código (te llega por correo)</label><input id="fp_code" inputmode="numeric" placeholder="123456">
+      <label>Nueva contraseña (mínimo 8)</label><input id="fp_new" type="password">
+      <button style="width:100%;margin-top:8px" onclick="fpReset()">Restablecer contraseña</button>
+    </div>
+    <div class="hint" id="fp_status" style="margin-top:8px"></div>
+  </div>
 </div></div>
 
 <div id="app">
@@ -1697,6 +1851,22 @@ img.preview{box-shadow:var(--sh-sm)}
    <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Crea uno arriba para enviarlo automáticamente.</p></div>
    <div style="margin-top:14px"><button class="sec" onclick="loadSchedules()">Refrescar</button></div>
   </div>
+  <div class="card accent" data-tab="ajustes"><h2>👥 Usuarios del panel <span id="usr_n" class="hint"></span></h2>
+   <div class="hint">Cada usuario entra con sus propias credenciales (independientes). El correo se usa para recuperar la contraseña.</div>
+   <div style="overflow-x:auto;margin-top:12px"><table id="usr_table"><thead><tr><th>Usuario</th><th>Correo</th><th></th></tr></thead><tbody id="usr_rows"></tbody></table></div>
+   <div class="section-label" style="margin-top:14px">Crear usuario</div>
+   <div class="row">
+     <div><label>Usuario o correo</label><input id="usr_new_name" placeholder="nuevo@correo.com"></div>
+     <div><label>Correo (para recuperación)</label><input id="usr_new_email" placeholder="correo@dominio.com"></div>
+   </div>
+   <label>Contraseña (mínimo 8)</label><input id="usr_new_pw" type="password">
+   <button style="margin-top:10px" onclick="createUser()">Crear usuario</button>
+  </div>
+  <div class="card" data-tab="ajustes"><h2>🔑 Cambiar mi contraseña</h2>
+   <label>Contraseña actual</label><input id="cp_cur" type="password">
+   <label>Nueva contraseña (mínimo 8)</label><input id="cp_new" type="password">
+   <div style="margin-top:10px"><button onclick="changePassword()">Cambiar contraseña</button> <span id="cp_status" class="hint" style="margin-left:10px"></span></div>
+  </div>
   <div class="card accent" data-tab="ajustes"><h2>Interruptor de envíos</h2>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
      <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos activos</b></label>
@@ -1759,6 +1929,54 @@ async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':
     $('login').style.display='none'; $('app').style.display='block'; $('who').textContent=u; boot(); }
   catch(e){ $('lerr').textContent='Usuario o contraseña incorrectos (tras varios intentos se bloquea unos minutos)'; } }
 function logout(){ sessionStorage.removeItem('cred'); CRED=''; $('app').style.display='none'; $('login').style.display='flex'; }
+// --- recuperación de contraseña (público, sin sesión) ---
+function fpToggle(){ const b=$('fp_box'); b.style.display = b.style.display==='none'?'block':'none'; }
+async function fpSend(){
+  const u=$('fp_user').value.trim(); if(!u){ $('fp_status').textContent='Indica tu usuario o correo.'; return; }
+  $('fp_status').textContent='Enviando…';
+  try{ await fetch(BASE+'/api/auth/forgot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u})}); }catch(e){}
+  $('fp_step2').style.display='block';
+  $('fp_status').textContent='Si el usuario existe, enviamos un código al correo registrado. Revisa tu bandeja.';
+}
+async function fpReset(){
+  const u=$('fp_user').value.trim(), code=$('fp_code').value.trim(), nw=$('fp_new').value;
+  if(!code||!nw){ $('fp_status').textContent='Completa el código y la nueva contraseña.'; return; }
+  try{
+    const r=await fetch(BASE+'/api/auth/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,code:code,new:nw})});
+    const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status));
+    $('fp_status').textContent='✅ Contraseña actualizada. Ya puedes iniciar sesión.'; $('fp_step2').style.display='none';
+  }catch(e){ $('fp_status').textContent=e.message||'No se pudo restablecer.'; }
+}
+// --- usuarios del panel ---
+let USR_ME='';
+async function loadUsers(){
+  try{ const r=await api('/api/users'); USR_ME=r.me||''; const list=r.users||[];
+    $('usr_n').textContent='· '+list.length;
+    $('usr_rows').innerHTML=list.map(u=>{ const me=u.username===USR_ME;
+      return `<tr><td><b>${bcEsc(u.username)}</b>${me?' <span class="hint">(tú)</span>':''}</td><td>${bcEsc(u.email||'—')}</td>`+
+        `<td style="text-align:right">${me?'':`<button class="danger" style="padding:4px 9px" onclick="deleteUser('${bcEsc(u.username)}')">🗑</button>`}</td></tr>`; }).join('');
+  }catch(e){}
+}
+async function createUser(){
+  const username=$('usr_new_name').value.trim(), email=$('usr_new_email').value.trim(), pw=$('usr_new_pw').value;
+  if(!username||!pw){ toast('Usuario y contraseña requeridos',true); return; }
+  try{ const r=await fetch(BASE+'/api/users',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({username:username,email:email,password:pw})});
+    const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status));
+    toast('✓ Usuario creado'); $('usr_new_name').value=''; $('usr_new_email').value=''; $('usr_new_pw').value=''; loadUsers();
+  }catch(e){ toast(e.message||'Error al crear',true); }
+}
+async function deleteUser(u){ if(!confirm('¿Borrar el usuario "'+u+'"?')) return;
+  try{ const r=await fetch(BASE+'/api/users/delete',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({username:u})});
+    const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status)); toast('✓ Usuario borrado'); loadUsers();
+  }catch(e){ toast(e.message||'Error',true); } }
+async function changePassword(){
+  const cur=$('cp_cur').value, nw=$('cp_new').value; if(!cur||!nw){ toast('Completa ambos campos',true); return; }
+  $('cp_status').textContent='Cambiando…';
+  try{ const r=await fetch(BASE+'/api/auth/change-password',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({current:cur,new:nw})});
+    const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status));
+    $('cp_status').textContent='✅ Contraseña cambiada'; $('cp_cur').value=''; $('cp_new').value=''; toast('✓ Contraseña cambiada');
+  }catch(e){ $('cp_status').textContent=e.message||''; toast(e.message||'Error',true); }
+}
 async function loadCfg(){ const c=await api('/api/config');
   ['source_channel','markup_percentage','currency_symbols','whatsapp_footer','image_url','telethon_api_id','telethon_api_hash'].forEach(k=>$(k).value=c[k]??'');
   $('send_mode').value=c.send_mode||'bot';
@@ -2418,7 +2636,7 @@ function plStartPolling(){
     if(vis) loadPlans(); }, BC_POLL);
 }
 (function(){ const _s=window.showTab;
-  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='inicio') loadDashboard(); if(t==='envios') loadPlans(); if(t==='fuentes') loadBlocked(); if(t==='ajustes'){ loadQueue(); loadDlq(); loadAudit(); } }; }
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='inicio') loadDashboard(); if(t==='envios') loadPlans(); if(t==='fuentes') loadBlocked(); if(t==='ajustes'){ loadQueue(); loadDlq(); loadAudit(); loadUsers(); } }; }
   const start=()=>{ if(CRED){ plStartPolling(); qStartPolling(); } };
   if(document.readyState!=='loading') start();
   else document.addEventListener('DOMContentLoaded', start);
