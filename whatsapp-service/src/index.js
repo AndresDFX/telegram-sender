@@ -308,6 +308,13 @@ app.get('/', (req, res) =>
 
 app.get('/health', (req, res) => res.json({ ok: true }))
 
+// Favicon: logo fan-out de Replica (SVG inline). Sirve la raíz, /qr y cualquier página del servicio.
+const FAVICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><defs><linearGradient id="f" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#f)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg>'
+app.get(['/favicon.ico', '/favicon.svg'], (req, res) =>
+  res.set('Content-Type', 'image/svg+xml').set('Cache-Control', 'public, max-age=604800').send(FAVICON)
+)
+
 // Página de QR en vivo (mismo origen → sin CORS). El token va por query para abrirla
 // directo en el navegador. El QR se auto-renueva y avisa cuando conecta.
 app.get('/qr', (req, res) => {
@@ -316,6 +323,7 @@ app.get('/qr', (req, res) => {
     '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<meta name="referrer" content="no-referrer">' + // evita filtrar el token por Referer
       '<title>Vincular WhatsApp · Replica</title>' +
+      '<link rel="icon" href="/favicon.ico">' +
       '<body style="font-family:system-ui;text-align:center;background:#0b1020;color:#e6ebff;padding:28px;margin:0">' +
       '<h2>Vincular WhatsApp · Replica</h2><div id="s">cargando…</div>' +
       '<img id="q" style="width:300px;height:300px;margin:18px;background:#fff;border-radius:10px;padding:10px;object-fit:contain"/>' +
