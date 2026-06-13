@@ -582,6 +582,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             config.clear_login_temp()
             _audit("telethon:sign-in", "conectado @" + str((res.get("me") or {}).get("username") or ""))
             return _json({"ok": True, "connected": True, "me": res.get("me")})
+        if sub == "/api/telethon/logout" and method == "POST":
+            config.set({"telethon_session": ""})  # vacía la sesión (telethon_session SÍ se borra aquí)
+            config.clear_login_temp()
+            _audit("telethon:logout", "limpiar sesión userbot")
+            return _json({"ok": True})
         if sub == "/api/broadcast/preview" and method == "POST":
             cuerpo = _body(event)
 
@@ -610,6 +615,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _whatsapp_proxy("/blocked/clear", body={})
         if sub == "/api/whatsapp/pair" and method == "POST":
             return _whatsapp_proxy("/pair", timeout=25, body={"number": _body(event).get("number", "")})
+        if sub == "/api/whatsapp/reset" and method == "POST":
+            _audit("whatsapp:reset", "limpiar sesión de WhatsApp")
+            return _whatsapp_proxy("/reset", timeout=25, body={})
     except Exception:
         logger.exception("Error en admin %s %s", method, sub)
         return _json({"error": "internal"}, 500)
@@ -1425,7 +1433,11 @@ img.preview{box-shadow:var(--sh-sm)}
    <div class="section-label" style="margin-top:14px">Avanzado: pegar StringSession</div>
    <input id="telethon_session" type="password" placeholder="(pega para unir/cambiar la cuenta)">
    <div class="hint">Alternativa manual: genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a esa cuenta: trátala como secreto.</div>
-   <button onclick="saveAccount()">Guardar cuenta</button>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
+     <button onclick="saveAccount()">Guardar cuenta</button>
+     <button class="danger" onclick="tlLogout()">🗑 Limpiar sesión userbot</button>
+     <span id="tl_logout_out" class="hint" style="margin-top:0"></span>
+   </div>
   </div>
   <div class="card" data-tab="ajustes"><h2>WhatsApp (reenvío)</h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="whatsapp_enabled" style="width:auto"> Reenviar también cada lista por WhatsApp</label>
@@ -1451,6 +1463,7 @@ img.preview{box-shadow:var(--sh-sm)}
          <div class="hint" id="wa_pair_out" style="display:none"></div>
        </div>
      </div>
+     <div style="margin-top:10px"><button class="danger" onclick="waReset()">🗑 Limpiar sesión de WhatsApp</button> <span class="hint" id="wa_reset_out" style="margin-left:6px"></span></div>
      <div class="hint" style="margin-top:10px">💡 Lo más fiable si Render bloquea el linking: vincula <b>localmente</b> (corre el servicio en tu PC con las mismas credenciales AWS) y Render reusará la sesión guardada en DynamoDB.</div>
    </div>
    <div class="callout warn">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza con listas pequeñas. Las <b>exclusiones</b> se gestionan por nombre abajo, en <b>Destinatarios WhatsApp</b>.</div>
@@ -1823,6 +1836,19 @@ async function tlSignIn(){
     if(j.connected){ $('tl_status').textContent='✅ Conectado'+(j.me&&j.me.username?(' como @'+j.me.username):''); toast('✓ Cuenta conectada'); $('tl_code').value=''; $('tl_password').value=''; $('tl_step2').style.display='none'; loadCfg(); loadSubs(); }
   }catch(e){ toast(e.message||'No se pudo iniciar sesión',true); $('tl_status').textContent=e.message||''; }
   finally{ $('tl_confirm').disabled=false; }
+}
+async function tlLogout(){
+  if(!confirm('¿Limpiar la sesión de Telegram (userbot)? La cuenta dejará de poder enviar hasta que la reconectes aquí.')) return;
+  try{ await api('/api/telethon/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    $('tl_logout_out').textContent='✓ Sesión limpiada'; toast('✓ Sesión de Telegram limpiada'); loadCfg(); }
+  catch(e){ toast('Error al limpiar',true); }
+}
+async function waReset(){
+  if(!confirm('¿Limpiar la sesión de WhatsApp? Se borran las credenciales y tendrás que volver a vincular (QR o código).')) return;
+  $('wa_reset_out').textContent='Limpiando…';
+  try{ await api('/api/whatsapp/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    $('wa_reset_out').textContent='✓ Sesión limpiada. Vincula de nuevo (QR o código).'; toast('✓ Sesión de WhatsApp limpiada'); setTimeout(()=>{ try{waStatus(false)}catch(e){} },1500); }
+  catch(e){ $('wa_reset_out').textContent=''; toast('Error al limpiar',true); }
 }
 async function tgVerify(){ $('tg_state').textContent='verificando...';
   try{ const r=await api('/api/telegram/me'); $('tg_state').textContent = (r.ok && r.result) ? ('bot ✓ @'+(r.result.username||r.result.id)) : ('error: '+(r.description||'token inválido')); }
