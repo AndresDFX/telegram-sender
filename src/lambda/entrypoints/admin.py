@@ -22,6 +22,7 @@ import time
 import wiring
 from adapters.config import admin_user
 from domain.message import componer_mensaje
+from domain.schedules import hhmm, proximo_run
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -40,6 +41,7 @@ image_store = None
 broadcast_store = None
 plan_store = None
 audit_store = None
+schedule_store = None
 
 _CAMPOS_EDITABLES = (
     "source_channel",
@@ -86,7 +88,7 @@ _NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token", "bot_to
 
 
 def _ensure() -> None:
-    global config, subscribers, queue_stats, image_store, broadcast_store, plan_store, audit_store
+    global config, subscribers, queue_stats, image_store, broadcast_store, plan_store, audit_store, schedule_store
     if config is None:
         config = wiring.build_config_store()
     if subscribers is None:
@@ -101,6 +103,8 @@ def _ensure() -> None:
         plan_store = wiring.build_plan_store()
     if audit_store is None:
         audit_store = wiring.build_audit_store()
+    if schedule_store is None:
+        schedule_store = wiring.build_schedule_store()
 
 
 def _audit(action: str, detail: str = "") -> None:
@@ -464,6 +468,80 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             canales = "+".join([c for c, on in (("tg", a_tg), ("wa", a_wa)) if on])
             _audit("broadcast" + (" (programado)" if sched else ""), f"[{canales}] {texto[:60]}")
             return _json({"ok": True, **res})
+        if sub == "/api/schedules" and method == "GET":
+            return _json({"schedules": schedule_store.listar()})
+        if sub == "/api/schedules" and method == "POST":
+            c = _body(event)
+            texto = str(c.get("text", "")).strip()
+            if not texto:
+                return _json({"error": "El mensaje no puede estar vacío"}, 400)
+            if len(texto) > 4096:
+                return _json({"error": "El mensaje supera 4096 caracteres"}, 400)
+            a_tg, a_wa = bool(c.get("telegram")), bool(c.get("whatsapp"))
+            if not (a_tg or a_wa):
+                return _json({"error": "Elige al menos un canal"}, 400)
+            wa_list = str(c.get("whatsapp_list", "")).strip()
+            if a_wa and not wa_list:
+                return _json({"error": "WhatsApp exige elegir una lista (evita mandar a todos)"}, 400)
+            img = str(c.get("image_url", "")).strip()
+            if img and not img.startswith("https://"):
+                return _json({"error": "La imagen debe ser una URL https://"}, 400)
+            tipo = str(c.get("type", "once")).lower()
+            if tipo not in ("once", "daily", "weekly"):
+                return _json({"error": "Tipo de programación inválido"}, 400)
+            tz = int(config.get().get("window_tz", -300))
+            ahora = int(time.time())
+            at, dias = "", []
+            if tipo == "once":
+                try:
+                    next_run = int(c.get("run_at") or 0)
+                except (TypeError, ValueError):
+                    next_run = 0
+                if next_run <= ahora:
+                    return _json({"error": "La fecha y hora deben ser futuras"}, 400)
+            else:
+                at = str(c.get("at", "")).strip()
+                if not hhmm(at):
+                    return _json({"error": "Hora inválida (usa HH:MM)"}, 400)
+                if tipo == "weekly":
+                    dias = sorted({int(d) for d in (c.get("days") or []) if str(d).strip().isdigit() and 0 <= int(d) <= 6})
+                    if not dias:
+                        return _json({"error": "Elige al menos un día de la semana"}, 400)
+                next_run = proximo_run(tipo, at, dias, tz, ahora)
+                if not next_run:
+                    return _json({"error": "No se pudo calcular el próximo envío"}, 400)
+            sid = schedule_store.crear(
+                name=str(c.get("name", "")).strip(), text=texto, image_url=img,
+                telegram=a_tg, telegram_list=str(c.get("telegram_list", "")).strip(),
+                whatsapp=a_wa, whatsapp_list=wa_list, type=tipo, at=at, days=dias,
+                next_run=next_run, enabled=True,
+            )
+            canales = "+".join(x for x, on in (("tg", a_tg), ("wa", a_wa)) if on)
+            _audit("schedule:crear", f"{tipo} [{canales}] {texto[:40]}")
+            return _json({"ok": True, "sid": sid, "next_run": next_run})
+        if sub == "/api/schedules/toggle" and method == "POST":
+            c = _body(event)
+            sid = str(c.get("sid", "")).strip()
+            if not sid:
+                return _json({"error": "sid requerido"}, 400)
+            enabled = bool(c.get("enabled"))
+            campos = {"enabled": enabled}
+            if enabled:  # al reactivar un recurrente, recalcula su próximo disparo desde ahora
+                s = next((x for x in schedule_store.listar() if x["sid"] == sid), None)
+                if s and s["type"] != "once":
+                    nr = proximo_run(s["type"], s["at"], s["days"], int(config.get().get("window_tz", -300)), int(time.time()))
+                    if nr:
+                        campos["next_run"] = nr
+            schedule_store.actualizar(sid, **campos)
+            _audit("schedule:toggle", f"{sid}={'on' if enabled else 'off'}")
+            return _json({"ok": True})
+        if sub == "/api/schedules/delete" and method == "POST":
+            sid = str(_body(event).get("sid", "")).strip()
+            if not sid:
+                return _json({"error": "sid requerido"}, 400)
+            schedule_store.borrar(sid)
+            _audit("schedule:borrar", sid)
+            return _json({"ok": True})
         if sub == "/api/broadcast/preview" and method == "POST":
             cuerpo = _body(event)
 
@@ -1246,6 +1324,7 @@ img.preview{box-shadow:var(--sh-sm)}
    <button data-tab="prog" onclick="showTab('prog')">⏱️ Programación</button>
    <button data-tab="estado" onclick="showTab('estado')">📊 Estado</button>
    <button data-tab="enviar" onclick="showTab('enviar')">📨 Enviar</button>
+   <button data-tab="programados" onclick="showTab('programados')">⏰ Programados</button>
  </nav>
  <main>
   <div class="card accent" data-tab="inicio"><h2>Resumen</h2>
@@ -1484,6 +1563,61 @@ img.preview{box-shadow:var(--sh-sm)}
    </div>
    <div class="bc-empty" id="bc_empty" style="display:none">Aún no hay envíos. Crea uno en <b>Componer y enviar</b>.</div>
    <div style="margin-top:14px"><button class="sec" onclick="loadBroadcasts()">Refrescar</button></div>
+  </div>
+  <div class="card accent" data-tab="programados"><h2>⏰ Programar un mensaje</h2>
+   <div class="hint">Crea mensajes que se envían solos a la hora indicada, por las conexiones existentes de Telegram y WhatsApp. Una vez, a diario o semanal. Respetan el ritmo anti-baneo, la ventana horaria y el interruptor maestro.</div>
+   <label>Nombre (opcional)</label>
+   <input id="sg_name" placeholder="p. ej. Lista de la mañana" maxlength="80">
+   <label>Mensaje <span id="sg_count" class="charcount">0 caracteres</span></label>
+   <textarea id="sg_text" style="min-height:110px" placeholder="Escribe el mensaje a programar..." oninput="sgCount()"></textarea>
+   <label>Imagen (opcional)</label>
+   <input id="sg_image_url" placeholder="…pega una URL https:// de imagen">
+   <label style="margin-top:16px">Canales</label>
+   <div class="chan-row">
+     <label class="chan tg on" id="sg_chan_tg"><span class="dot"></span><input type="checkbox" id="sg_telegram" checked onchange="sgChan()" style="display:none">✈️ Telegram</label>
+     <label class="chan wa" id="sg_chan_wa"><span class="dot"></span><input type="checkbox" id="sg_whatsapp" onchange="sgChan()" style="display:none">🟢 WhatsApp</label>
+   </div>
+   <div class="row">
+     <div id="sg_tg_wrap"><div class="hint" style="margin-top:0">Lista de Telegram</div>
+       <select id="sg_tg_list"><option value="">(según configuración)</option></select></div>
+     <div id="sg_wa_wrap" style="display:none"><div class="hint" style="margin-top:0">Lista de WhatsApp (obligatoria)</div>
+       <select id="sg_wa_list"><option value="">— elige una lista —</option></select></div>
+   </div>
+   <div class="hint">⚠️ WhatsApp exige una lista (evita mandar a toda la agenda por error).</div>
+   <label style="margin-top:16px">Frecuencia</label>
+   <div class="chan-row">
+     <label class="chan on" id="sg_freq_once"><input type="radio" name="sg_type" value="once" checked onchange="sgType()" style="display:none">Una vez</label>
+     <label class="chan" id="sg_freq_daily"><input type="radio" name="sg_type" value="daily" onchange="sgType()" style="display:none">Diario</label>
+     <label class="chan" id="sg_freq_weekly"><input type="radio" name="sg_type" value="weekly" onchange="sgType()" style="display:none">Semanal</label>
+   </div>
+   <div id="sg_once_box" style="margin-top:12px">
+     <label>Fecha y hora</label>
+     <input type="datetime-local" id="sg_run_at" style="max-width:260px">
+   </div>
+   <div id="sg_time_box" style="margin-top:12px;display:none">
+     <label>Hora</label>
+     <input type="time" id="sg_at" value="09:00" style="max-width:160px">
+   </div>
+   <div id="sg_days_box" style="margin-top:12px;display:none">
+     <label>Días</label>
+     <div class="chan-row" id="sg_days"></div>
+   </div>
+   <div class="hint" style="margin-top:8px">La hora usa la zona horaria configurada en la pestaña <b>Programación</b> (ventana de envío).</div>
+   <div class="compose-actions">
+     <button id="sg_create" onclick="sgCreate()">Programar</button>
+     <button class="ghost" onclick="sgClear()">Limpiar</button>
+     <span class="grow"></span>
+     <span id="sg_status" class="hint" style="margin-top:0"></span>
+   </div>
+  </div>
+  <div class="card" data-tab="programados"><h2>📅 Mensajes programados <span id="sg_n" class="hint"></span></h2>
+   <div class="hint">Próximos envíos automáticos. Puedes pausarlos/activarlos o eliminarlos.</div>
+   <div style="overflow-x:auto;margin-top:12px">
+     <table id="sg_table"><thead><tr><th>Mensaje</th><th>Canales</th><th>Cuándo</th><th>Próximo</th><th></th></tr></thead>
+       <tbody id="sg_rows"></tbody></table>
+   </div>
+   <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Crea uno arriba para enviarlo automáticamente.</p></div>
+   <div style="margin-top:14px"><button class="sec" onclick="loadSchedules()">Refrescar</button></div>
   </div>
   <div class="card accent" data-tab="prog"><h2>Interruptor de envíos</h2>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
@@ -1833,6 +1967,7 @@ function showTab(t){
   document.querySelectorAll('main>.card').forEach(c=>c.classList.toggle('show', c.dataset.tab===t));
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===t));
   try{ localStorage.setItem('tab',t); }catch(e){}
+  if(t==='programados'){ sgFillLists(); sgChan(); sgType(); loadSchedules(); }
   window.scrollTo(0,0); }
 function boot(){ showTab((()=>{try{return localStorage.getItem('tab')}catch(e){return null}})()||'inicio'); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
 if(CRED && !sessionFresca()){ logout(); }
@@ -1960,6 +2095,81 @@ let BC_TIMER=null;
 const BC_POLL=4000;
 const BC_STATUS={ queued:'En cola', sending:'Enviando', done:'Completado', failed:'Fallido', partial:'Parcial' };
 function bcEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ===== Mensajes programados (módulo /api/schedules) =====
+const SG_DAYNAMES=['L','M','X','J','V','S','D'];  // 0=lunes .. 6=domingo
+let SG_DAYS=new Set();
+function sgCount(){ const n=$('sg_text').value.length; $('sg_count').textContent=n+(n===1?' carácter':' caracteres'); }
+function sgFillLists(){
+  const fill=(sel,arr,first)=>{ if(!sel) return; const cur=sel.value;
+    sel.innerHTML='<option value="">'+first+'</option>'+(arr||[]).map(l=>`<option value="${bcEsc(l.name)}">${bcEsc(l.name)} (${(l.ids||[]).length})</option>`).join('');
+    sel.value=cur; };
+  fill($('sg_tg_list'),(LISTS&&LISTS.telegram)||[],'(según configuración)');
+  fill($('sg_wa_list'),(LISTS&&LISTS.whatsapp)||[],'— elige una lista —');
+}
+function sgRenderDays(){ const box=$('sg_days'); if(!box||box.children.length) return;
+  box.innerHTML=SG_DAYNAMES.map((d,i)=>`<label class="chan${SG_DAYS.has(i)?' on':''}" data-d="${i}" onclick="sgToggleDay(${i})">${d}</label>`).join(''); }
+function sgToggleDay(i){ SG_DAYS.has(i)?SG_DAYS.delete(i):SG_DAYS.add(i);
+  const el=document.querySelector('#sg_days [data-d="'+i+'"]'); if(el) el.classList.toggle('on',SG_DAYS.has(i)); }
+function sgChan(){ const tg=$('sg_telegram').checked, wa=$('sg_whatsapp').checked;
+  $('sg_chan_tg').classList.toggle('on',tg); $('sg_chan_wa').classList.toggle('on',wa);
+  $('sg_tg_wrap').style.display=tg?'block':'none'; $('sg_wa_wrap').style.display=wa?'block':'none'; }
+function sgCurType(){ const r=document.querySelector('input[name="sg_type"]:checked'); return r?r.value:'once'; }
+function sgType(){ const t=sgCurType();
+  $('sg_freq_once').classList.toggle('on',t==='once'); $('sg_freq_daily').classList.toggle('on',t==='daily'); $('sg_freq_weekly').classList.toggle('on',t==='weekly');
+  $('sg_once_box').style.display=t==='once'?'block':'none';
+  $('sg_time_box').style.display=t==='once'?'none':'block';
+  $('sg_days_box').style.display=t==='weekly'?'block':'none';
+  sgRenderDays(); }
+function sgClear(){ $('sg_name').value=''; $('sg_text').value=''; $('sg_image_url').value=''; $('sg_run_at').value='';
+  SG_DAYS.clear(); document.querySelectorAll('#sg_days .chan').forEach(e=>e.classList.remove('on')); sgCount(); $('sg_status').textContent=''; }
+async function sgCreate(){
+  const t=sgCurType();
+  const body={ name:$('sg_name').value.trim(), text:$('sg_text').value, image_url:$('sg_image_url').value.trim(),
+    telegram:$('sg_telegram').checked, whatsapp:$('sg_whatsapp').checked,
+    telegram_list:$('sg_tg_list').value, whatsapp_list:$('sg_wa_list').value, type:t };
+  if(!body.text.trim()){ toast('El mensaje no puede estar vacío',true); return; }
+  if(t==='once'){ const v=$('sg_run_at').value; if(!v){ toast('Elige fecha y hora',true); return; }
+    body.run_at=Math.floor(new Date(v).getTime()/1000); }
+  else { body.at=$('sg_at').value; if(t==='weekly') body.days=[...SG_DAYS]; }
+  $('sg_create').disabled=true; $('sg_status').textContent='Guardando…';
+  try{
+    const r=await fetch(BASE+'/api/schedules',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify(body)});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.error||('error '+r.status));
+    toast('✓ Mensaje programado'); $('sg_status').textContent=''; sgClear(); loadSchedules();
+  }catch(e){ toast(e.message||'Error al programar',true); $('sg_status').textContent=e.message||''; }
+  finally{ $('sg_create').disabled=false; }
+}
+function sgDesc(s){
+  if(s.type==='daily') return 'Diario · '+s.at;
+  if(s.type==='weekly') return 'Semanal · '+(s.days||[]).slice().sort((a,b)=>a-b).map(d=>SG_DAYNAMES[d]).join(',')+' · '+s.at;
+  return 'Una vez';
+}
+function sgWhen(ep){ if(!ep) return '—'; try{ return new Date(ep*1000).toLocaleString('es',{dateStyle:'medium',timeStyle:'short'}); }catch(e){ return '—'; } }
+function sgChans(s){ return [s.telegram?'✈️':'', s.whatsapp?'🟢':''].filter(Boolean).join(' ')||'—'; }
+async function loadSchedules(){
+  let data;
+  try{ data=(await api('/api/schedules')).schedules||[]; }catch(e){ return; }
+  $('sg_n').textContent=data.length?('· '+data.length):'';
+  $('sg_empty').style.display=data.length?'none':'block';
+  $('sg_rows').innerHTML=data.map(s=>{
+    const msg=bcEsc((s.name||s.text||'').slice(0,48))||'(sin texto)';
+    const tag=s.enabled?'<span class="pill done">activo</span>':'<span class="pill inactive">pausado</span>';
+    return `<tr>
+      <td><b>${msg}</b><div class="hint" style="margin-top:2px">${tag}</div></td>
+      <td>${sgChans(s)}</td>
+      <td>${bcEsc(sgDesc(s))}</td>
+      <td>${s.enabled?sgWhen(s.next_run):'—'}</td>
+      <td style="white-space:nowrap;text-align:right">
+        <button class="sec" style="padding:5px 10px" onclick="sgToggle('${s.sid}',${s.enabled?'false':'true'})">${s.enabled?'Pausar':'Activar'}</button>
+        <button class="danger" style="padding:5px 10px;margin-left:6px" onclick="sgDelete('${s.sid}')">Borrar</button>
+      </td></tr>`;
+  }).join('');
+}
+async function sgToggle(sid,en){ try{ await api('/api/schedules/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid,enabled:en})}); loadSchedules(); }catch(e){ toast('Error',true); } }
+async function sgDelete(sid){ if(!confirm('¿Borrar este mensaje programado?')) return;
+  try{ await api('/api/schedules/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid})}); toast('✓ Borrado'); loadSchedules(); }catch(e){ toast('Error',true); } }
 function bcFmtTime(t){
   if(!t) return '';
   const d=new Date(typeof t==='number'? (t<1e12? t*1000 : t) : t);

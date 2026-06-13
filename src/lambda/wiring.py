@@ -15,6 +15,7 @@ from adapters.dynamodb import (
     DynamoDbDedupStore,
     DynamoDbHighWaterMarkStore,
     DynamoDbPlanStore,
+    DynamoDbScheduleStore,
     DynamoDbSubscriberRepository,
 )
 from adapters.s3 import S3ImageStore
@@ -26,6 +27,7 @@ from adapters.whatsapp import HttpWhatsAppForwarder
 from application.broadcasting import BroadcastList
 from application.deliver_batch import DeliverBatch
 from application.dispatch import DispatchCampaigns
+from application.materialize_schedules import MaterializeSchedules
 from application.onboarding import HandleCommand
 from application.poll_channel import PollChannel
 
@@ -102,6 +104,19 @@ def build_plan_store() -> DynamoDbPlanStore:
 
 def build_audit_store() -> DynamoDbAuditStore:
     return DynamoDbAuditStore()
+
+
+def build_schedule_store() -> DynamoDbScheduleStore:
+    return DynamoDbScheduleStore()
+
+
+def build_materialize_schedules() -> MaterializeSchedules:
+    """Materializador de mensajes programados: reutiliza el envío manual (→ plan → dispatcher)."""
+    return MaterializeSchedules(
+        schedules=build_schedule_store(),
+        broadcasting=_broadcast_list(),
+        config=build_config_store(),
+    )
 
 
 def build_dedup() -> DynamoDbDedupStore:

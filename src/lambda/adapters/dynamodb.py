@@ -868,3 +868,98 @@ class DynamoDbAuditStore:
              "user": a.get("user", "")}
             for a in items[:limit]
         ]
+
+
+class DynamoDbScheduleStore:
+    """Mensajes programados (once/daily/weekly). El dispatcher materializa los vencidos
+    creando un envío manual (plan), reutilizando todo el pipeline de entrega.
+
+    NOTA: ``name`` y ``type`` son palabras reservadas en DynamoDB → toda actualización
+    usa ``ExpressionAttributeNames`` (``#campo``) para evitar errores de validación."""
+
+    def __init__(self, table_name: str | None = None, endpoint: str | None = None):
+        self._name = table_name or os.environ.get("SCHEDULES_TABLE", "Schedules")
+        self._endpoint = endpoint or os.environ.get("DYNAMODB_ENDPOINT")
+
+    def _t(self):
+        return _table(self._name, self._endpoint)
+
+    @staticmethod
+    def _norm(it: dict) -> dict:
+        return {
+            "sid": it.get("sid", ""),
+            "name": it.get("name", ""),
+            "text": it.get("text", ""),
+            "image_url": it.get("image_url", ""),
+            "telegram": bool(it.get("telegram", False)),
+            "telegram_list": it.get("telegram_list", ""),
+            "whatsapp": bool(it.get("whatsapp", False)),
+            "whatsapp_list": it.get("whatsapp_list", ""),
+            "type": it.get("type", "once"),
+            "at": it.get("at", ""),
+            "days": [int(d) for d in (it.get("days") or [])],
+            "next_run": int(it.get("next_run", 0) or 0),
+            "enabled": bool(it.get("enabled", False)),
+            "last_run": int(it.get("last_run", 0) or 0),
+            "runs": int(it.get("runs", 0) or 0),
+            "created_at": int(it.get("created_at", 0) or 0),
+        }
+
+    def crear(self, *, name: str, text: str, image_url: str, telegram: bool, telegram_list: str,
+              whatsapp: bool, whatsapp_list: str, type: str, at: str, days, next_run: int,
+              enabled: bool = True) -> str:
+        sid = "s-" + uuid.uuid4().hex[:16]
+        self._t().put_item(
+            Item={
+                "sid": sid,
+                "name": str(name or "")[:80],
+                "text": str(text or "")[:4096],
+                "image_url": str(image_url or ""),
+                "telegram": bool(telegram),
+                "telegram_list": str(telegram_list or ""),
+                "whatsapp": bool(whatsapp),
+                "whatsapp_list": str(whatsapp_list or ""),
+                "type": str(type),
+                "at": str(at or ""),
+                "days": [int(d) for d in (days or [])],
+                "next_run": int(next_run or 0),
+                "enabled": bool(enabled),
+                "last_run": 0,
+                "runs": 0,
+                "created_at": int(time.time()),
+            }
+        )
+        return sid
+
+    def listar(self) -> list[dict]:
+        items, start = [], None
+        while True:
+            kwargs = {"ExclusiveStartKey": start} if start else {}
+            resp = self._t().scan(**kwargs)
+            items.extend(resp.get("Items", []))
+            start = resp.get("LastEvaluatedKey")
+            if not start:
+                break
+        salida = [self._norm(i) for i in items]
+        # activos primero, luego por próximo disparo ascendente
+        salida.sort(key=lambda s: (not s["enabled"], s["next_run"] or 9_999_999_999))
+        return salida
+
+    def vencidos(self, now: int) -> list[dict]:
+        return [s for s in self.listar() if s["enabled"] and 0 < s["next_run"] <= int(now)]
+
+    def actualizar(self, sid: str, **campos) -> None:
+        if not campos:
+            return
+        names = {f"#{k}": k for k in campos}
+        values = {f":{k}": v for k, v in campos.items()}
+        expr = "SET " + ", ".join(f"#{k} = :{k}" for k in campos)
+        self._t().update_item(
+            Key={"sid": sid},
+            UpdateExpression=expr,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+
+    def borrar(self, sid: str) -> None:
+        self._t().delete_item(Key={"sid": sid})

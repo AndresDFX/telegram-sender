@@ -361,6 +361,26 @@ Resources:
         - Key: Environment
           Value: !Ref EnvironmentName
 
+  # Mensajes programados (once/daily/weekly). El dispatcher los materializa al vencer.
+  SchedulesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${EnvironmentName}-schedules"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: sid
+          AttributeType: S
+      KeySchema:
+        - AttributeName: sid
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
   # --- Cola de broadcast + DLQ -------------------------------------------------
   BroadcastDLQ:
     Type: AWS::SQS::Queue
@@ -822,11 +842,13 @@ Resources:
                   - dynamodb:Scan # planes activos
                   - dynamodb:GetItem # ids de cada lote / metadatos
                   - dynamodb:UpdateItem # avanzar cursor, in_flight, bitácora
+                  - dynamodb:PutItem # crear plan al materializar un mensaje programado
                 Resource:
                   - !GetAtt PlansTable.Arn
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem # leer progreso del job (¿terminó el lote?)
+                  - dynamodb:PutItem # crear job al materializar un mensaje programado
                 Resource:
                   - !GetAtt BroadcastsTable.Arn
               - Effect: Allow
@@ -834,6 +856,19 @@ Resources:
                   - sqs:SendMessage # liberar UN lote de Telegram a la cola
                 Resource:
                   - !GetAtt BroadcastQueue.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan # mensajes programados vencidos
+                  - dynamodb:UpdateItem # avanzar next_run / desactivar tras disparar
+                Resource:
+                  - !GetAtt SchedulesTable.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan # destinatarios (modo bot) al materializar
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt SubscribersTable.Arn
+                  - !Sub "${SubscribersTable.Arn}/index/*"
 
   DispatcherFunction:
     Type: AWS::Lambda::Function
@@ -856,6 +891,10 @@ Resources:
           PLANS_TABLE: !Ref PlansTable
           BROADCASTS_TABLE: !Ref BroadcastsTable
           BROADCAST_QUEUE_URL: !Ref BroadcastQueue
+          SCHEDULES_TABLE: !Ref SchedulesTable
+          SUBSCRIBERS_TABLE: !Ref SubscribersTable
+          SUBSCRIBERS_STATUS_INDEX: StatusIndex
+          IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -945,6 +984,14 @@ Resources:
                   - !GetAtt AuditTable.Arn
               - Effect: Allow
                 Action:
+                  - dynamodb:PutItem # crear mensaje programado
+                  - dynamodb:Scan # listar mensajes programados
+                  - dynamodb:UpdateItem # activar/pausar
+                  - dynamodb:DeleteItem # borrar
+                Resource:
+                  - !GetAtt SchedulesTable.Arn
+              - Effect: Allow
+                Action:
                   - s3:PutObject # subir la imagen de la lista
                   - s3:GetObject # firmar URL temporal (adjuntar imagen en envío manual)
                 Resource:
@@ -973,6 +1020,7 @@ Resources:
           BROADCASTS_TABLE: !Ref BroadcastsTable
           PLANS_TABLE: !Ref PlansTable
           AUDIT_TABLE: !Ref AuditTable
+          SCHEDULES_TABLE: !Ref SchedulesTable
           BROADCAST_BATCH_SIZE: !Ref BroadcastBatchSize
           IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
           ADMIN_USER: !Ref AdminUser
