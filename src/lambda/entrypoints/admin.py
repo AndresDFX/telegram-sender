@@ -1530,6 +1530,7 @@ img.preview{box-shadow:var(--sh-sm)}
      <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
      <button onclick="bulk('excluir')">Excluir marcados</button>
      <button onclick="bulk('incluir')">Incluir marcados</button>
+     <button class="sec" onclick="createListFromGrid('telegram')">➕ Crear lista con marcados</button>
      <button class="ghost" onclick="bulkFiltered('excluir')">Excluir filtrados</button>
      <button class="ghost" onclick="bulkFiltered('incluir')">Incluir filtrados</button>
    </div>
@@ -1561,6 +1562,7 @@ img.preview{box-shadow:var(--sh-sm)}
      <button class="sec" onclick="waToggleAll(false)">Desmarcar</button>
      <button onclick="waBulk('excluir')">Excluir marcados</button>
      <button onclick="waBulk('incluir')">Incluir marcados</button>
+     <button class="sec" onclick="createListFromGrid('whatsapp')">➕ Crear lista con marcados</button>
    </div>
    <table><thead><tr><th></th><th>nombre</th><th>estado</th></tr></thead><tbody id="wa_subs"></tbody></table>
    <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button class="sec" onclick="waPrev()">◀</button><span id="wa_pageinfo" class="hint"></span><button class="sec" onclick="waNext()">▶</button></div>
@@ -2052,6 +2054,17 @@ async function saveLists(ch){ TGT[ch].mode=curMode(ch);
   const body=ch==='telegram'?{telegram_lists:LISTS.telegram,telegram_target:TGT.telegram}:{whatsapp_lists:LISTS.whatsapp,whatsapp_target:TGT.whatsapp};
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('✓ Listas guardadas'); loadCfg(); }
   catch(e){ toast('Error al guardar',true); } }
+async function createListFromGrid(ch){
+  const ids=selForChannel(ch);
+  if(!ids.length){ toast('Marca primero los contactos en el grid de arriba',true); return; }
+  const n=(prompt('Nombre de la nueva lista (con los '+ids.length+' contactos marcados):')||'').trim();
+  if(!n) return;
+  if(LISTS[ch].some(l=>l.name===n)){ toast('Ya existe una lista con ese nombre',true); return; }
+  LISTS[ch].push({name:n, ids:[...new Set(ids.map(String))]});
+  renderLists(ch);
+  await saveLists(ch);
+  toast('✓ Lista "'+n+'" creada con '+ids.length+' contactos');
+}
 // --- contactos de WhatsApp (para armar listas de WhatsApp) ---
 let WA_DEST=[], WA_PAGE=0, WA_EXCLUDED=new Set();
 function waName(c){ return c.name || '(sin nombre)'; }
