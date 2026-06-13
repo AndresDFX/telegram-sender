@@ -969,6 +969,7 @@ Resources:
                 Action:
                   - dynamodb:PutItem # crear job de envío manual
                   - dynamodb:Scan # listar envíos (estados)
+                  - dynamodb:DeleteItem # borrar definitivamente envíos de la tabla
                 Resource:
                   - !GetAtt BroadcastsTable.Arn
               - Effect: Allow

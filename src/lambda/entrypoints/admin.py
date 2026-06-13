@@ -587,6 +587,18 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             config.clear_login_temp()
             _audit("telethon:logout", "limpiar sesión userbot")
             return _json({"ok": True})
+        if sub == "/api/broadcasts/delete" and method == "POST":
+            cuerpo = _body(event)
+            if cuerpo.get("finished"):
+                n = broadcast_store.borrar_terminados()
+                _audit("broadcasts:borrar", f"terminados {n}")
+                return _json({"ok": True, "deleted": n})
+            bid = str(cuerpo.get("id", "")).strip()
+            if not bid:
+                return _json({"error": "id requerido"}, 400)
+            broadcast_store.borrar(bid)
+            _audit("broadcasts:borrar", bid)
+            return _json({"ok": True})
         if sub == "/api/broadcast/preview" and method == "POST":
             cuerpo = _body(event)
 
@@ -1622,11 +1634,11 @@ img.preview{box-shadow:var(--sh-sm)}
   <div class="card" data-tab="envios"><h2>📡 Envíos <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
    <div class="hint">Estado y progreso de cada difusión. Se actualiza automáticamente mientras hay envíos en curso.</div>
    <div style="overflow-x:auto;margin-top:12px">
-     <table id="bc_table"><thead><tr><th>Mensaje</th><th>Estado</th><th>Progreso</th></tr></thead>
+     <table id="bc_table"><thead><tr><th>Mensaje</th><th>Estado</th><th>Progreso</th><th></th></tr></thead>
        <tbody id="bc_rows"></tbody></table>
    </div>
    <div class="bc-empty" id="bc_empty" style="display:none">Aún no hay envíos. Crea uno en <b>Componer y enviar</b>.</div>
-   <div style="margin-top:14px"><button class="sec" onclick="loadBroadcasts()">Refrescar</button></div>
+   <div style="margin-top:14px"><button class="sec" onclick="loadBroadcasts()">Refrescar</button> <button class="danger" onclick="bcClearFinished()">🗑 Limpiar terminados</button></div>
   </div>
   <div class="card accent" data-tab="envios"><h2>⏰ Programar un mensaje</h2>
    <div class="hint">Crea mensajes que se envían solos a la hora indicada, por las conexiones existentes de Telegram y WhatsApp. Una vez, a diario o semanal. Respetan el ritmo anti-baneo, la ventana horaria y el interruptor maestro.</div>
@@ -1992,7 +2004,7 @@ function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length
   $('pageinfo').textContent = f.length ? `página ${PAGE+1} de ${pages}` : 'sin resultados';
   slice.forEach(s=>{ const ex=EXCLUDED.has(String(s.chatId)); const label=s.name||'(sin nombre)'; const tr=document.createElement('tr');
     tr.innerHTML=`<td><input type="checkbox" class="selrow" data-id="${s.chatId}"></td>`+
-      `<td><b>${bcEsc(label)}</b></td>`+
+      `<td><b>${bcEsc(label)}</b><div class="hint" style="margin-top:2px;font-size:11px">${bcEsc(s.phone||s.chatId||'')}</div></td>`+
       `<td><span class="pill ${ex?'inactive':'active'}">${ex?'Excluido':'Incluido'}</span></td>`;
     t.appendChild(tr); }); }
 async function loadSubs(){ const [d,c]=await Promise.all([api('/api/subscribers'),api('/api/config')]);
@@ -2053,7 +2065,7 @@ function renderWa(){ const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.le
   const t=$('wa_subs'); t.innerHTML='';
   $('wa_c_count').textContent = WA_DEST.length ? `· ${f.length} de ${WA_DEST.length} (${WA_EXCLUDED.size} excluidos)` : '';
   slice.forEach(c=>{ const id=String(c.id||''); const ex=WA_EXCLUDED.has(id); const tr=document.createElement('tr');
-    tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${bcEsc(waName(c))}</b></td>`+
+    tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${bcEsc(waName(c))}</b><div class="hint" style="margin-top:2px;font-size:11px">${bcEsc(id)}</div></td>`+
       `<td><span class="pill ${ex?'inactive':'active'}">${ex?'Excluido':'Incluido'}</span></td>`; t.appendChild(tr); });
   $('wa_pageinfo').textContent=f.length?`página ${WA_PAGE+1} de ${pages}`:'sin resultados'; }
 function waSelectedIds(){ return [...document.querySelectorAll('.wsel:checked')].map(c=>String(c.dataset.id)); }
@@ -2297,7 +2309,8 @@ function bcRow(b){
     `<td class="bc-msg"><b title="${bcEsc(txt)}">${bcEsc(txt)}</b>`+
       `<div class="bc-meta"><span class="bc-src">${bcEsc(b.source||'manual')}</span><span>${bcFmtTime(b.created_at)}</span></div></td>`+
     `<td><span class="pill ${st}">${bcEsc(label)}</span></td>`+
-    `<td><div class="chprog">${bcChanCell(false,b.telegram)}${bcChanCell(true,b.whatsapp)}</div></td>`;
+    `<td><div class="chprog">${bcChanCell(false,b.telegram)}${bcChanCell(true,b.whatsapp)}</div></td>`+
+    `<td style="text-align:right;white-space:nowrap"><button class="danger" style="padding:4px 9px" title="Borrar definitivamente" onclick="bcDelete('${b.id}')">🗑</button></td>`;
   return tr;
 }
 async function loadBroadcasts(){
@@ -2311,6 +2324,16 @@ async function loadBroadcasts(){
     const live=$('bc_live'); live.classList.toggle('on', active);
     $('bc_live_t').textContent = active ? 'en vivo' : 'al día';
   }catch(e){ /* silencioso: no romper el polling por un fallo puntual */ }
+}
+async function bcDelete(id){
+  if(!confirm('¿Borrar este envío DEFINITIVAMENTE de la tabla? No se puede deshacer (no afecta lo ya entregado).')) return;
+  try{ await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); toast('✓ Envío borrado'); loadBroadcasts(); }
+  catch(e){ toast('Error al borrar',true); }
+}
+async function bcClearFinished(){
+  if(!confirm('¿Borrar DEFINITIVAMENTE todos los envíos terminados? Se conservan los que están en cola o enviándose.')) return;
+  try{ const r=await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({finished:true})}); toast('✓ '+(r.deleted||0)+' envíos borrados'); loadBroadcasts(); }
+  catch(e){ toast('Error al borrar',true); }
 }
 function bcStartPolling(){
   if(BC_TIMER) return;

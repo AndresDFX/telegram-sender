@@ -576,6 +576,22 @@ class DynamoDbBroadcastStore:
             )
         return salida
 
+    def borrar(self, broadcast_id: str) -> None:
+        """Borra DEFINITIVAMENTE un envío de la tabla (no solo a nivel visual)."""
+        self._t().delete_item(Key={"id": broadcast_id})
+
+    def borrar_terminados(self) -> int:
+        """Borra todos los envíos ya terminados (estado != queued/sending). Devuelve cuántos."""
+        n = 0
+        for j in self._scan_todo():
+            if self._estado(j) not in ("queued", "sending"):
+                try:
+                    self._t().delete_item(Key={"id": j.get("id")})
+                    n += 1
+                except Exception:
+                    pass
+        return n
+
 
 class DynamoDbPlanStore:
     """Planes de envío FRACCIONADO: un plan retiene toda la difusión y el dispatcher libera
