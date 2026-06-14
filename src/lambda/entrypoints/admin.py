@@ -1526,6 +1526,15 @@ tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .tbl-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
 .tbl-toolbar .grow{flex:1}
 .bc-err{color:var(--bad);font-size:11px;margin-top:4px;line-height:1.35;max-width:240px;cursor:help}
+/* Sistema de modales reutilizable (reemplaza confirm()/prompt() nativos por diálogos de marca) */
+.ds-overlay{position:fixed;inset:0;background:rgba(0,0,0,.66);display:flex;align-items:center;justify-content:center;z-index:1300;padding:20px;animation:dsFade .14s ease}
+@keyframes dsFade{from{opacity:0}to{opacity:1}}
+.ds-modal{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--bd2);border-radius:16px;box-shadow:0 24px 60px -16px rgba(0,0,0,.7);padding:22px;max-width:440px;width:100%;animation:dsPop .16s ease}
+@keyframes dsPop{from{transform:translateY(10px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+.ds-modal h3{margin:0 0 10px;font-size:17px}
+.ds-modal-body{color:var(--tx2);font-size:14px;line-height:1.55;white-space:pre-line}
+.ds-modal input{width:100%;margin-top:14px}
+.ds-modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
 th.selcol,td.selcol{width:34px;text-align:center}
 </style></head><body>
 
@@ -1952,6 +1961,27 @@ async function api(p, opt){ opt=opt||{}; opt.headers=hdr(opt.headers); const r=a
 function toast(m,v){ const t=$('toast'); t.textContent=m;
   const cls = v===true ? 'err' : (typeof v==='string' && v ? v : '');  // true=err (compat); 'info'/'warn'/'err'
   t.className='toast show'+(cls?' '+cls:''); setTimeout(()=>t.className='toast',2200); }
+// Modales (promesas): reemplazan confirm()/prompt() nativos por diálogos de marca, accesibles (Esc/Enter, foco).
+function dsModal(o){ o=o||{}; return new Promise(resolve=>{
+  const ov=document.createElement('div'); ov.className='ds-overlay';
+  const d=document.createElement('div'); d.className='ds-modal'; d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true');
+  d.innerHTML='<h3>'+bcEsc(o.title||'Confirmar')+'</h3>'+
+    (o.message?'<div class="ds-modal-body">'+bcEsc(o.message)+'</div>':'')+
+    (o.input?'<input id="ds_modal_input" placeholder="'+bcEsc(o.placeholder||'')+'">':'')+
+    '<div class="ds-modal-actions"><button class="ghost" data-a="c">'+bcEsc(o.cancelText||'Cancelar')+'</button>'+
+    '<button class="'+(o.danger?'danger':'')+'" data-a="k">'+bcEsc(o.okText||'Aceptar')+'</button></div>';
+  ov.appendChild(d); document.body.appendChild(ov);
+  const inp=d.querySelector('#ds_modal_input'); if(inp) setTimeout(()=>{inp.focus();},40);
+  const no=o.input?null:false;
+  function close(v){ document.removeEventListener('keydown',onKey); ov.remove(); resolve(v); }
+  function onKey(e){ if(e.key==='Escape') close(no); else if(e.key==='Enter') close(o.input?(inp?inp.value:''):true); }
+  ov.addEventListener('mousedown',e=>{ if(e.target===ov) close(no); });
+  d.querySelector('[data-a=c]').onclick=()=>close(no);
+  d.querySelector('[data-a=k]').onclick=()=>close(o.input?(inp?inp.value:''):true);
+  document.addEventListener('keydown',onKey);
+}); }
+function confirmModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'¿Confirmas?',message:message,okText:opts.okText||'Aceptar',cancelText:opts.cancelText,danger:!!opts.danger}); }
+function promptModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'Escribe un valor',message:message,input:true,placeholder:opts.placeholder,okText:opts.okText||'Aceptar'}); }
 async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':'+p);
   try{ await fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{if(!r.ok)throw 0;}); sessionStorage.setItem('cred',CRED); sessionStorage.setItem('cred_ts',String(Date.now()));
     $('login').style.display='none'; $('app').style.display='block'; $('who').textContent=u; boot(); }
@@ -1993,7 +2023,7 @@ async function createUser(){
     toast('✓ Usuario creado'); $('usr_new_name').value=''; $('usr_new_email').value=''; $('usr_new_pw').value=''; loadUsers();
   }catch(e){ toast(e.message||'Error al crear',true); }
 }
-async function deleteUser(u){ if(!confirm('¿Borrar el usuario "'+u+'"?')) return;
+async function deleteUser(u){ if(!await confirmModal('¿Borrar el usuario "'+u+'"?',{danger:true,okText:'Borrar'})) return;
   try{ const r=await fetch(BASE+'/api/users/delete',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({username:u})});
     const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status)); toast('✓ Usuario borrado'); loadUsers();
   }catch(e){ toast(e.message||'Error',true); } }
@@ -2029,13 +2059,13 @@ function renderSendingState(on){
 }
 async function toggleSending(){
   const on=$('sending_enabled').checked;
-  if(!on && !confirm('¿Pausar TODOS los envíos (Telegram y WhatsApp)? Nada saldrá hasta reactivar.')){ $('sending_enabled').checked=true; return; }
+  if(!on && !(await confirmModal('¿Pausar TODOS los envíos (Telegram y WhatsApp)? Nada saldrá hasta reactivar.',{okText:'Pausar'}))){ $('sending_enabled').checked=true; return; }
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sending_enabled:on})});
     renderSendingState(on); toast(on?'✓ Envíos ACTIVADOS':'⏸ Envíos PAUSADOS', on?'info':'warn'); }
   catch(e){ toast('Error al cambiar el estado',true); $('sending_enabled').checked=!on; }
 }
 async function cancelPending(){
-  if(!confirm('¿Cancelar todas las difusiones pendientes/en curso? No se enviarán (ni al reactivar).')) return;
+  if(!await confirmModal('¿Cancelar todas las difusiones pendientes/en curso? No se enviarán (ni al reactivar).',{danger:true,okText:'Cancelar difusiones'})) return;
   try{ const r=await api('/api/plans/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     toast('✓ '+(r.canceled||0)+' difusión(es) cancelada(s)'); loadPlans(); loadQueue(); }
   catch(e){ toast('Error al cancelar',true); }
@@ -2098,13 +2128,13 @@ async function tlSignIn(){
   finally{ $('tl_confirm').disabled=false; }
 }
 async function tlLogout(){
-  if(!confirm('¿Limpiar la sesión de Telegram (userbot)? La cuenta dejará de poder enviar hasta que la reconectes aquí.')) return;
+  if(!await confirmModal('¿Limpiar la sesión de Telegram (userbot)? La cuenta dejará de poder enviar hasta que la reconectes aquí.',{danger:true,okText:'Limpiar sesión'})) return;
   try{ await api('/api/telethon/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     $('tl_logout_out').textContent='✓ Sesión limpiada'; toast('✓ Sesión de Telegram limpiada'); loadCfg(); }
   catch(e){ toast('Error al limpiar',true); }
 }
 async function waReset(){
-  if(!confirm('¿Limpiar la sesión de WhatsApp? Se borran las credenciales y tendrás que volver a vincular (QR o código).')) return;
+  if(!await confirmModal('¿Limpiar la sesión de WhatsApp? Se borran las credenciales y tendrás que volver a vincular (QR o código).',{danger:true,okText:'Limpiar sesión'})) return;
   $('wa_reset_out').textContent='Limpiando…';
   try{ await api('/api/whatsapp/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     $('wa_reset_out').textContent='✓ Sesión limpiada. Vincula de nuevo (QR o código).'; toast('✓ Sesión de WhatsApp limpiada'); setTimeout(()=>{ try{waStatus(false)}catch(e){} },1500); }
@@ -2157,12 +2187,12 @@ async function loadDlq(){
   }catch(e){ $('dlq_n').textContent='· error'; }
 }
 async function dlqRedrive(){
-  if(!confirm('¿Reintentar todos los fallidos? Volverán a la cola para procesarse.')) return;
+  if(!await confirmModal('¿Reintentar todos los fallidos? Volverán a la cola para procesarse.',{okText:'Reintentar'})) return;
   try{ await api('/api/dlq/redrive',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ Reintento iniciado'); setTimeout(loadDlq,1500); }
   catch(e){ toast('Error al reintentar',true); }
 }
 async function dlqPurge(){
-  if(!confirm('¿Descartar TODOS los mensajes fallidos? No se podrán recuperar.')) return;
+  if(!await confirmModal('¿Descartar TODOS los mensajes fallidos? No se podrán recuperar.',{danger:true,okText:'Descartar'})) return;
   try{ await api('/api/dlq/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ DLQ descartada'); setTimeout(loadDlq,1500); }
   catch(e){ toast('Error al descartar',true); }
 }
@@ -2173,7 +2203,7 @@ async function loadBlocked(){
   }catch(e){ if($('wa_blk_n')) $('wa_blk_n').textContent='· servicio inaccesible'; if($('wa_blk_list')) $('wa_blk_list').textContent='—'; }
 }
 async function clearBlocked(){
-  if(!confirm('¿Reincluir a TODOS los auto-excluidos? Volverán a recibir envíos.')) return;
+  if(!await confirmModal('¿Reincluir a TODOS los auto-excluidos? Volverán a recibir envíos.',{okText:'Reincluir'})) return;
   try{ await api('/api/whatsapp/blocked/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ Reincluidos'); loadBlocked(); }
   catch(e){ toast('Error',true); }
 }
@@ -2288,7 +2318,7 @@ function renderLists(ch){ const cont=$(listsBox(ch)); cont.innerHTML='';
 function addList(ch){ const inp=$(ch==='telegram'?'tg_newlist':'wa_newlist'); const n=inp.value.trim(); if(!n)return;
   if(LISTS[ch].some(l=>l.name===n)){ toast('Ya existe una lista con ese nombre',true); return; }
   LISTS[ch].push({name:n,ids:[]}); inp.value=''; renderLists(ch); }
-function delList(ch,i){ const n=LISTS[ch][i].name; if(!confirm('¿Borrar la lista "'+n+'"?'))return;
+async function delList(ch,i){ const n=LISTS[ch][i].name; if(!await confirmModal('¿Borrar la lista "'+n+'"?',{danger:true,okText:'Borrar'}))return;
   LISTS[ch].splice(i,1); TGT[ch].lists=(TGT[ch].lists||[]).filter(x=>x!==n); renderLists(ch); }
 function toggleListActive(ch,i,v){ const n=LISTS[ch][i].name; const s=new Set(TGT[ch].lists||[]); v?s.add(n):s.delete(n); TGT[ch].lists=[...s]; }
 function addToList(ch,i){ const ids=selForChannel(ch); if(!ids.length){ toast('Marca contactos primero',true); return; }
@@ -2303,7 +2333,7 @@ async function saveLists(ch){ TGT[ch].mode=curMode(ch);
 async function createListFromGrid(ch){
   const ids=selForChannel(ch);
   if(!ids.length){ toast('Marca primero los contactos en el grid de arriba',true); return; }
-  const n=(prompt('Nombre de la nueva lista (con los '+ids.length+' contactos marcados):')||'').trim();
+  const n=(await promptModal('Nombre de la nueva lista (con los '+ids.length+' contactos marcados):',{title:'Crear lista',placeholder:'Nombre de la lista',okText:'Crear'})||'').trim();
   if(!n) return;
   if(LISTS[ch].some(l=>l.name===n)){ toast('Ya existe una lista con ese nombre',true); return; }
   LISTS[ch].push({name:n, ids:[...new Set(ids.map(String))]});
@@ -2452,7 +2482,7 @@ async function sendBroadcast(){
   if(sv){ ep=Math.floor(new Date(sv).getTime()/1000); if(ep>Math.floor(Date.now()/1000)) body.scheduled_at=ep; else { toast('La fecha programada debe ser futura',true); return; } }
   let msg = body.scheduled_at ? ('¿Programar este envío para '+new Date(sv).toLocaleString('es')+'?') : '¿Enviar este mensaje ahora?';
   if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
-  if(!confirm(msg)) return;
+  if(!await confirmModal(msg,{okText:'Enviar'})) return;
   const btn=$('bc_send'); btn.disabled=true; $('bc_status').textContent='guardando...';
   try{
     await api('/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -2546,7 +2576,7 @@ async function loadSchedules(){
   }).join('');
 }
 async function sgToggle(sid,en){ try{ await api('/api/schedules/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid,enabled:en})}); loadSchedules(); }catch(e){ toast('Error',true); } }
-async function sgDelete(sid){ if(!confirm('¿Borrar este mensaje programado?')) return;
+async function sgDelete(sid){ if(!await confirmModal('¿Borrar este mensaje programado?',{danger:true,okText:'Borrar'})) return;
   try{ await api('/api/schedules/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid})}); toast('✓ Borrado'); loadSchedules(); }catch(e){ toast('Error',true); } }
 function bcFmtTime(t){
   if(!t) return '';
@@ -2593,12 +2623,12 @@ async function loadBroadcasts(){
   }catch(e){ /* silencioso: no romper el polling por un fallo puntual */ }
 }
 async function bcDelete(id){
-  if(!confirm('¿Borrar este envío DEFINITIVAMENTE de la tabla? No se puede deshacer (no afecta lo ya entregado).')) return;
+  if(!await confirmModal('¿Borrar este envío DEFINITIVAMENTE de la tabla? No se puede deshacer (no afecta lo ya entregado).',{danger:true,okText:'Borrar'})) return;
   try{ await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); toast('✓ Envío borrado'); loadBroadcasts(); }
   catch(e){ toast('Error al borrar',true); }
 }
 async function bcClearFinished(){
-  if(!confirm('¿Borrar DEFINITIVAMENTE todos los envíos terminados? Se conservan los que están en cola o enviándose.')) return;
+  if(!await confirmModal('¿Borrar DEFINITIVAMENTE todos los envíos terminados? Se conservan los que están en cola o enviándose.',{danger:true,okText:'Borrar terminados'})) return;
   try{ const r=await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({finished:true})}); toast('✓ '+(r.deleted||0)+' envíos borrados'); loadBroadcasts(); }
   catch(e){ toast('Error al borrar',true); }
 }
@@ -2612,7 +2642,7 @@ function bcSelChanged(){
 }
 async function bcDeleteSelected(){
   const ids=bcSelectedIds(); if(!ids.length) return;
-  if(!confirm('¿Borrar DEFINITIVAMENTE '+ids.length+' envío(s) seleccionados? No se puede deshacer.')) return;
+  if(!await confirmModal('¿Borrar DEFINITIVAMENTE '+ids.length+' envío(s) seleccionados? No se puede deshacer.',{danger:true,okText:'Borrar'})) return;
   try{ const r=await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})}); toast('✓ '+(r.deleted||0)+' borrados'); loadBroadcasts(); }
   catch(e){ toast('Error al borrar',true); }
 }
@@ -2664,7 +2694,7 @@ function plCard(p){
     lines+`</div>`;
 }
 async function cancelPlan(pid){
-  if(!confirm('¿Cancelar ESTE envío? Los lotes que falten NO se enviarán (los ya enviados no se pueden retirar).')) return;
+  if(!await confirmModal('¿Cancelar ESTE envío? Los lotes que falten NO se enviarán (los ya enviados no se pueden retirar).',{danger:true,okText:'Cancelar envío'})) return;
   try{ await api('/api/plans/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pid:pid})});
     toast('✓ Envío cancelado'); loadPlans(); loadQueue(); }
   catch(e){ toast('Error al cancelar',true); }
