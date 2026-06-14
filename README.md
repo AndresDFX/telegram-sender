@@ -178,7 +178,12 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
   usuario** (`__users__`, vía `/api/patterns`), no en la config global. El efectivo para los envíos es la
   **UNIÓN** de todos los usuarios (`ConfigStore.get()` los unifica con `union_ordenada`); el panel muestra
   LO TUYO. Así no se pierden al guardar otra config (no pasan por `/api/config`). La infraestructura
-  compartida (tokens, sesión, canal fuente, markup, listas, interruptor, anti-baneo, ventana) sigue **global**.
+  compartida (tokens, sesión, canal fuente, markup, listas, interruptor, anti-baneo) sigue **global**.
+- **Canales INDEPENDIENTES** (Telegram y WhatsApp): cada uno tiene su **horario de envío propio**
+  (`tg_window_*` / `wa_window_*`, con `window_tz` compartido; si falta, hereda la ventana global). El dispatcher
+  evalúa la ventana **por canal**: una ventana cerrada en un canal NO frena al otro, y un WhatsApp caído (no
+  resuelve su total) **no bloquea** los envíos de Telegram (Telegram se despacha primero, sin depender de WhatsApp).
+  Los delays anti-baneo también son por canal (`tg_delay_*` / `wa_delay_*`).
 - **Interruptor maestro** (`sending_enabled`): pausa/activa los envíos **AUTOMÁTICOS** (captura del canal y
   difusión programada). El **envío MANUAL** (Componer → Enviar) **SIEMPRE sale**, aun en pausa: el plan se marca
   `source="manual"` y el dispatcher/worker lo dejan pasar (lo automático es `source="channel"`). La **captura del

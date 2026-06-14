@@ -183,6 +183,13 @@ class DynamoDbConfigStore(ConfigStore):
         "window_start",
         "window_end",
         "window_tz",
+        # Ventana horaria POR CANAL (independiente): si no se fija, hereda la global de arriba.
+        "tg_window_enabled",
+        "tg_window_start",
+        "tg_window_end",
+        "wa_window_enabled",
+        "wa_window_start",
+        "wa_window_end",
         # Correo transaccional (recuperación de contraseña).
         "resend_api_key",
         "mail_from",
@@ -282,6 +289,13 @@ class DynamoDbConfigStore(ConfigStore):
         cfg["window_start"] = str(cfg["window_start"])
         cfg["window_end"] = str(cfg["window_end"])
         cfg["window_tz"] = int(float(cfg["window_tz"]))
+        # Ventana POR CANAL: si no hay valor guardado, hereda la ventana global (migración
+        # transparente: la config previa sigue aplicando a ambos canales hasta que se editen).
+        for _canal in ("tg", "wa"):
+            _en = item.get(f"{_canal}_window_enabled")
+            cfg[f"{_canal}_window_enabled"] = bool(cfg["window_enabled"]) if _en is None else bool(_en)
+            cfg[f"{_canal}_window_start"] = str(item.get(f"{_canal}_window_start") or cfg["window_start"])
+            cfg[f"{_canal}_window_end"] = str(item.get(f"{_canal}_window_end") or cfg["window_end"])
         for k in ("telegram_exclude_patterns", "whatsapp_exclude_patterns",
                   "telegram_pattern_exceptions", "whatsapp_pattern_exceptions"):
             cfg[k] = [str(x) for x in (cfg.get(k) or [])]

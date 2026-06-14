@@ -184,6 +184,35 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(res["diferido"], "fuera de ventana")
         self.assertEqual(plans.dispatched, [])
 
+    def test_ventana_tg_cerrada_no_frena_a_wa(self):
+        # Horarios INDEPENDIENTES: TG fuera de su ventana, WA dentro -> se despacha WA igual.
+        plans = FakePlans(_plan(wa_enabled=True, wa_resolved=True, wa_total=150, wa_batches=1))
+        cfg = FakeConfig(tg_window_enabled=True, tg_window_start="08:00", tg_window_end="20:00",
+                         wa_window_enabled=False, window_tz=0)
+        wa = FakeWa()
+        res = _disp(plans, wa=wa, config=cfg, now=22 * 3600)()  # 22:00 UTC: TG cerrado, WA 24h
+        self.assertEqual(res["despachado"], "WA#0")
+        self.assertEqual(len(wa.calls), 1)
+
+    def test_ventana_wa_cerrada_no_frena_a_tg(self):
+        plans, queue = FakePlans(_plan(wa_enabled=True, wa_resolved=True, wa_total=150, wa_batches=1)), FakeQueue()
+        cfg = FakeConfig(wa_window_enabled=True, wa_window_start="08:00", wa_window_end="20:00",
+                         tg_window_enabled=False, window_tz=0)
+        res = _disp(plans, queue=queue, config=cfg, now=22 * 3600)()  # 22:00: WA cerrado, TG 24h
+        self.assertEqual(res["despachado"], "TG#0")
+        self.assertEqual(len(queue.calls), 1)
+
+    def test_whatsapp_caido_no_bloquea_telegram(self):
+        # Si WhatsApp no resuelve su total (servicio caído), Telegram debe salir igual (independencia).
+        class WaCaido:
+            def ping(self): pass
+            def contar(self, **k): raise RuntimeError("WhatsApp caído")
+            def forward(self, *a, **k): raise RuntimeError("WhatsApp caído")
+        plans, queue = FakePlans(_plan(wa_enabled=True, wa_resolved=False)), FakeQueue()
+        res = _disp(plans, queue=queue, wa=WaCaido())()
+        self.assertEqual(res["despachado"], "TG#0")  # TG sale aunque WhatsApp esté caído
+        self.assertEqual(len(queue.calls), 1)
+
     def test_finaliza_cuando_no_queda_nada(self):
         plans = FakePlans(_plan(status="running", tg_next=2, tg_dispatched=300))  # tg agotado, wa off
         res = _disp(plans)()

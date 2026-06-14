@@ -75,6 +75,13 @@ _CAMPOS_EDITABLES = (
     "window_start",
     "window_end",
     "window_tz",
+    # Ventana horaria POR CANAL (independiente Telegram/WhatsApp).
+    "tg_window_enabled",
+    "tg_window_start",
+    "tg_window_end",
+    "wa_window_enabled",
+    "wa_window_start",
+    "wa_window_end",
     # Correo transaccional (recuperación de contraseña vía Resend).
     "resend_api_key",
     "mail_from",
@@ -93,7 +100,8 @@ _LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
 _TARGETS = ("telegram_target", "whatsapp_target")
 _FLOATS = ("tg_delay_min", "tg_delay_max")
 _ENTEROS = ("batch_size", "wa_delay_min", "wa_delay_max", "window_tz")
-_BOOLS = ("whatsapp_enabled", "scheduling_enabled", "window_enabled", "sending_enabled")
+_BOOLS = ("whatsapp_enabled", "scheduling_enabled", "window_enabled", "sending_enabled",
+          "tg_window_enabled", "wa_window_enabled")
 # Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
 _NO_VACIAR = ("telethon_session", "telethon_api_id", "telethon_api_hash", "whatsapp_token", "bot_token", "resend_api_key")
 
@@ -1439,6 +1447,16 @@ th{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.6px;
 td b{font-weight:600;color:var(--tx)}
 
 /* ---------- pills / chips de estado ---------- */
+.ico{width:1.05em;height:1.05em;vertical-align:-0.18em;display:inline-block;flex:none}
+.steps-bar{height:6px;background:var(--bd);border-radius:999px;overflow:hidden;margin:2px 0 6px}
+.steps-bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--ac),var(--ac2));border-radius:999px;transition:width .45s ease}
+.step{display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--bd)}
+.step:last-child{border-bottom:0}
+.step-ic{font-size:15px;flex:none;width:18px;text-align:center}
+.step-tx{flex:1;display:flex;flex-direction:column;gap:1px;min-width:0}
+.step-t{color:var(--tx)}
+.step.done .step-t{color:var(--mut)}
+.pill .ico{vertical-align:-0.15em;margin-right:3px}
 .pill{padding:3px 11px;border-radius:999px;font-size:11.5px;font-weight:600;display:inline-block;border:1px solid transparent;white-space:nowrap}
 .pill.active{background:rgba(52,211,153,.13);color:var(--ok);border-color:rgba(52,211,153,.28)}
 .pill.inactive{background:rgba(251,191,36,.12);color:var(--warn);border-color:rgba(251,191,36,.26)}
@@ -1838,6 +1856,11 @@ a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visib
 }
 th.selcol,td.selcol{width:34px;text-align:center}
 </style></head><body>
+<!-- Iconos de marca reutilizables (Telegram / WhatsApp) para mostrar junto a la info de cada canal. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-tg" viewBox="0 0 240 240"><circle cx="120" cy="120" r="120" fill="#2AABEE"/><path fill="#fff" d="M53 118.5l116-44.7c5.4-2 10.1 1.3 8.3 9.5l-19.8 93.2c-1.5 6.6-5.4 8.2-10.9 5.1l-30.2-22.3-14.6 14c-1.6 1.6-3 3-6.1 3l2.1-30.9 56.3-50.9c2.4-2.2-.5-3.4-3.8-1.2l-69.6 43.8-30-9.4c-6.5-2-6.6-6.5 1.4-9.6z"/></symbol>
+<symbol id="i-wa" viewBox="0 0 240 240"><circle cx="120" cy="120" r="120" fill="#25D366"/><path fill="#fff" d="M120 54c-36.4 0-66 29.6-66 66 0 11.6 3 22.5 8.3 32L54 186l34.7-9.1c9.1 5 19.6 7.8 30.8 7.8h.5c36.4 0 66-29.6 66-66s-29.6-66-66-66zm38.6 93.2c-1.6 4.5-9.4 8.7-13 9.2-3.3.5-7.5.7-12.1-.8-2.8-.9-6.4-2.1-11-4.1-19.4-8.4-32-27.9-33-29.2-1-1.3-7.9-10.5-7.9-20s5-14.2 6.8-16.2c1.8-2 3.9-2.5 5.2-2.5h3.7c1.2 0 2.8-.2 4.4 3.4 1.6 3.7 5.5 12.9 6 13.8.5.9.8 2 .1 3.3-.7 1.3-1 2.1-2 3.2-1 1.1-2.1 2.5-3 3.3-1 1-2 2.1-.9 4s5 8.2 10.7 13.3c7.4 6.6 13.6 8.6 15.5 9.6 1.9 1 3 .8 4.1-.5 1.1-1.3 4.7-5.5 6-7.4 1.3-1.9 2.6-1.6 4.4-1 1.8.7 11.4 5.4 13.3 6.3 1.9 1 3.2 1.4 3.7 2.2.5.9.5 4.6-1.1 9.1z"/></symbol>
+</defs></svg>
 
 <div id="login"><div class="box">
   <div class="brand brand-lg"><svg viewBox="0 0 48 48" width="46" height="46" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div>
@@ -1888,10 +1911,10 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
   </div>
   <div class="card" data-tab="inicio" id="dash_steps_card"><h2>Primeros pasos <span id="steps_n" class="hint"></span></h2>
-   <div class="hint">Configuración guiada. Cada paso te lleva a su pestaña.</div>
+   <div class="hint">Configuración guiada: el botón de cada paso te lleva directo a la sección exacta para completarlo.</div>
    <div id="dash_steps" style="margin-top:10px">cargando…</div>
   </div>
-  <div class="card" data-tab="fuentes" style="padding:14px 18px"><div class="subnav" data-subnav="fuentes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="fuente" onclick="showSub('fuentes','fuente')">📡 Fuente del canal</button><button data-sub="tg" onclick="showSub('fuentes','tg')">✈️ Telegram</button><button data-sub="wa" onclick="showSub('fuentes','wa')">🟢 WhatsApp</button></div></div>
+  <div class="card" data-tab="fuentes" style="padding:14px 18px"><div class="subnav" data-subnav="fuentes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="fuente" onclick="showSub('fuentes','fuente')">📡 Fuente del canal</button><button data-sub="tg" onclick="showSub('fuentes','tg')"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</button><button data-sub="wa" onclick="showSub('fuentes','wa')"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</button></div></div>
   <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Aumento (markup)<span class="help" tabindex="0" data-tip="Sube un % los precios detectados antes de difundir. Solo afecta números con símbolo de moneda ($, 💸, COP); no toca modelos ni especificaciones. Redondea al mil hacia arriba.">ⓘ</span></h2>
    <div class="markup"><input id="markup_percentage" type="number" step="0.1"><div>
      <div style="font-size:13px">% que se suma a cada precio</div>
@@ -2128,8 +2151,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
 
    <label style="margin-top:16px">Canales</label>
    <div class="chan-row">
-     <label class="chan tg on" id="bc_chan_tg"><span class="dot"></span><input type="checkbox" id="bc_telegram" checked onchange="bcChan()" style="display:none">✈️ Telegram</label>
-     <label class="chan wa" id="bc_chan_wa"><span class="dot"></span><input type="checkbox" id="bc_whatsapp" onchange="bcChan()" style="display:none">🟢 WhatsApp</label>
+     <label class="chan tg on" id="bc_chan_tg"><span class="dot"></span><input type="checkbox" id="bc_telegram" checked onchange="bcChan()" style="display:none"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</label>
+     <label class="chan wa" id="bc_chan_wa"><span class="dot"></span><input type="checkbox" id="bc_whatsapp" onchange="bcChan()" style="display:none"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</label>
    </div>
    <div class="hint" id="bc_wa_warn" style="display:none">⚠️ El envío masivo por WhatsApp puede banear tu número. El sistema lo hace con ritmo lento (anti-baneo); úsalo con listas pequeñas.</div>
 
@@ -2183,8 +2206,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <input id="sg_image_url" placeholder="…pega una URL https:// de imagen">
    <label style="margin-top:16px">Canales</label>
    <div class="chan-row">
-     <label class="chan tg on" id="sg_chan_tg"><span class="dot"></span><input type="checkbox" id="sg_telegram" checked onchange="sgChan()" style="display:none">✈️ Telegram</label>
-     <label class="chan wa" id="sg_chan_wa"><span class="dot"></span><input type="checkbox" id="sg_whatsapp" onchange="sgChan()" style="display:none">🟢 WhatsApp</label>
+     <label class="chan tg on" id="sg_chan_tg"><span class="dot"></span><input type="checkbox" id="sg_telegram" checked onchange="sgChan()" style="display:none"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</label>
+     <label class="chan wa" id="sg_chan_wa"><span class="dot"></span><input type="checkbox" id="sg_whatsapp" onchange="sgChan()" style="display:none"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</label>
    </div>
    <div class="row">
      <div id="sg_tg_wrap"><div class="hint" style="margin-top:0">Lista de Telegram</div>
@@ -2285,14 +2308,22 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="callout">El delay entre mensajes es <b>aleatorio</b> dentro del rango (evita patrones predecibles). El dispatcher libera <b>un lote por minuto</b> y espera a que termine el anterior antes de soltar el siguiente.</div>
    <button onclick="saveSched()">Guardar anti-baneo</button>
   </div>
-  <div class="card" data-tab="ajustes" data-sub="envio"><h2>Ventana de envío (horario permitido)<span class="help" tabindex="0" data-tip="Restringe los envíos a un horario (p. ej. 08:00–20:00, en tu zona). Fuera de la ventana, los lotes se difieren hasta que reabra. Apagado = 24 h.">ⓘ</span></h2>
-   <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="window_enabled" style="width:auto"> Enviar solo dentro del horario permitido</label>
+  <div class="card" data-tab="ajustes" data-sub="envio"><h2>Horario de envío por canal<span class="help" tabindex="0" data-tip="Cada canal tiene su PROPIO horario, independiente. Fuera de su ventana, los lotes de ESE canal se difieren; el otro canal sigue enviando con normalidad. Apagado = 24 h. Soporta cruzar medianoche (22:00 → 06:00). La zona horaria es la de «Anti-baneo».">ⓘ</span></h2>
+   <div class="hint">Telegram y WhatsApp son <b>independientes</b>: la ventana horaria de un canal no afecta al otro.</div>
+   <div class="section-label" style="margin-top:12px"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</div>
+   <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="tg_window_enabled" style="width:auto"> Enviar Telegram solo dentro del horario</label>
    <div class="row">
-     <div><label>Desde (HH:MM)</label><input id="window_start" placeholder="08:00"></div>
-     <div><label>Hasta (HH:MM)</label><input id="window_end" placeholder="20:00"></div>
+     <div><label>Desde (HH:MM)</label><input id="tg_window_start" placeholder="08:00"></div>
+     <div><label>Hasta (HH:MM)</label><input id="tg_window_end" placeholder="20:00"></div>
    </div>
-   <div class="hint">Fuera del horario, los lotes quedan <b>encolados</b> y se procesan de forma diferida al reabrir la ventana. Soporta cruzar medianoche (p.ej. 22:00 → 06:00).</div>
-   <button onclick="saveSched()">Guardar ventana</button>
+   <div class="section-label" style="margin-top:14px"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</div>
+   <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="wa_window_enabled" style="width:auto"> Enviar WhatsApp solo dentro del horario</label>
+   <div class="row">
+     <div><label>Desde (HH:MM)</label><input id="wa_window_start" placeholder="08:00"></div>
+     <div><label>Hasta (HH:MM)</label><input id="wa_window_end" placeholder="20:00"></div>
+   </div>
+   <div class="hint" style="margin-top:10px">Fuera del horario, los lotes de ese canal quedan <b>encolados</b> y salen al reabrir su ventana.</div>
+   <button onclick="saveSched()">Guardar horarios</button>
   </div>
   <div class="card" data-tab="envios" data-sub="historial"><h2>📦 Envíos fraccionados<span class="help" tabindex="0" data-tip="Las difusiones grandes se dividen en lotes que salen de a uno, con pausas (anti-baneo). Aquí ves el progreso por canal; puedes cancelar o borrar planes.">ⓘ</span> <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
    <div class="hint">De cada lote programado se muestra <b>cuántos mensajes se han enviado</b>. El sistema procesa un lote a la vez, en orden.</div>
@@ -2313,6 +2344,10 @@ th.selcol,td.selcol{width:34px;text-align:center}
 <script>
 const BASE = location.pathname.replace(/\/admin.*/, '/admin');
 const $ = id => document.getElementById(id);
+// Iconos de marca (referencian los <symbol> del SVG). Úsalos SOLO en contextos HTML (innerHTML);
+// en diálogos de texto plano (confirmModal/alert/toast) se mantienen los emojis ✈️/🟢.
+const ICO_TG = '<svg class="ico"><use href="#i-tg"></use></svg>';
+const ICO_WA = '<svg class="ico"><use href="#i-wa"></use></svg>';
 let CRED = sessionStorage.getItem('cred') || '';
 function hdr(extra){ return Object.assign({Authorization:'Basic '+CRED}, extra||{}); }
 async function api(p, opt){ opt=opt||{}; opt.headers=hdr(opt.headers); const r=await fetch(BASE+p,opt);
@@ -2430,7 +2465,7 @@ let SRC_CHANNEL='';
 // Badge del header con el canal fuente al que Telegram está integrado (de dónde lee las listas).
 function renderTgSource(){ const e=$('conn_tg_src'); if(!e) return;
   const ch=(SRC_CHANNEL||'').replace(/^@/,'').trim();
-  if(ch){ e.style.display='inline-block'; e.className='pill'; e.textContent='📡 @'+ch; e.title='Canal fuente del que Telegram lee las listas: @'+ch; }
+  if(ch){ e.style.display='inline-block'; e.className='pill'; e.innerHTML=ICO_TG+' @'+bcEsc(ch); e.title='Canal fuente del que Telegram lee las listas: @'+ch; }
   else{ e.style.display='none'; } }
 async function loadCfg(){ const c=await api('/api/config');
   ['source_channel','markup_percentage','currency_symbols','whatsapp_footer','image_url','telethon_api_id','telethon_api_hash'].forEach(k=>$(k).value=c[k]??'');
@@ -2445,10 +2480,12 @@ async function loadCfg(){ const c=await api('/api/config');
   LISTS.telegram=c.telegram_lists||[]; TGT.telegram=c.telegram_target||{mode:'all',lists:[]};
   LISTS.whatsapp=c.whatsapp_lists||[]; TGT.whatsapp=c.whatsapp_target||{mode:'all',lists:[]};
   renderLists('telegram'); renderLists('whatsapp');
-  // --- anti-baneo / ventana ---
-  ['batch_size','tg_delay_min','tg_delay_max','wa_delay_min','wa_delay_max','window_tz','window_start','window_end'].forEach(k=>{ if($(k)) $(k).value=c[k]??''; });
+  // --- anti-baneo / horario por canal ---
+  ['batch_size','tg_delay_min','tg_delay_max','wa_delay_min','wa_delay_max','window_tz',
+   'tg_window_start','tg_window_end','wa_window_start','wa_window_end'].forEach(k=>{ if($(k)) $(k).value=c[k]??''; });
   if($('scheduling_enabled')) $('scheduling_enabled').checked = c.scheduling_enabled!==false;
-  if($('window_enabled')) $('window_enabled').checked = !!c.window_enabled;
+  if($('tg_window_enabled')) $('tg_window_enabled').checked = !!c.tg_window_enabled;
+  if($('wa_window_enabled')) $('wa_window_enabled').checked = !!c.wa_window_enabled;
   if($('mail_from')) $('mail_from').value=c.mail_from||'';
   if($('mail_status')) $('mail_status').textContent = c.resend_api_key_set ? '· API key configurada ✓' : '· sin API key (usa SNS)';
   loadPatterns();
@@ -2535,12 +2572,14 @@ async function cancelPending(){
   catch(e){ toast('Error al cancelar',true); }
 }
 async function saveSched(){
-  const b={ scheduling_enabled:$('scheduling_enabled').checked, window_enabled:$('window_enabled').checked,
+  const b={ scheduling_enabled:$('scheduling_enabled').checked,
     batch_size:parseInt($('batch_size').value||'150',10),
     tg_delay_min:parseFloat($('tg_delay_min').value||'1'), tg_delay_max:parseFloat($('tg_delay_max').value||'4'),
     wa_delay_min:parseInt($('wa_delay_min').value||'3000',10), wa_delay_max:parseInt($('wa_delay_max').value||'9000',10),
-    window_start:($('window_start').value||'08:00').trim(), window_end:($('window_end').value||'20:00').trim(),
-    window_tz:parseInt($('window_tz').value||'-300',10) };
+    window_tz:parseInt($('window_tz').value||'-300',10),
+    // Ventana horaria INDEPENDIENTE por canal.
+    tg_window_enabled:$('tg_window_enabled').checked, tg_window_start:($('tg_window_start').value||'08:00').trim(), tg_window_end:($('tg_window_end').value||'20:00').trim(),
+    wa_window_enabled:$('wa_window_enabled').checked, wa_window_start:($('wa_window_start').value||'08:00').trim(), wa_window_end:($('wa_window_end').value||'20:00').trim() };
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); toast('✓ Guardado'); loadCfg(); }
   catch(e){ toast('Error al guardar',true); } }
 async function saveWhatsapp(){ const b={ whatsapp_enabled:$('whatsapp_enabled').checked, whatsapp_service_url:$('whatsapp_service_url').value };
@@ -2687,26 +2726,26 @@ async function refreshConn(){
       const irCuenta=()=>{ showTab('ajustes'); try{ showSub('ajustes','cuenta'); }catch(e){} };
       if(a.mode==='userbot'){
         const me=a.me||{}; const phone=me.phone?('+'+String(me.phone).replace(/^\+/,'')):''; const who=phone||me.name||'cuenta';
-        if(a.connected===true){ tg.className='pill active'; tg.textContent='✈️ '+who+' ✓';
+        if(a.connected===true){ tg.className='pill active'; tg.innerHTML=ICO_TG+' '+bcEsc(who)+' ✓';
           tg.title='Cuenta de Telegram '+(me.name||'')+(phone?(' ('+phone+')'):'')+' · sesión válida ✓'; }
-        else if(a.connected===false){ tg.className='pill failed'; tg.style.cursor='pointer'; tg.textContent='✈️ Telegram: renovar ✕';
+        else if(a.connected===false){ tg.className='pill failed'; tg.style.cursor='pointer'; tg.innerHTML=ICO_TG+' Telegram: renovar ✕';
           tg.title='La sesión de Telegram caducó o se revocó — clic para volver a conectar la cuenta (Ajustes → Cuenta de Telegram)';
           tg.onclick=irCuenta; }
-        else { tg.className='pill inactive'; tg.textContent='✈️ Telegram ?'; tg.title='No se pudo verificar la sesión de Telegram ahora mismo'; }
+        else { tg.className='pill inactive'; tg.innerHTML=ICO_TG+' Telegram ?'; tg.title='No se pudo verificar la sesión de Telegram ahora mismo'; }
       } else {
         const me=a.me||{}; const uname=me.username?('@'+me.username):'bot'; const id=me.id?(' · '+me.id):'';
-        if(a.connected){ tg.className='pill active'; tg.textContent='✈️ '+uname+id;
+        if(a.connected){ tg.className='pill active'; tg.innerHTML=ICO_TG+' '+bcEsc(uname+id);
           tg.title='Bot de Telegram: '+(me.name||'')+' '+uname+(me.id?(' · ID '+me.id):''); }
-        else { tg.className='pill failed'; tg.style.cursor='pointer'; tg.textContent='✈️ bot ✕';
+        else { tg.className='pill failed'; tg.style.cursor='pointer'; tg.innerHTML=ICO_TG+' bot ✕';
           tg.title='El bot de Telegram no responde (¿token?) — clic para revisar'; tg.onclick=irCuenta; }
       }
     } }
-  catch(e){ if(tg){ tg.className='pill failed'; tg.textContent='✈️ ✕'; tg.onclick=null; } }
+  catch(e){ if(tg){ tg.className='pill failed'; tg.innerHTML=ICO_TG+' ✕'; tg.onclick=null; } }
   try{ const s=await api('/api/whatsapp/status'); const ok=s&&s.connected;
     if(wa){ const num=(ok&&s.me&&s.me.id)?('+'+String(s.me.id).split('@')[0].split(':')[0]):'';
-      wa.className='pill '+(ok?'active':'failed'); wa.textContent=ok?('🟢 '+(num||'WhatsApp')):'🟢 WA ✕';
+      wa.className='pill '+(ok?'active':'failed'); wa.innerHTML=ok?(ICO_WA+' '+bcEsc(num||'WhatsApp')):(ICO_WA+' WA ✕');
       wa.title=ok?((num?('WhatsApp '+num):'WhatsApp conectado')+(s.contacts?(' · '+s.contacts+' contactos'):'')):('desconectado'+(s.lastCloseMsg?(' · '+s.lastCloseMsg):'')); } }
-  catch(e){ if(wa){ wa.className='pill inactive'; wa.textContent='🟢 WA ?'; wa.title='servicio no configurado o inaccesible'; } }
+  catch(e){ if(wa){ wa.className='pill inactive'; wa.innerHTML=ICO_WA+' WA ?'; wa.title='servicio no configurado o inaccesible'; } }
 }
 let CONN_TIMER=null;
 function connStartPolling(){ if(CONN_TIMER) return; refreshConn();
@@ -2715,21 +2754,33 @@ function connStartPolling(){ if(CONN_TIMER) return; refreshConn();
 const SESSION_MAX_MS=8*3600*1000;
 function sessionFresca(){ try{ const t=parseInt(sessionStorage.getItem('cred_ts')||'0',10); return t && (Date.now()-t)<SESSION_MAX_MS; }catch(e){ return true; } }
 // --- Onboarding: checklist de primeros pasos (desde la config) ---
+function goStep(tab,sub){ showTab(tab); if(sub){ try{ showSub(tab,sub); }catch(e){} } }
 function renderSteps(c){
   const steps=[
-    {ok: !!(c.bot_token_set||c.telethon_session_set), t:'Conectar cuenta o bot de Telegram', tab:'ajustes'},
-    {ok: !!(c.source_channel&&String(c.source_channel).trim()), t:'Definir el canal fuente', tab:'fuentes'},
-    {ok: ((c.telegram_lists||[]).length>0 || (c.whatsapp_lists||[]).length>0), t:'Crear listas o elegir destinatarios', tab:'fuentes'},
-    {ok: !!c.whatsapp_enabled, t:'Conectar WhatsApp', tab:'ajustes', opt:true},
-    {ok: c.sending_enabled!==false, t:'Activar los envíos', tab:'ajustes'},
+    {ok: !!(c.bot_token_set||c.telethon_session_set), ic:ICO_TG, t:'Conectar Telegram',
+     d:'Bot (a suscriptores) o tu cuenta (userbot, a tus contactos) para poder enviar.', tab:'ajustes', sub:'cuenta'},
+    {ok: !!(c.source_channel&&String(c.source_channel).trim()), ic:ICO_TG, t:'Definir el canal fuente',
+     d:'El canal de Telegram del que se leen las listas a reenviar.', tab:'fuentes', sub:'fuente'},
+    {ok: ((c.telegram_lists||[]).length>0 || (c.whatsapp_lists||[]).length>0), t:'Crear listas o elegir destinatarios',
+     d:'Agrupa contactos en listas y define a quién se envía en cada canal.', tab:'fuentes', sub:'tg'},
+    {ok: !!c.whatsapp_enabled, ic:ICO_WA, t:'Conectar WhatsApp',
+     d:'Opcional: reenvía también por WhatsApp (vincula desde tu IP residencial).', tab:'ajustes', sub:'cuenta', opt:true},
+    {ok: c.sending_enabled!==false, t:'Activar los envíos',
+     d:'Enciende el interruptor para que salgan los envíos automáticos.', tab:'ajustes', sub:'envio'},
   ];
-  const done=steps.filter(s=>s.ok).length;
-  if($('steps_n')) $('steps_n').textContent='· '+done+'/'+steps.length+(done===steps.length?' ✓':'');
-  if($('dash_steps')) $('dash_steps').innerHTML=steps.map(s=>
-    `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--bd)">`+
-    `<span style="font-size:15px">${s.ok?'✅':(s.opt?'⚪':'⬜')}</span>`+
-    `<span style="flex:1;color:${s.ok?'var(--mut)':'var(--tx)'}">${s.t}${s.opt?' <span class="hint">(opcional)</span>':''}</span>`+
-    `<button class="ghost" style="padding:5px 11px" onclick="showTab('${s.tab}')">Ir</button></div>`).join('');
+  const done=steps.filter(s=>s.ok).length, total=steps.length, pct=Math.round(done/total*100);
+  const reqDone=steps.filter(s=>!s.opt).every(s=>s.ok);
+  if($('steps_n')) $('steps_n').textContent='· '+done+'/'+total+(done===total?' ✓':'');
+  if($('dash_steps')) $('dash_steps').innerHTML=
+    `<div class="steps-bar"><i style="width:${pct}%"></i></div>`+
+    (reqDone?'<div class="callout ok" style="margin:8px 0 4px">🎉 ¡Listo para enviar! Los pasos opcionales amplían el alcance.</div>':'')+
+    steps.map(s=>
+      `<div class="step${s.ok?' done':''}">`+
+      `<span class="step-ic">${s.ok?'✅':(s.opt?'⚪':'⬜')}</span>`+
+      `<span class="step-tx"><span class="step-t">${s.ic?(s.ic+' '):''}${s.t}${s.opt?' <span class="hint">(opcional)</span>':''}</span>`+
+      `<span class="hint">${s.d}</span></span>`+
+      `<button class="${s.ok?'ghost':'sec'}" style="padding:5px 11px;flex:none" onclick="goStep('${s.tab}','${s.sub||''}')">${s.ok?'Revisar':'Ir →'}</button>`+
+      `</div>`).join('');
 }
 // --- Dashboard / Inicio (KPIs + estado de un vistazo) ---
 async function loadDashboard(){
@@ -2745,8 +2796,8 @@ async function loadDashboard(){
     renderSteps(c);
     const on=c.sending_enabled!==false; const de=$('dash_estado');
     renderSendingState(on);
-    if(de){ de.className='callout '+(on?'ok':'warn');
-      de.innerHTML='Envíos: <b>'+(on?'ACTIVOS':'PAUSADOS')+'</b> · '+(c.window_enabled?('ventana '+c.window_start+'–'+c.window_end):'24 h')+' · WhatsApp '+(c.whatsapp_enabled?'activo':'desactivado')+' · lote '+(c.batch_size|0); }
+    if(de){ de.className='callout '+(on?'ok':'warn'); const win=(en,a,b)=>en?(a+'–'+b):'24h';
+      de.innerHTML='Envíos: <b>'+(on?'ACTIVOS':'PAUSADOS')+'</b> · '+ICO_TG+' '+win(c.tg_window_enabled,c.tg_window_start,c.tg_window_end)+' · '+ICO_WA+' '+win(c.wa_window_enabled,c.wa_window_start,c.wa_window_end)+' · WhatsApp '+(c.whatsapp_enabled?'activo':'desactivado')+' · lote '+(c.batch_size|0); }
     const s=(m.serie||[]).slice(-14); const max=Math.max(1,...s.map(d=>(d.sent|0)+(d.failed|0)));
     if($('dash_serie')) $('dash_serie').innerHTML='<div class="hint" style="margin-top:0">Actividad (últimos '+s.length+' días con envíos)</div>'+
       '<div style="display:flex;gap:3px;align-items:flex-end;height:56px;margin-top:6px">'+
@@ -3014,8 +3065,8 @@ async function bcPrev(){
   BC_PREV_T=setTimeout(async()=>{
     try{ const r=await api('/api/broadcast/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bcBody())});
       const parts=[];
-      if(tg) parts.push('✈️ Telegram: <b>'+(r.telegram??0)+'</b>');
-      if(wa) parts.push('🟢 WhatsApp: <b>'+(r.whatsapp??0)+'</b>');
+      if(tg) parts.push(ICO_TG+' Telegram: <b>'+(r.telegram??0)+'</b>');
+      if(wa) parts.push(ICO_WA+' WhatsApp: <b>'+(r.whatsapp??0)+'</b>');
       out.innerHTML='Se enviará a → '+parts.join(' · ');
     }catch(e){ out.textContent='no se pudo calcular la previsualización'; }
   }, 300);
@@ -3136,7 +3187,7 @@ function sgDesc(s){
   return 'Una vez';
 }
 function sgWhen(ep){ if(!ep) return '—'; try{ return new Date(ep*1000).toLocaleString('es',{dateStyle:'medium',timeStyle:'short'}); }catch(e){ return '—'; } }
-function sgChans(s){ return [s.telegram?'✈️':'', s.whatsapp?'🟢':''].filter(Boolean).join(' ')||'—'; }
+function sgChans(s){ return [s.telegram?ICO_TG:'', s.whatsapp?ICO_WA:''].filter(Boolean).join(' ')||'—'; }
 async function loadSchedules(){
   { const _s=$('sg_rows'); if(_s && !_s.children.length) skelTable('sg_rows',5,3); }
   let data;
@@ -3258,7 +3309,7 @@ function bcStartPolling(){
 const PL_ST={pending:'Pendiente',running:'En curso',done:'Completado',canceled:'Cancelado'};
 const PL_PILL={pending:'queued',running:'sending',done:'done',canceled:'failed'};
 function plBatchLine(e){
-  const chName=e.ch==='wa'?'🟢 WhatsApp':'✈️ Telegram';
+  const chName=e.ch==='wa'?(ICO_WA+' WhatsApp'):(ICO_TG+' Telegram');
   const n=e.n|0, env=e.enviados|0, pct=n?Math.round(env/n*100):0, full=env>=n;
   return `<div class="ch ${e.ch==='wa'?'wa':'tg'}" style="margin:6px 0">`+
     `<span class="ic"></span>`+
@@ -3268,8 +3319,8 @@ function plBatchLine(e){
 function plCard(p){
   const txt=(p.text||'').trim()||'(solo imagen)';
   const st=String(p.status||'pending'); const lab=PL_ST[st]||st; const pill=PL_PILL[st]||'queued';
-  const tgI=(p.tg&&p.tg.total)?`✈️ ${p.tg.next|0}/${p.tg.batches|0} lotes`:'';
-  const waI=(p.wa&&p.wa.enabled)?`🟢 ${p.wa.next|0}/${p.wa.batches|0} lotes`+(!p.wa.resolved?' (resolviendo…)':''):'';
+  const tgI=(p.tg&&p.tg.total)?`${ICO_TG} ${p.tg.next|0}/${p.tg.batches|0} lotes`:'';
+  const waI=(p.wa&&p.wa.enabled)?`${ICO_WA} ${p.wa.next|0}/${p.wa.batches|0} lotes`+(!p.wa.resolved?' (resolviendo…)':''):'';
   const lines=(p.log||[]).map(plBatchLine).join('') || '<div class="hint" style="margin-top:6px">Aún sin lotes despachados (esperando ventana/turno).</div>';
   const activo=(st==='pending'||st==='running');
   const cancelBtn=activo?`<button class="danger" style="padding:6px 12px" onclick="cancelPlan('${p.pid}')">🛑 Cancelar este envío</button>`:'';

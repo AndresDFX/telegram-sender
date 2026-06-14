@@ -89,40 +89,20 @@ class DispatchCampaigns:
             else:
                 return {"plan": pid, "esperando": in_flight, "progreso": prog.get(ch, 0), "target": target}
 
-        # 2) Ventana cerrada -> diferir (no despachar).
-        abierta = ventana_abierta(
-            now,
-            enabled=bool(cfg.get("window_enabled")),
-            start=cfg.get("window_start", "08:00"),
-            end=cfg.get("window_end", "20:00"),
-            tz_offset_min=int(cfg.get("window_tz", -300)),
-        )
-        if not abierta:
-            return {"plan": pid, "diferido": "fuera de ventana"}
-
         bs = int(plan.get("batch_size", 150)) or 150
 
-        # 3) Resolver el total de WhatsApp si quedó pendiente (servicio caído al crear).
-        if plan.get("wa_enabled") and not plan.get("wa_resolved"):
-            try:
-                total = self._whatsapp.contar(
-                    mode=plan.get("wa_mode", "all"),
-                    list_ids=plan.get("wa_list_ids", []),
-                    exclude=plan.get("wa_exclude", []),
-                    exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
-                    pattern_exceptions=cfg.get("whatsapp_pattern_exceptions", []),
-                )
-            except Exception:
-                logger.exception("No se pudo resolver el total de WhatsApp del plan %s; reintento luego", pid)
-                return {"plan": pid, "esperando_wa": True}
-            self._plans.resolver_wa(pid, total, bs)
-            plan["wa_total"] = total
-            plan["wa_batches"] = total_lotes(total, bs)
-            plan["wa_resolved"] = True
+        # Ventanas horarias POR CANAL (independientes): el horario de Telegram y el de WhatsApp se
+        # evalúan por separado, así una ventana cerrada en un canal NO frena al otro. Si un canal no
+        # tiene horario propio configurado, hereda el global (compatibilidad).
+        tg_open = self._ventana_canal(cfg, "tg", now)
+        wa_open = self._ventana_canal(cfg, "wa", now)
 
-        # 4) Despachar el siguiente lote: Telegram primero, luego WhatsApp.
+        # 2) Telegram: independiente de WhatsApp. Se despacha si tiene lotes pendientes y su ventana
+        #    está abierta. NO se resuelve nada de WhatsApp antes, para que una caída de WhatsApp
+        #    NUNCA bloquee los envíos de Telegram.
         tg_next = int(plan.get("tg_next", 0))
-        if tg_next < int(plan.get("tg_batches", 0)):
+        tg_pendiente = tg_next < int(plan.get("tg_batches", 0))
+        if tg_pendiente and tg_open:
             ids = self._plans.ids_lote_tg(pid, tg_next)
             target = int(plan.get("tg_dispatched", 0)) + len(ids)
             # Reclama el lote ANTES de encolar: si un cancel concurrente ganó, no se envía.
@@ -143,36 +123,79 @@ class DispatchCampaigns:
             logger.info("Plan %s: despachado TG#%d (%d destinatarios)", pid, tg_next, len(ids))
             return {"plan": pid, "despachado": f"TG#{tg_next}", "n": len(ids)}
 
-        wa_next = int(plan.get("wa_next", 0))
-        if plan.get("wa_enabled") and wa_next < int(plan.get("wa_batches", 0)):
-            offset = wa_next * bs
-            wa_total = int(plan.get("wa_total", 0))
-            limit = max(0, min(bs, wa_total - offset))
-            target = int(plan.get("wa_dispatched", 0)) + limit
-            # Reclama el lote ANTES de llamar al servicio: si se canceló en carrera, no se envía.
-            if not self._plans.registrar_dispatch(pid, channel="wa", index=wa_next, n=limit, target=target, now=now):
-                logger.info("Plan %s cancelado en carrera; no se despacha WA#%d", pid, wa_next)
-                return {"plan": pid, "cancelado": True}
-            self._whatsapp.forward(
-                plan.get("wa_text", "") or plan.get("text", ""),
-                plan.get("wa_image_url") or None,
-                plan.get("wa_exclude", []),
-                mode=plan.get("wa_mode", "all"),
-                list_ids=plan.get("wa_list_ids", []),
-                broadcast_id=bid,
-                broadcasts_table=self._broadcasts_table,
-                offset=offset,
-                limit=limit,
-                bc_total=wa_total,
-                delay_min_ms=int(cfg.get("wa_delay_min", 3000)),
-                delay_max_ms=int(cfg.get("wa_delay_max", 9000)),
-                exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
-                pattern_exceptions=cfg.get("whatsapp_pattern_exceptions", []),
-            )
-            logger.info("Plan %s: despachado WA#%d (offset %d, %d destinatarios)", pid, wa_next, offset, limit)
-            return {"plan": pid, "despachado": f"WA#{wa_next}", "n": limit}
+        # 3) WhatsApp: independiente de Telegram. Resolvemos su total AQUÍ (no antes), de modo que un
+        #    WhatsApp caído solo afecta a WhatsApp. Se despacha si su ventana está abierta.
+        if plan.get("wa_enabled") and wa_open:
+            if not plan.get("wa_resolved"):
+                try:
+                    total = self._whatsapp.contar(
+                        mode=plan.get("wa_mode", "all"),
+                        list_ids=plan.get("wa_list_ids", []),
+                        exclude=plan.get("wa_exclude", []),
+                        exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
+                        pattern_exceptions=cfg.get("whatsapp_pattern_exceptions", []),
+                    )
+                except Exception:
+                    logger.exception("No se pudo resolver el total de WhatsApp del plan %s; reintento luego", pid)
+                    return {"plan": pid, "esperando_wa": True}
+                self._plans.resolver_wa(pid, total, bs)
+                plan["wa_total"] = total
+                plan["wa_batches"] = total_lotes(total, bs)
+                plan["wa_resolved"] = True
+
+            wa_next = int(plan.get("wa_next", 0))
+            if wa_next < int(plan.get("wa_batches", 0)):
+                offset = wa_next * bs
+                wa_total = int(plan.get("wa_total", 0))
+                limit = max(0, min(bs, wa_total - offset))
+                target = int(plan.get("wa_dispatched", 0)) + limit
+                # Reclama el lote ANTES de llamar al servicio: si se canceló en carrera, no se envía.
+                if not self._plans.registrar_dispatch(pid, channel="wa", index=wa_next, n=limit, target=target, now=now):
+                    logger.info("Plan %s cancelado en carrera; no se despacha WA#%d", pid, wa_next)
+                    return {"plan": pid, "cancelado": True}
+                self._whatsapp.forward(
+                    plan.get("wa_text", "") or plan.get("text", ""),
+                    plan.get("wa_image_url") or None,
+                    plan.get("wa_exclude", []),
+                    mode=plan.get("wa_mode", "all"),
+                    list_ids=plan.get("wa_list_ids", []),
+                    broadcast_id=bid,
+                    broadcasts_table=self._broadcasts_table,
+                    offset=offset,
+                    limit=limit,
+                    bc_total=wa_total,
+                    delay_min_ms=int(cfg.get("wa_delay_min", 3000)),
+                    delay_max_ms=int(cfg.get("wa_delay_max", 9000)),
+                    exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
+                    pattern_exceptions=cfg.get("whatsapp_pattern_exceptions", []),
+                )
+                logger.info("Plan %s: despachado WA#%d (offset %d, %d destinatarios)", pid, wa_next, offset, limit)
+                return {"plan": pid, "despachado": f"WA#{wa_next}", "n": limit}
+
+        # 4) Nada despachable AHORA: si hay pendientes pero su ventana está cerrada -> diferir.
+        wa_pendiente = bool(plan.get("wa_enabled")) and (
+            not plan.get("wa_resolved") or int(plan.get("wa_next", 0)) < int(plan.get("wa_batches", 0))
+        )
+        if (tg_pendiente and not tg_open) or (wa_pendiente and not wa_open):
+            return {"plan": pid, "diferido": "fuera de ventana"}
 
         # 5) Nada pendiente -> plan terminado.
         self._plans.finalizar(pid)
         logger.info("Plan %s finalizado", pid)
         return {"plan": pid, "finalizado": True}
+
+    def _ventana_canal(self, cfg: dict, canal: str, now: int) -> bool:
+        """¿Está abierta la ventana horaria del canal (``tg``/``wa``) ahora? Cada canal tiene su
+        propio horario; si no está configurado, hereda el horario global (compatibilidad)."""
+        enabled = cfg.get(f"{canal}_window_enabled")
+        if enabled is None:
+            enabled = cfg.get("window_enabled")
+        start = cfg.get(f"{canal}_window_start") or cfg.get("window_start", "08:00")
+        end = cfg.get(f"{canal}_window_end") or cfg.get("window_end", "20:00")
+        return ventana_abierta(
+            now,
+            enabled=bool(enabled),
+            start=start,
+            end=end,
+            tz_offset_min=int(cfg.get("window_tz", -300)),
+        )
