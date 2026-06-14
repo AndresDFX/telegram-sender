@@ -10,7 +10,19 @@ from domain.recipients import (  # noqa: E402
     filtrar_destinatarios,
     ids_de_listas_activas,
     ids_excluidos_por_patron,
+    union_ordenada,
 )
+
+
+class UnionOrdenadaTests(unittest.TestCase):
+    def test_une_sin_duplicados_preservando_orden(self):
+        self.assertEqual(union_ordenada(["FAM", "#"], ["#", "INT"], ["FAM"]), ["FAM", "#", "INT"])
+
+    def test_trim_y_vacios(self):
+        self.assertEqual(union_ordenada([" FAM ", ""], None, ["  "]), ["FAM"])
+
+    def test_sin_listas(self):
+        self.assertEqual(union_ordenada(), [])
 
 LISTS = [
     {"name": "VIP", "ids": ["1", "2"]},

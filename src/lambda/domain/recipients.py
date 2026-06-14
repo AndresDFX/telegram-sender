@@ -28,6 +28,20 @@ def ids_de_listas_activas(lists: Iterable[dict], target: dict) -> set[str]:
     return seleccion
 
 
+def union_ordenada(*listas) -> list[str]:
+    """Unión de varias listas preservando el orden de aparición y sin duplicados (como strings).
+    Usada para los patrones por-usuario: el efectivo (envíos) = unión de todos los usuarios."""
+    out: list[str] = []
+    vistos: set[str] = set()
+    for lista in listas:
+        for x in lista or []:
+            s = str(x).strip()
+            if s and s not in vistos:
+                vistos.add(s)
+                out.append(s)
+    return out
+
+
 def ids_excluidos_por_patron(contactos: Iterable[dict], patrones: Iterable[str]) -> set[str]:
     """IDs de contactos cuyo NOMBRE contiene (sin distinguir mayúsculas) alguno de los
     patrones dados. Sirve para AUTO-EXCLUIR, p. ej., 'FAM' (familia) o '#' que aparezcan en

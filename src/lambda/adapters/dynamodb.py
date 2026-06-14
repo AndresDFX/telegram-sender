@@ -287,6 +287,17 @@ class DynamoDbConfigStore(ConfigStore):
             cfg[k] = [str(x) for x in (cfg.get(k) or [])]
         for k in ("resend_api_key", "mail_from", "telethon_api_id", "telethon_api_hash"):
             cfg[k] = str(cfg.get(k) or "").strip()
+        # Patrones de exclusión POR USUARIO: el efectivo (para envíos) = UNIÓN de todos los usuarios
+        # (+ lo global legacy). Las excepciones siguen siendo globales. Cada usuario edita los suyos
+        # vía /api/patterns; aquí se unifican para que el pipeline (que lee cfg) los aplique.
+        from domain.recipients import union_ordenada
+
+        try:
+            usuarios = self.get_users() or {}
+        except Exception:
+            usuarios = {}
+        for k in ("telegram_exclude_patterns", "whatsapp_exclude_patterns"):
+            cfg[k] = union_ordenada(cfg.get(k), *[(u or {}).get(k) for u in usuarios.values()])
         return cfg
 
     @staticmethod

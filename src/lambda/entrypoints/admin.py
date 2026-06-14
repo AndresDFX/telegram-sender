@@ -80,16 +80,17 @@ _CAMPOS_EDITABLES = (
     # Correo transaccional (recuperación de contraseña vía Resend).
     "resend_api_key",
     "mail_from",
-    # Auto-exclusión por patrón de nombre (p. ej. "FAM"), por canal.
-    "telegram_exclude_patterns",
-    "whatsapp_exclude_patterns",
-    # Excepciones al patrón: ids que se incluyen aunque su nombre coincida (override manual).
+    # NOTA: telegram_exclude_patterns/whatsapp_exclude_patterns NO van aquí: son POR USUARIO
+    # (se guardan en el registro del usuario vía /api/patterns; el efectivo es la unión). Quitarlos
+    # de aquí evita que un guardado de config los borre por accidente.
+    # Excepciones al patrón: ids que se incluyen aunque su nombre coincida (override manual; global).
     "telegram_pattern_exceptions",
     "whatsapp_pattern_exceptions",
 )
 _LISTAS = ("strip_patterns", "excluded_ids", "whatsapp_excluded",
-           "telegram_exclude_patterns", "whatsapp_exclude_patterns",
            "telegram_pattern_exceptions", "whatsapp_pattern_exceptions")
+# Patrones de exclusión por usuario (se guardan en __users__, no en la config global).
+_PATRONES_USUARIO = ("telegram_exclude_patterns", "whatsapp_exclude_patterns")
 _LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
 _TARGETS = ("telegram_target", "whatsapp_target")
 _FLOATS = ("tg_delay_min", "tg_delay_max")
@@ -555,6 +556,32 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             cambios = _sanea_config(_body(event))
             _audit("config", "campos: " + (", ".join(sorted(cambios.keys())) or "(ninguno)"))
             return _json(config.set(cambios))
+        if sub == "/api/patterns" and method == "GET":
+            # Patrones de exclusión del USUARIO actual (se guardan en su registro, no en la config global).
+            u = (config.get_users() or {}).get(_usuario_actual(event)) or {}
+            return _json({k: [str(x) for x in (u.get(k) or [])] for k in _PATRONES_USUARIO})
+        if sub == "/api/patterns" and method == "POST":
+            cuerpo = _body(event)
+            usuario = _usuario_actual(event)
+            users = config.get_users() or {}
+            rec = dict(users.get(usuario) or {})
+            cambiados = []
+            for k in _PATRONES_USUARIO:
+                if k in cuerpo:
+                    v = cuerpo.get(k)
+                    if isinstance(v, str):
+                        v = [ln.strip() for ln in v.splitlines() if ln.strip()]
+                    elif isinstance(v, list):
+                        v = [str(x).strip() for x in v if str(x).strip()]
+                    else:
+                        continue
+                    rec[k] = v
+                    cambiados.append(k)
+            if usuario:  # solo persiste si hay un usuario identificado (no el fallback de entorno sin registro)
+                users[usuario] = rec
+                config.set_users(users)
+            _audit("patterns", f"{usuario}: " + (", ".join(cambiados) or "(ninguno)"))
+            return _json({k: [str(x) for x in (rec.get(k) or [])] for k in _PATRONES_USUARIO})
         if sub == "/api/image" and method == "POST":
             cuerpo = _body(event)
             datos = cuerpo.get("image", "")
@@ -1881,7 +1908,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <div class="excl-pat">
      <label style="margin:0 0 6px">⛔ Auto-excluir por patrón de nombre</label>
-     <div class="hint" style="margin:0 0 8px">Un patrón por línea. Cualquier contacto cuyo nombre <b>contenga</b> un patrón (sin distinguir mayúsculas) queda excluido solo de los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>.</div>
+     <div class="hint" style="margin:0 0 8px">Un patrón por línea. Cualquier contacto cuyo nombre <b>contenga</b> un patrón (sin distinguir mayúsculas) queda excluido solo de los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>. Son <b>tus</b> patrones (por usuario); los envíos excluyen con la <b>unión</b> de los de todos los usuarios.</div>
      <textarea id="tg_excl_pat" style="min-height:62px" placeholder="FAM&#10;#"></textarea>
      <button style="margin-top:8px" onclick="saveExclPatterns('telegram')">Guardar patrones</button>
    </div>
@@ -1927,7 +1954,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <div class="excl-pat">
      <label style="margin:0 0 6px">⛔ Auto-excluir por patrón de nombre</label>
-     <div class="hint" style="margin:0 0 8px">Un patrón por línea. Cualquier contacto cuyo nombre <b>contenga</b> un patrón (sin distinguir mayúsculas) queda excluido solo de los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>.</div>
+     <div class="hint" style="margin:0 0 8px">Un patrón por línea. Cualquier contacto cuyo nombre <b>contenga</b> un patrón (sin distinguir mayúsculas) queda excluido solo de los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>. Son <b>tus</b> patrones (por usuario); los envíos excluyen con la <b>unión</b> de los de todos los usuarios.</div>
      <textarea id="wa_excl_pat" style="min-height:62px" placeholder="FAM&#10;#"></textarea>
      <button style="margin-top:8px" onclick="saveExclPatterns('whatsapp')">Guardar patrones</button>
    </div>
@@ -2263,16 +2290,24 @@ async function loadCfg(){ const c=await api('/api/config');
   if($('window_enabled')) $('window_enabled').checked = !!c.window_enabled;
   if($('mail_from')) $('mail_from').value=c.mail_from||'';
   if($('mail_status')) $('mail_status').textContent = c.resend_api_key_set ? '· API key configurada ✓' : '· sin API key (usa SNS)';
-  EXCL_PAT_TG=c.telegram_exclude_patterns||[]; WA_EXCL_PAT=c.whatsapp_exclude_patterns||[];
   EXCEPT_TG=new Set((c.telegram_pattern_exceptions||[]).map(String)); WA_EXCEPT=new Set((c.whatsapp_pattern_exceptions||[]).map(String));
-  if($('tg_excl_pat')) $('tg_excl_pat').value=EXCL_PAT_TG.join('\n');
-  if($('wa_excl_pat')) $('wa_excl_pat').value=WA_EXCL_PAT.join('\n');
+  loadPatterns();
   renderSendingState(c.sending_enabled!==false); }
+// Patrones de exclusión POR USUARIO: se cargan/guardan en /api/patterns (registro del usuario),
+// no en la config global. El envío real usa la UNIÓN de los patrones de todos los usuarios.
+async function loadPatterns(){
+  try{ const p=await api('/api/patterns');
+    EXCL_PAT_TG=p.telegram_exclude_patterns||[]; WA_EXCL_PAT=p.whatsapp_exclude_patterns||[];
+    if($('tg_excl_pat')) $('tg_excl_pat').value=EXCL_PAT_TG.join('\n');
+    if($('wa_excl_pat')) $('wa_excl_pat').value=WA_EXCL_PAT.join('\n');
+    try{render();}catch(e){} try{renderWa();}catch(e){}
+  }catch(e){}
+}
 async function saveExclPatterns(canal){
   const id = canal==='telegram' ? 'tg_excl_pat' : 'wa_excl_pat';
   const lines = ($(id).value||'').split('\n').map(s=>s.trim()).filter(Boolean);
-  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({[canal+'_exclude_patterns']:lines})});
-    toast('✓ Patrones guardados');
+  try{ await api('/api/patterns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({[canal+'_exclude_patterns']:lines})});
+    toast('✓ Tus patrones se guardaron');
     if(canal==='telegram'){ EXCL_PAT_TG=lines; try{render();}catch(e){} } else { WA_EXCL_PAT=lines; try{renderWa();}catch(e){} } }
   catch(e){ toast('Error al guardar',true); } }
 async function saveEmail(){ const b={ mail_from:($('mail_from').value||'').trim() };
@@ -2569,8 +2604,7 @@ function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length
 async function loadSubs(){ const [d,c]=await Promise.all([api('/api/subscribers'),api('/api/config')]);
   DEST=d.subscribers||[]; EXCLUDED=new Set((c.excluded_ids||[]).map(String));
   EXCEPT_TG=new Set((c.telegram_pattern_exceptions||[]).map(String));
-  EXCL_PAT_TG=c.telegram_exclude_patterns||[]; if($('tg_excl_pat')) $('tg_excl_pat').value=EXCL_PAT_TG.join('\n');
-  render(); }
+  loadPatterns(); render(); }
 function onSearch(){ FILTER=$('subsearch').value.trim(); PAGE=0; render(); }
 function prevPage(){ PAGE--; render(); }
 function nextPage(){ PAGE++; render(); }

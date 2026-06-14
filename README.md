@@ -156,11 +156,14 @@ API (Basic Auth) bajo `/admin/api/`: `config`, `subscribers`, `image`, `queue`, 
 - **Listas con nombre** por canal (`telegram_lists`/`whatsapp_lists`) + **modo** (`telegram_target`/
   `whatsapp_target`): `all` (todos), `only` (solo listas activas = whitelist), `except` (excluir = blacklist).
   Regla pura en `domain/recipients.py`. El envío manual a WhatsApp **exige** una lista (no manda a todos por error).
-- **Auto-exclusión por patrón de nombre** (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`, listas
-  de strings por canal): cualquier contacto cuyo **nombre contenga** un patrón (substring, sin distinguir
-  mayúsculas) se excluye solo de los envíos — p. ej. `FAM` para no enviar a la familia. Aplica también a la
-  selección ad-hoc (guardrail). Telegram: `domain/recipients.ids_excluidos_por_patron` (en modo bot no hay
-  nombres → no-op). WhatsApp: el servicio Node lo aplica en `resolverTargets` (recibe `exclude_patterns`).
+- **Auto-exclusión por patrón de nombre** (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`):
+  cualquier contacto cuyo **nombre contenga** un patrón (substring, sin distinguir mayúsculas) se excluye
+  solo de los envíos — p. ej. `FAM` para no enviar a la familia. Aplica también a la selección ad-hoc
+  (guardrail). **Son POR USUARIO**: cada usuario del panel guarda los suyos en su registro (`__users__`, vía
+  `/api/patterns`); el efectivo para los envíos es la **UNIÓN** de los patrones de todos los usuarios
+  (`ConfigStore.get()` los unifica con `union_ordenada`). Telegram: `domain/recipients.ids_excluidos_por_patron`
+  (en modo bot no hay nombres → no-op). WhatsApp: el servicio Node lo aplica en `resolverTargets`.
+  Se pueden **incluir excepciones** (global): un contacto que coincide pero se incluye igual.
 - **Interruptor maestro** (`sending_enabled`): pausa/activa TODOS los envíos. La **captura del canal nunca se
   detiene** — mientras está en pausa se crean planes EN ESPERA que salen al reactivar (la info no se pierde).
   Auto-pausa anti-baneo tras 2 lotes totalmente fallidos.
