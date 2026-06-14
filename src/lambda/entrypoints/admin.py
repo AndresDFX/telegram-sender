@@ -1921,7 +1921,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
      <button onclick="bulk('excluir')">Excluir marcados</button>
      <button onclick="bulk('incluir')">Incluir marcados</button>
-     <button class="sec" onclick="createListFromGrid('telegram')">➕ Crear lista con marcados</button>
+     <button class="sec" onclick="createListFromGrid('telegram')">➕ Lista con marcados</button>
+     <button class="sec" onclick="createListFromIncluded('telegram')">➕ Lista con incluidos</button>
      <button class="ghost" onclick="bulkFiltered('excluir')">Excluir filtrados</button>
      <button class="ghost" onclick="bulkFiltered('incluir')">Incluir filtrados</button>
    </div>
@@ -1967,7 +1968,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="sec" onclick="waToggleAll(false)">Desmarcar</button>
      <button onclick="waBulk('excluir')">Excluir marcados</button>
      <button onclick="waBulk('incluir')">Incluir marcados</button>
-     <button class="sec" onclick="createListFromGrid('whatsapp')">➕ Crear lista con marcados</button>
+     <button class="sec" onclick="createListFromGrid('whatsapp')">➕ Lista con marcados</button>
+     <button class="sec" onclick="createListFromIncluded('whatsapp')">➕ Lista con incluidos</button>
    </div>
    <div class="tbl-scroll"><table><thead><tr><th></th><th>nombre</th><th>estado</th></tr></thead><tbody id="wa_subs"></tbody></table></div>
    <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button class="sec" onclick="waPrev()">◀</button><span id="wa_pageinfo" class="hint"></span><button class="sec" onclick="waNext()">▶</button></div>
@@ -2349,15 +2351,20 @@ async function pendingSummary(){
 async function setSending(on){
   if(!on){ if(!(await confirmModal('¿Pausar TODOS los envíos (Telegram y WhatsApp)? Nada saldrá hasta que los reactives.',{okText:'Pausar envíos',danger:true}))){ renderSendingState(true); return; } }
   else {
+    toast('Calculando a quién se enviará…','info');
     const ps=await pendingSummary();
-    let msg='¿Activar los envíos? No hay nada en cola: los próximos mensajes se entregarán a tus contactos de forma gradual (anti-baneo).';
+    const {waOk}=await ensureContactsLoaded();
+    const tg=audienceFor('telegram'), wa=audienceFor('whatsapp');
+    const fmt=(emoji,canal,a,ok)=>{ if(ok===false) return emoji+' '+canal+': no se pudo calcular (abre Fuentes → '+canal+' para ver el detalle).';
+      const MAX=12, lista=a.names.slice(0,MAX).map(x=>'   • '+x).join('\n'), mas=a.names.length>MAX?('\n   …y '+(a.names.length-MAX)+' más'):'';
+      return emoji+' '+canal+' ('+a.mode+') — '+a.total+' contacto(s)'+(a.total?':\n'+lista+mas:' (nadie)'); };
+    let msg='Al ACTIVAR, los envíos saldrán a esta AUDIENCIA (según tu configuración actual):\n\n'
+      + fmt('✈️','Telegram',tg,true) + '\n\n' + fmt('🟢','WhatsApp',wa,waOk);
     if(ps.planes>0){
-      const ne = ps.envios>0 ? (' (~'+ps.envios.toLocaleString('es')+' envíos en total)') : '';
-      const MAX=15;
-      const lista = ps.items.slice(0,MAX).map((it,i)=>(i+1)+'. '+it.ch+' '+it.n+' → '+it.text).join('\n');
-      const mas = ps.items.length>MAX ? ('\n…y '+(ps.items.length-MAX)+' más.') : '';
-      msg='⚠️ Al ACTIVAR se enviará esto AHORA — '+ps.planes+' difusión(es)'+ne+':\n\n'+lista+mas+'\n\nEmpezarán a salir de forma gradual a tus contactos. Si no quieres enviar alguna, pausa y bórrala primero abajo en «Envíos fraccionados». ¿Activar los envíos?';
+      const ne = ps.envios>0 ? (' (~'+ps.envios.toLocaleString('es')+' envíos)') : '';
+      msg += '\n\n⚠️ Además hay '+ps.planes+' difusión(es) EN COLA'+ne+' que saldrán al activar (gestiónalas en «Envíos fraccionados»).';
     }
+    msg += '\n\n¿Activar los envíos?';
     if(!(await confirmModal(msg,{okText:'Activar envíos',danger:ps.planes>0}))){ renderSendingState(false); return; }
   }
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sending_enabled:on})});
@@ -2661,16 +2668,52 @@ async function saveLists(ch){ TGT[ch].mode=curMode(ch);
   const body=ch==='telegram'?{telegram_lists:LISTS.telegram,telegram_target:TGT.telegram}:{whatsapp_lists:LISTS.whatsapp,whatsapp_target:TGT.whatsapp};
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('✓ Listas guardadas'); loadCfg(); }
   catch(e){ toast('Error al guardar',true); } }
-async function createListFromGrid(ch){
-  const ids=selForChannel(ch);
-  if(!ids.length){ toast('Marca primero los contactos en el grid de arriba',true); return; }
-  const n=(await promptModal('Nombre de la nueva lista (con los '+ids.length+' contactos marcados):',{title:'Crear lista',placeholder:'Nombre de la lista',okText:'Crear'})||'').trim();
+// IDs INCLUIDOS (los que SÍ reciben: no excluidos manualmente ni por patrón) por canal.
+function includedIds(ch){
+  return ch==='telegram'
+    ? DEST.filter(s=>!isExcludedTg(s)).map(s=>String(s.chatId))
+    : WA_DEST.filter(c=>!isExcludedWa(c)).map(c=>String(c.id||'')).filter(Boolean);
+}
+async function crearListaCon(ch, ids, etiqueta){
+  if(!ids.length){ toast('No hay contactos '+etiqueta,true); return; }
+  const n=(await promptModal('Nombre de la nueva lista (con los '+ids.length+' contactos '+etiqueta+'):',{title:'Crear lista',placeholder:'Nombre de la lista',okText:'Crear'})||'').trim();
   if(!n) return;
   if(LISTS[ch].some(l=>l.name===n)){ toast('Ya existe una lista con ese nombre',true); return; }
   LISTS[ch].push({name:n, ids:[...new Set(ids.map(String))]});
   renderLists(ch);
   await saveLists(ch);
   toast('✓ Lista "'+n+'" creada con '+ids.length+' contactos');
+}
+async function createListFromGrid(ch){
+  const ids=selForChannel(ch);
+  if(!ids.length){ toast('Marca primero los contactos en el grid de arriba',true); return; }
+  await crearListaCon(ch, ids, 'marcados');
+}
+async function createListFromIncluded(ch){ await crearListaCon(ch, includedIds(ch), 'incluidos'); }
+// Audiencia EFECTIVA por canal (a quién se enviaría con la config actual): aplica modo
+// (todos/solo/excepto) + listas activas + exclusiones (manuales y por patrón). Devuelve nombres.
+function audienceFor(ch){
+  const dest = ch==='telegram'? DEST : WA_DEST;
+  const idOf = ch==='telegram'? (x=>String(x.chatId)) : (x=>String(x.id||''));
+  const nameOf = ch==='telegram'? (x=>x.name||x.phone||String(x.chatId||'')) : waName;
+  const isExc = ch==='telegram'? isExcludedTg : isExcludedWa;
+  const tgt = TGT[ch]||{mode:'all',lists:[]}; const mode=tgt.mode||'all';
+  const sel=new Set(); (LISTS[ch]||[]).forEach(l=>{ if((tgt.lists||[]).includes(l.name)) (l.ids||[]).forEach(x=>sel.add(String(x))); });
+  const inc=(dest||[]).filter(x=>{ const id=idOf(x);
+    if(isExc(x)) return false;
+    if(mode==='only') return sel.has(id);
+    if(mode==='except') return !sel.has(id);
+    return true; });
+  const lab = mode==='only'?('solo listas: '+((tgt.lists||[]).join(', ')||'ninguna')) : mode==='except'?('excepto listas: '+((tgt.lists||[]).join(', ')||'ninguna')) : 'todos';
+  return {mode:lab, total:inc.length, names:inc.map(nameOf)};
+}
+// Carga contactos si faltan (para poder resumir la audiencia). WhatsApp con timeout (puede dormir).
+async function ensureContactsLoaded(){
+  if(!DEST.length){ try{ const d=await api('/api/subscribers'); DEST=d.subscribers||[]; }catch(e){} }
+  try{ await loadPatterns(); }catch(e){}
+  let waOk=true;
+  if(!WA_DEST.length){ try{ const r=await Promise.race([api('/api/whatsapp/contacts'), new Promise((_,rej)=>setTimeout(()=>rej('t'),12000))]); WA_DEST=r.contacts||[]; }catch(e){ waOk=false; } }
+  return {waOk};
 }
 // --- contactos de WhatsApp (para armar listas de WhatsApp) ---
 let WA_DEST=[], WA_PAGE=0, WA_EXCLUDED=new Set(), WA_STATEF='', WA_EXCL_PAT=[], WA_EXCEPT=new Set();
