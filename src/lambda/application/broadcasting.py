@@ -310,16 +310,18 @@ class BroadcastList:
         # difusión programada). El envío MANUAL desde «Componer → Enviar» SIEMPRE sale: el usuario
         # lo pidió explícitamente. Por eso aquí NO se valida sending_enabled; el plan se marca
         # source="manual" para que el dispatcher y el worker lo dejen pasar aunque esté en pausa.
-        # WhatsApp manual EXIGE que el servicio esté CONECTADO: si se pide WhatsApp pero no está
-        # configurado/activo, fallamos RUIDOSAMENTE (no en silencio) para que se vea EN LA APP.
+        # WhatsApp manual EXIGE que el SERVICIO esté CONFIGURADO (URL + token). NO exigimos
+        # `whatsapp_enabled` (ese es el interruptor de auto-reenvío del canal): un envío manual es una
+        # acción explícita del usuario y debe poder salir aunque el auto-reenvío esté apagado. Si el
+        # servicio no está configurado, fallamos RUIDOSAMENTE (no en silencio). La liveness real
+        # (servicio caído/desconectado) la detecta el dispatcher y marca el job como fallido.
         if whatsapp:
-            wa_listo = bool(
-                self._whatsapp and cfg.get("whatsapp_enabled")
-                and cfg.get("whatsapp_service_url") and cfg.get("whatsapp_token")
+            wa_configurado = bool(
+                self._whatsapp and cfg.get("whatsapp_service_url") and cfg.get("whatsapp_token")
             )
-            if not wa_listo:
+            if not wa_configurado:
                 raise ValueError(
-                    "WhatsApp no está conectado: actívalo y conéctalo (Ajustes → WhatsApp) antes de elegirlo como canal."
+                    "WhatsApp no está configurado: conéctalo (Ajustes → WhatsApp: URL, token y QR) antes de elegirlo como canal."
                 )
         wa_on = bool(whatsapp and self._whatsapp)
         wa_mode, wa_ids = self._wa_destino(cfg, whatsapp_list, whatsapp_ids)

@@ -872,6 +872,12 @@ Resources:
                 Resource:
                   - !GetAtt SubscribersTable.Arn
                   - !Sub "${SubscribersTable.Arn}/index/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject # RE-FIRMAR la URL de la imagen de WhatsApp al despachar (si no, la
+                  # URL prefirmada va sin permiso de lectura → 403 al descargarla → no llega la imagen)
+                Resource:
+                  - !Sub "arn:aws:s3:::${LambdaCodeS3Bucket}/images/*"
 
   DispatcherFunction:
     Type: AWS::Lambda::Function

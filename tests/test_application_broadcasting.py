@@ -371,15 +371,16 @@ class SchedulerPathTests(unittest.TestCase):
         self.assertEqual(plans.creados[0]["image_key"], "images/abc.jpg")
         self.assertEqual(plans.creados[0]["wa_image_key"], "images/abc.jpg")
 
-    def test_manual_whatsapp_no_conectado_se_rechaza(self):
-        # Pedir WhatsApp sin el servicio conectado falla RUIDOSAMENTE (no en silencio).
-        cfg = FakeConfig(scheduling_enabled=True, whatsapp_enabled=False,
+    def test_manual_whatsapp_no_configurado_se_rechaza(self):
+        # Pedir WhatsApp sin el servicio CONFIGURADO (sin URL/token) falla RUIDOSAMENTE (no silencio).
+        # No depende de whatsapp_enabled (ese es el auto-reenvío del canal, no el envío manual).
+        cfg = FakeConfig(scheduling_enabled=True, whatsapp_service_url="", whatsapp_token="",
                          whatsapp_lists=[{"name": "c", "ids": ["57300@s.whatsapp.net"]}],
                          whatsapp_target={"mode": "only", "lists": ["c"]})
         bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, whatsapp=object(), plans=FakePlans())
         with self.assertRaises(ValueError) as ctx:
             bl.enviar_manual("hola", telegram=False, whatsapp=True, whatsapp_list="c")
-        self.assertIn("no está conectado", str(ctx.exception))
+        self.assertIn("no está configurado", str(ctx.exception))
 
     def test_manual_sin_destinatarios_se_rechaza_con_motivo(self):
         # Si los patrones excluyen a todos, el manual no "no envía en silencio": avisa la causa.
