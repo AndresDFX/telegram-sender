@@ -51,7 +51,6 @@ _CAMPOS_EDITABLES = (
     "strip_patterns",
     "whatsapp_footer",
     "image_url",
-    "excluded_ids",
     "send_mode",
     "bot_token",
     "telethon_api_id",
@@ -60,7 +59,6 @@ _CAMPOS_EDITABLES = (
     "whatsapp_enabled",
     "whatsapp_service_url",
     "whatsapp_token",
-    "whatsapp_excluded",
     "telegram_lists",
     "telegram_target",
     "whatsapp_lists",
@@ -80,17 +78,17 @@ _CAMPOS_EDITABLES = (
     # Correo transaccional (recuperación de contraseña vía Resend).
     "resend_api_key",
     "mail_from",
-    # NOTA: telegram_exclude_patterns/whatsapp_exclude_patterns NO van aquí: son POR USUARIO
-    # (se guardan en el registro del usuario vía /api/patterns; el efectivo es la unión). Quitarlos
-    # de aquí evita que un guardado de config los borre por accidente.
-    # Excepciones al patrón: ids que se incluyen aunque su nombre coincida (override manual; global).
-    "telegram_pattern_exceptions",
-    "whatsapp_pattern_exceptions",
+    # NOTA: la info de DESTINATARIOS (exclusiones, excepciones y patrones, ambos canales) NO va aquí:
+    # es POR USUARIO (se guarda en el registro del usuario vía /api/patterns; el efectivo para envíos
+    # es la unión de todos los usuarios). Quitarla de /api/config evita que un guardado la borre.
 )
-_LISTAS = ("strip_patterns", "excluded_ids", "whatsapp_excluded",
-           "telegram_pattern_exceptions", "whatsapp_pattern_exceptions")
-# Patrones de exclusión por usuario (se guardan en __users__, no en la config global).
-_PATRONES_USUARIO = ("telegram_exclude_patterns", "whatsapp_exclude_patterns")
+_LISTAS = ("strip_patterns",)
+# Info de destinatarios POR USUARIO (se guarda en __users__, no en la config global; el envío usa la unión).
+_PER_USER = (
+    "telegram_exclude_patterns", "whatsapp_exclude_patterns",
+    "excluded_ids", "whatsapp_excluded",
+    "telegram_pattern_exceptions", "whatsapp_pattern_exceptions",
+)
 _LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
 _TARGETS = ("telegram_target", "whatsapp_target")
 _FLOATS = ("tg_delay_min", "tg_delay_max")
@@ -557,16 +555,16 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             _audit("config", "campos: " + (", ".join(sorted(cambios.keys())) or "(ninguno)"))
             return _json(config.set(cambios))
         if sub == "/api/patterns" and method == "GET":
-            # Patrones de exclusión del USUARIO actual (se guardan en su registro, no en la config global).
+            # Info de destinatarios del USUARIO actual (se guarda en su registro, no en la config global).
             u = (config.get_users() or {}).get(_usuario_actual(event)) or {}
-            return _json({k: [str(x) for x in (u.get(k) or [])] for k in _PATRONES_USUARIO})
+            return _json({k: [str(x) for x in (u.get(k) or [])] for k in _PER_USER})
         if sub == "/api/patterns" and method == "POST":
             cuerpo = _body(event)
             usuario = _usuario_actual(event)
             users = config.get_users() or {}
             rec = dict(users.get(usuario) or {})
             cambiados = []
-            for k in _PATRONES_USUARIO:
+            for k in _PER_USER:
                 if k in cuerpo:
                     v = cuerpo.get(k)
                     if isinstance(v, str):
@@ -580,8 +578,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             if usuario:  # solo persiste si hay un usuario identificado (no el fallback de entorno sin registro)
                 users[usuario] = rec
                 config.set_users(users)
-            _audit("patterns", f"{usuario}: " + (", ".join(cambiados) or "(ninguno)"))
-            return _json({k: [str(x) for x in (rec.get(k) or [])] for k in _PATRONES_USUARIO})
+            _audit("destinatarios", f"{usuario}: " + (", ".join(cambiados) or "(ninguno)"))
+            return _json({k: [str(x) for x in (rec.get(k) or [])] for k in _PER_USER})
         if sub == "/api/image" and method == "POST":
             cuerpo = _body(event)
             datos = cuerpo.get("image", "")
@@ -2280,7 +2278,7 @@ async function loadCfg(){ const c=await api('/api/config');
   $('strip_patterns').value=(c.strip_patterns||[]).join('\n');
   $('whatsapp_enabled').checked=!!c.whatsapp_enabled; $('whatsapp_service_url').value=c.whatsapp_service_url||'';
   $('wa_tok_status').textContent = c.whatsapp_token_set ? '· configurado ✓' : '· no configurado';
-  WA_EXCLUDED=new Set((c.whatsapp_excluded||[]).map(String)); if($('wa_subs')) renderWa();
+  if($('wa_subs')) renderWa();
   LISTS.telegram=c.telegram_lists||[]; TGT.telegram=c.telegram_target||{mode:'all',lists:[]};
   LISTS.whatsapp=c.whatsapp_lists||[]; TGT.whatsapp=c.whatsapp_target||{mode:'all',lists:[]};
   renderLists('telegram'); renderLists('whatsapp');
@@ -2290,14 +2288,16 @@ async function loadCfg(){ const c=await api('/api/config');
   if($('window_enabled')) $('window_enabled').checked = !!c.window_enabled;
   if($('mail_from')) $('mail_from').value=c.mail_from||'';
   if($('mail_status')) $('mail_status').textContent = c.resend_api_key_set ? '· API key configurada ✓' : '· sin API key (usa SNS)';
-  EXCEPT_TG=new Set((c.telegram_pattern_exceptions||[]).map(String)); WA_EXCEPT=new Set((c.whatsapp_pattern_exceptions||[]).map(String));
   loadPatterns();
   renderSendingState(c.sending_enabled!==false); }
-// Patrones de exclusión POR USUARIO: se cargan/guardan en /api/patterns (registro del usuario),
-// no en la config global. El envío real usa la UNIÓN de los patrones de todos los usuarios.
+// Info de DESTINATARIOS por usuario (patrones, excepciones y exclusiones manuales, ambos canales):
+// se carga/guarda en /api/patterns (registro del usuario), no en la config global. El envío real
+// usa la UNIÓN de todos los usuarios; el panel muestra LO TUYO.
 async function loadPatterns(){
   try{ const p=await api('/api/patterns');
     EXCL_PAT_TG=p.telegram_exclude_patterns||[]; WA_EXCL_PAT=p.whatsapp_exclude_patterns||[];
+    EXCLUDED=new Set((p.excluded_ids||[]).map(String)); WA_EXCLUDED=new Set((p.whatsapp_excluded||[]).map(String));
+    EXCEPT_TG=new Set((p.telegram_pattern_exceptions||[]).map(String)); WA_EXCEPT=new Set((p.whatsapp_pattern_exceptions||[]).map(String));
     if($('tg_excl_pat')) $('tg_excl_pat').value=EXCL_PAT_TG.join('\n');
     if($('wa_excl_pat')) $('wa_excl_pat').value=WA_EXCL_PAT.join('\n');
     try{render();}catch(e){} try{renderWa();}catch(e){}
@@ -2601,16 +2601,15 @@ function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length
       `<td><b>${bcEsc(label)}</b><div class="hint" style="margin-top:2px;font-size:11px">${bcEsc(s.phone||s.chatId||'')}</div></td>`+
       `<td>${pill}</td>`;
     t.appendChild(tr); }); }
-async function loadSubs(){ const [d,c]=await Promise.all([api('/api/subscribers'),api('/api/config')]);
-  DEST=d.subscribers||[]; EXCLUDED=new Set((c.excluded_ids||[]).map(String));
-  EXCEPT_TG=new Set((c.telegram_pattern_exceptions||[]).map(String));
-  loadPatterns(); render(); }
+async function loadSubs(){ const d=await api('/api/subscribers');
+  DEST=d.subscribers||[];
+  loadPatterns(); render(); }  // EXCLUDED/EXCEPT/patrones son por-usuario (loadPatterns vía /api/patterns)
 function onSearch(){ FILTER=$('subsearch').value.trim(); PAGE=0; render(); }
 function prevPage(){ PAGE--; render(); }
 function nextPage(){ PAGE++; render(); }
 function toggleAll(v){ document.querySelectorAll('.selrow').forEach(c=>c.checked=v); $('selall').checked=v; }
 function selectedIds(){ return [...document.querySelectorAll('.selrow:checked')].map(c=>String(c.dataset.id)); }
-async function persistExcluded(){ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({excluded_ids:[...EXCLUDED],telegram_pattern_exceptions:[...EXCEPT_TG]})}); render(); loadCfg(); }
+async function persistExcluded(){ await api('/api/patterns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({excluded_ids:[...EXCLUDED],telegram_pattern_exceptions:[...EXCEPT_TG]})}); render(); }
 // Incluir un id que coincide con un patrón crea una EXCEPCIÓN (se envía pese al patrón).
 function tgInclExcl(id,accion){
   if(accion==='excluir'){ EXCLUDED.add(id); EXCEPT_TG.delete(id); }
@@ -2695,7 +2694,7 @@ function renderWa(){ const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.le
   $('wa_pageinfo').textContent=f.length?`página ${WA_PAGE+1} de ${pages}`:'sin resultados'; }
 function waSelectedIds(){ return [...document.querySelectorAll('.wsel:checked')].map(c=>String(c.dataset.id)); }
 function waToggleAll(v){ document.querySelectorAll('.wsel').forEach(c=>c.checked=v); }
-async function persistWaExcluded(){ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({whatsapp_excluded:[...WA_EXCLUDED],whatsapp_pattern_exceptions:[...WA_EXCEPT]})}); renderWa(); loadCfg(); }
+async function persistWaExcluded(){ await api('/api/patterns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({whatsapp_excluded:[...WA_EXCLUDED],whatsapp_pattern_exceptions:[...WA_EXCEPT]})}); renderWa(); }
 async function waBulk(accion){ const ids=waSelectedIds(); if(!ids.length){ toast('Marca al menos un contacto',true); return; }
   ids.forEach(id=>{
     if(accion==='excluir'){ WA_EXCLUDED.add(id); WA_EXCEPT.delete(id); }

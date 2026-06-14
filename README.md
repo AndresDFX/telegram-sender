@@ -159,11 +159,15 @@ API (Basic Auth) bajo `/admin/api/`: `config`, `subscribers`, `image`, `queue`, 
 - **Auto-exclusión por patrón de nombre** (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`):
   cualquier contacto cuyo **nombre contenga** un patrón (substring, sin distinguir mayúsculas) se excluye
   solo de los envíos — p. ej. `FAM` para no enviar a la familia. Aplica también a la selección ad-hoc
-  (guardrail). **Son POR USUARIO**: cada usuario del panel guarda los suyos en su registro (`__users__`, vía
-  `/api/patterns`); el efectivo para los envíos es la **UNIÓN** de los patrones de todos los usuarios
-  (`ConfigStore.get()` los unifica con `union_ordenada`). Telegram: `domain/recipients.ids_excluidos_por_patron`
-  (en modo bot no hay nombres → no-op). WhatsApp: el servicio Node lo aplica en `resolverTargets`.
-  Se pueden **incluir excepciones** (global): un contacto que coincide pero se incluye igual.
+  (guardrail). Telegram: `domain/recipients.ids_excluidos_por_patron` (en modo bot no hay nombres → no-op);
+  WhatsApp: el servicio Node lo aplica en `resolverTargets`. Se pueden **incluir excepciones**: un contacto
+  que coincide pero se incluye igual.
+- **Info de destinatarios POR USUARIO**: TODO lo de "a quién enviar" — patrones de exclusión, excepciones y
+  exclusiones manuales (`excluded_ids`/`whatsapp_excluded`, ambos canales) — se guarda en el **registro del
+  usuario** (`__users__`, vía `/api/patterns`), no en la config global. El efectivo para los envíos es la
+  **UNIÓN** de todos los usuarios (`ConfigStore.get()` los unifica con `union_ordenada`); el panel muestra
+  LO TUYO. Así no se pierden al guardar otra config (no pasan por `/api/config`). La infraestructura
+  compartida (tokens, sesión, canal fuente, markup, listas, interruptor, anti-baneo, ventana) sigue **global**.
 - **Interruptor maestro** (`sending_enabled`): pausa/activa TODOS los envíos. La **captura del canal nunca se
   detiene** — mientras está en pausa se crean planes EN ESPERA que salen al reactivar (la info no se pierde).
   Auto-pausa anti-baneo tras 2 lotes totalmente fallidos.
