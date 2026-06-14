@@ -1533,7 +1533,9 @@ img.preview{box-shadow:var(--sh-sm)}
 tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .tbl-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
 .tbl-toolbar .grow{flex:1}
-.bc-err{color:var(--bad);font-size:11px;margin-top:4px;line-height:1.35;max-width:240px;cursor:help}
+.bc-err{color:var(--bad);font-size:11px;margin-top:4px;line-height:1.35;max-width:240px;cursor:pointer;border-bottom:1px dotted rgba(255,107,90,.5);display:inline-block}
+.bc-err:hover{color:#ff8f7d}
+.bc-err:focus-visible{outline:2px solid var(--ac2);outline-offset:2px;border-radius:3px}
 /* Sistema de modales reutilizable (reemplaza confirm()/prompt() nativos por diálogos de marca) */
 .ds-overlay{position:fixed;inset:0;background:rgba(0,0,0,.66);display:flex;align-items:center;justify-content:center;z-index:1300;padding:20px;animation:dsFade .14s ease}
 @keyframes dsFade{from{opacity:0}to{opacity:1}}
@@ -1829,7 +1831,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <label class="chan tg on" id="bc_chan_tg"><span class="dot"></span><input type="checkbox" id="bc_telegram" checked onchange="bcChan()" style="display:none">✈️ Telegram</label>
      <label class="chan wa" id="bc_chan_wa"><span class="dot"></span><input type="checkbox" id="bc_whatsapp" onchange="bcChan()" style="display:none">🟢 WhatsApp</label>
    </div>
-   <div class="hint">⚠️ El envío masivo por WhatsApp puede banear tu número. El sistema lo hace con ritmo lento (anti-baneo); úsalo con listas pequeñas.</div>
+   <div class="hint" id="bc_wa_warn" style="display:none">⚠️ El envío masivo por WhatsApp puede banear tu número. El sistema lo hace con ritmo lento (anti-baneo); úsalo con listas pequeñas.</div>
 
    <label style="margin-top:16px">Enviar a</label>
    <div class="row">
@@ -2431,7 +2433,9 @@ else if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('logi
 
 // ===== Componer y enviar (POST /api/broadcast) =====
 let BC_IMG_URL = '';           // URL devuelta tras subir un archivo a /api/image
-function bcCount(){ const n=$('bc_text').value.length; $('bc_count').textContent=n+(n===1?' carácter':' caracteres'); }
+function bcCount(){ const n=$('bc_text').value.length, el=$('bc_count');
+  el.textContent = n>4096 ? (n+' / 4096 · supera el límite de Telegram') : (n+(n===1?' carácter':' caracteres'));
+  el.dataset.near = (n>3600 && n<=4096) ? '1':'0'; el.dataset.over = n>4096 ? '1':'0'; }
 // --- selección de contactos (picker) en el compositor ---
 let BC_TG_SEL=new Set(), BC_WA_SEL=new Set();
 function bcSel(ch){ return ch==='tg'?BC_TG_SEL:BC_WA_SEL; }
@@ -2455,6 +2459,7 @@ function bcChan(){
   $('bc_chan_wa').classList.toggle('on', wa);
   $('bc_tg_wrap').style.display = tg ? 'block':'none';
   $('bc_wa_wrap').style.display = wa ? 'block':'none';
+  { const w=$('bc_wa_warn'); if(w) w.style.display = wa ? 'block':'none'; }
   if(wa && !WA_DEST.length){ loadWaContacts().then(()=>bcRenderPick('wa')); }
   bcRenderPick('tg'); bcRenderPick('wa'); bcPrev();
 }
@@ -2523,6 +2528,7 @@ async function sendBroadcast(){
   const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked;
   if(!text && !bcEffectiveUrl()){ toast('Escribe un mensaje o adjunta una imagen',true); return; }
   if(!tg && !wa){ toast('Elige al menos un canal',true); return; }
+  if(text.length>4096){ toast('El mensaje supera el límite de Telegram (4096 caracteres)',true); $('bc_text').focus(); return; }
   const body=bcBody({ text });
   const url=bcEffectiveUrl(); if(url) body.image_url=url;
   // Programación opcional: datetime-local -> epoch (s). Vacío = enviar ya.
@@ -2555,7 +2561,9 @@ function bcEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;
 // ===== Mensajes programados (módulo /api/schedules) =====
 const SG_DAYNAMES=['L','M','X','J','V','S','D'];  // 0=lunes .. 6=domingo
 let SG_DAYS=new Set();
-function sgCount(){ const n=$('sg_text').value.length; $('sg_count').textContent=n+(n===1?' carácter':' caracteres'); }
+function sgCount(){ const n=$('sg_text').value.length, el=$('sg_count');
+  el.textContent = n>4096 ? (n+' / 4096 · supera el límite de Telegram') : (n+(n===1?' carácter':' caracteres'));
+  el.dataset.near = (n>3600 && n<=4096) ? '1':'0'; el.dataset.over = n>4096 ? '1':'0'; }
 function sgFillLists(){
   const fill=(sel,arr,first)=>{ if(!sel) return; const cur=sel.value;
     sel.innerHTML='<option value="">'+first+'</option>'+(arr||[]).map(l=>`<option value="${bcEsc(l.name)}">${bcEsc(l.name)} (${(l.ids||[]).length})</option>`).join('');
@@ -2653,10 +2661,16 @@ function bcRow(b){
     `<td class="selcol"><input type="checkbox" class="bcsel" data-id="${b.id}" onchange="bcSelChanged()"></td>`+
     `<td class="bc-msg"><b title="${bcEsc(txt)}">${bcEsc(txt)}</b>`+
       `<div class="bc-meta"><span class="bc-src">${bcEsc(b.source||'manual')}</span><span>${bcFmtTime(b.created_at)}</span></div></td>`+
-    `<td><span class="pill ${st}">${bcEsc(label)}</span>${b.last_error?`<div class="bc-err" title="${bcEsc((b.error_reasons||[]).join('  |  ')||b.last_error)}">⚠ ${bcEsc(String(b.last_error).slice(0,72))}</div>`:''}</td>`+
+    `<td><span class="pill ${st}">${bcEsc(label)}</span>${b.last_error?`<div class="bc-err" role="button" tabindex="0" onclick="bcErrDetail(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcErrDetail(this)}" data-err="${bcEsc((b.error_reasons||[]).join('\n')||b.last_error)}" title="Ver detalle del error">⚠ ${bcEsc(String(b.last_error).slice(0,72))} ›</div>`:''}</td>`+
     `<td><div class="chprog">${bcChanCell(false,b.telegram)}${bcChanCell(true,b.whatsapp)}</div></td>`+
     `<td style="text-align:right;white-space:nowrap"><button class="danger" style="padding:4px 9px" title="Borrar definitivamente" onclick="bcDelete('${b.id}')">🗑</button></td>`;
   return tr;
+}
+function bcErrDetail(el){
+  const raw=(el.getAttribute('data-err')||'').trim();
+  const lines=raw.split('\n').filter(Boolean);
+  const body = lines.length>1 ? lines.map((l,i)=>(i+1)+'. '+l).join('\n') : (raw||'Sin detalle disponible.');
+  alertModal(body,{title:'Detalle del error',danger:true});
 }
 async function loadBroadcasts(){
   { const _b=$('bc_rows'); if(_b && !_b.children.length) skelTable('bc_rows',5,4); }
