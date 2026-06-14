@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 
 from application.ports import ImageStore
 
@@ -24,7 +25,9 @@ class S3ImageStore(ImageStore):
     def guardar(self, data: bytes, content_type: str = "image/jpeg") -> str:
         if not self._bucket:
             raise RuntimeError("IMAGES_BUCKET no configurado")
-        key = f"{self._prefix}broadcast.{_EXT.get(content_type, 'jpg')}"
+        # Clave ÚNICA por subida: evita que una imagen nueva (compositor o Configuración) pise el
+        # objeto de un envío aún en curso/diferido. La URL se re-firma al despachar (no se congela).
+        key = f"{self._prefix}{uuid.uuid4().hex}.{_EXT.get(content_type, 'jpg')}"
         self._client().put_object(Bucket=self._bucket, Key=key, Body=data, ContentType=content_type)
         return key
 

@@ -35,6 +35,7 @@ class DispatchCampaigns:
         broadcasts_table: str | None = None,
         stale_seconds: int = 900,
         now=time.time,
+        image_store=None,
     ) -> None:
         self._plans = plans
         self._broadcasts = broadcasts
@@ -44,6 +45,9 @@ class DispatchCampaigns:
         self._broadcasts_table = broadcasts_table or os.environ.get("BROADCASTS_TABLE")
         self._stale = stale_seconds
         self._now = now
+        # Para RE-FIRMAR la URL de imagen de WhatsApp justo antes de enviar (las prefirmadas
+        # caducan en 1h y un envío diferido las dejaría muertas). Telegram ya re-firma en el worker.
+        self._image_store = image_store
 
     def __call__(self) -> dict:
         cfg = self._config.get()
@@ -153,9 +157,17 @@ class DispatchCampaigns:
                 if not self._plans.registrar_dispatch(pid, channel="wa", index=wa_next, n=limit, target=target, now=now):
                     logger.info("Plan %s cancelado en carrera; no se despacha WA#%d", pid, wa_next)
                     return {"plan": pid, "cancelado": True}
-                self._whatsapp.forward(
+                # RE-FIRMA la URL de imagen desde su clave S3 (la prefirmada del plan pudo caducar).
+                wa_img = plan.get("wa_image_url") or None
+                wa_key = plan.get("wa_image_key")
+                if wa_key and self._image_store:
+                    try:
+                        wa_img = self._image_store.url_temporal(wa_key)
+                    except Exception:
+                        logger.exception("No se pudo re-firmar la imagen WhatsApp del plan %s", pid)
+                res = self._whatsapp.forward(
                     plan.get("wa_text", "") or plan.get("text", ""),
-                    plan.get("wa_image_url") or None,
+                    wa_img,
                     plan.get("wa_exclude", []),
                     mode=plan.get("wa_mode", "all"),
                     list_ids=plan.get("wa_list_ids", []),
@@ -169,6 +181,17 @@ class DispatchCampaigns:
                     exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
                     pattern_exceptions=cfg.get("whatsapp_pattern_exceptions", []),
                 )
+                # RC-C: si el servicio NO aceptó (no conectado/URL/token), marcamos el job como
+                # fallido y registramos la causa, en vez de dejar el contador colgado en silencio.
+                if not (isinstance(res, dict) and res.get("accepted")):
+                    logger.warning("Plan %s: WhatsApp no aceptó WA#%d (%s)", pid, wa_next, res)
+                    if bid:
+                        try:
+                            self._broadcasts.marcar_whatsapp_fallido(bid)
+                            self._broadcasts.registrar_error(bid, "WhatsApp — el servicio no aceptó el envío (¿conectado/URL/token?)")
+                        except Exception:
+                            logger.exception("No se pudo marcar WhatsApp fallido del plan %s", pid)
+                    return {"plan": pid, "wa_no_aceptado": True}
                 logger.info("Plan %s: despachado WA#%d (offset %d, %d destinatarios)", pid, wa_next, offset, limit)
                 return {"plan": pid, "despachado": f"WA#{wa_next}", "n": limit}
 

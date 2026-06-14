@@ -657,10 +657,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             if not raw_img:
                 return _json({"error": "imagen vacía"}, 400)
             key = image_store.guardar(raw_img, cuerpo.get("content_type", "image/jpeg"))
-            config.set({"image_key": key})
+            # La imagen del COMPOSITOR (scope="compose") NO debe pisar la imagen por defecto de
+            # Configuración: solo esa última actualiza config.image_key.
+            if str(cuerpo.get("scope", "")) != "compose":
+                config.set({"image_key": key})
             url = ""
             try:
-                url = image_store.url_temporal(key)  # para adjuntarla en un envío manual
+                url = image_store.url_temporal(key)  # para previsualizarla / adjuntarla en un envío manual
             except Exception:
                 logger.exception("No se pudo firmar la imagen subida")
             return _json({"ok": True, "key": key, "url": url})
@@ -776,6 +779,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             a_tg = bool(cuerpo.get("telegram"))
             a_wa = bool(cuerpo.get("whatsapp"))
             img = str(cuerpo.get("image_url", "")).strip()
+            # image_key (clave S3 de una imagen SUBIDA): se propaga al plan para RE-FIRMAR la URL al
+            # despachar (las prefirmadas caducan en 1h; un envío diferido las dejaría muertas).
+            img_key = str(cuerpo.get("image_key", "")).strip()
+            if img_key and not img_key.startswith("images/"):
+                img_key = ""  # solo aceptamos claves de nuestro bucket de imágenes
             if not texto:
                 return _json({"error": "texto requerido"}, 400)
             if len(texto) > 4096:  # límite de Telegram; evita que falle en cada destinatario
@@ -803,6 +811,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     telegram_ids=_ids("telegram_ids"),
                     whatsapp_ids=_ids("whatsapp_ids"),
                     scheduled_at=sched or None,
+                    image_key=img_key or None,
                 )
             except ValueError as e:
                 # Auditamos el RECHAZO para que se vea EN LA APP por qué un envío "no salió"
@@ -2151,7 +2160,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
 
    <label style="margin-top:16px">Canales</label>
    <div class="chan-row">
-     <label class="chan tg on" id="bc_chan_tg"><span class="dot"></span><input type="checkbox" id="bc_telegram" checked onchange="bcChan()" style="display:none"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</label>
+     <label class="chan tg" id="bc_chan_tg"><span class="dot"></span><input type="checkbox" id="bc_telegram" onchange="bcChan()" style="display:none"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</label>
      <label class="chan wa" id="bc_chan_wa"><span class="dot"></span><input type="checkbox" id="bc_whatsapp" onchange="bcChan()" style="display:none"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</label>
    </div>
    <div class="hint" id="bc_wa_warn" style="display:none">⚠️ El envío masivo por WhatsApp puede banear tu número. El sistema lo hace con ritmo lento (anti-baneo); úsalo con listas pequeñas.</div>
@@ -3008,7 +3017,8 @@ if(CRED && !sessionFresca()){ logout(); }
 else if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } else { logout(); } }).catch(()=>{}); }
 
 // ===== Componer y enviar (POST /api/broadcast) =====
-let BC_IMG_URL = '';           // URL devuelta tras subir un archivo a /api/image
+let BC_IMG_URL = '';           // URL (solo preview) devuelta tras subir un archivo a /api/image
+let BC_IMG_KEY = '';           // clave S3 de la imagen subida (se re-firma al despachar)
 function bcCount(){ const n=$('bc_text').value.length, el=$('bc_count');
   el.textContent = n>4096 ? (n+' / 4096 · supera el límite de Telegram') : (n+(n===1?' carácter':' caracteres'));
   el.dataset.near = (n>3600 && n<=4096) ? '1':'0'; el.dataset.over = n>4096 ? '1':'0'; }
@@ -3082,8 +3092,11 @@ async function bcUploadImg(){
   const r=new FileReader();
   r.onload=async()=>{ const b64=r.result.split(',')[1];
     try{
-      const res=await api('/api/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:b64,content_type:f.type})});
-      BC_IMG_URL = res.url || res.image_url || '';   // si el backend devuelve URL pública la usamos
+      // scope=compose: NO pisa la imagen por defecto de Configuración. Guardamos la KEY (no la URL)
+      // para que el envío RE-FIRME la imagen al despachar (la prefirmada caduca en 1h).
+      const res=await api('/api/image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:b64,content_type:f.type,scope:'compose'})});
+      BC_IMG_URL = res.url || res.image_url || '';   // solo para previsualizar
+      BC_IMG_KEY = res.key || '';                    // se envía al backend para re-firmar al despachar
       $('bc_imgprev').src=r.result; $('bc_imgprev').style.display='block';
       $('bc_status').textContent=''; toast('✓ Imagen lista');
     }catch(e){ $('bc_status').textContent=''; toast('Error al subir imagen',true); }
@@ -3091,7 +3104,7 @@ async function bcUploadImg(){
   r.readAsDataURL(f);
 }
 function bcClear(){
-  $('bc_text').value=''; $('bc_image_url').value=''; BC_IMG_URL='';
+  $('bc_text').value=''; $('bc_image_url').value=''; BC_IMG_URL=''; BC_IMG_KEY='';
   $('bc_imgfile').value=''; $('bc_imgprev').style.display='none'; $('bc_imgprev').removeAttribute('src');
   BC_TG_SEL.clear(); BC_WA_SEL.clear();
   $('bc_tg_search').value=''; $('bc_wa_search').value=''; $('bc_tg_list').value=''; $('bc_wa_list').value='';
@@ -3107,10 +3120,14 @@ async function sendBroadcast(){
   if(text.length>4096){ toast('El mensaje supera el límite de Telegram (4096 caracteres)',true); $('bc_text').focus(); return; }
   const body=bcBody({ text });
   const url=bcEffectiveUrl(); if(url) body.image_url=url;
+  if(BC_IMG_KEY) body.image_key=BC_IMG_KEY;   // clave S3: el backend re-firma la imagen al despachar
   // Programación opcional: datetime-local -> epoch (s). Vacío = enviar ya.
   let ep=0; const sv=$('bc_sched')?$('bc_sched').value:'';
   if(sv){ ep=Math.floor(new Date(sv).getTime()/1000); if(ep>Math.floor(Date.now()/1000)) body.scheduled_at=ep; else { toast('La fecha programada debe ser futura',true); return; } }
+  // Canales EXPLÍCITOS en la confirmación: que se vea si saldrá por Telegram, WhatsApp o ambos.
+  const chs=[tg&&'Telegram', wa&&'WhatsApp'].filter(Boolean).join(' + ');
   let msg = body.scheduled_at ? ('¿Programar este envío para '+new Date(sv).toLocaleString('es')+'?') : '¿Enviar este mensaje ahora?';
+  msg += '\n\nSe enviará por: '+chs+'.';
   if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
   if(!await confirmModal(msg,{okText:'Enviar'})) return;
   const btn=$('bc_send'); btn.disabled=true; btn.classList.add('btn-loading'); $('bc_status').textContent='guardando...';

@@ -82,6 +82,7 @@ class BroadcastList:
         wa_list_ids,
         wa_text: str,
         wa_image_url: str | None,
+        wa_image_key: str | None = None,
         not_before: int = 0,
         source: str = "channel",
     ) -> None:
@@ -108,6 +109,7 @@ class BroadcastList:
             wa_exclude=wa_exclude,
             wa_text=wa_text,
             wa_image_url=wa_image_url,
+            wa_image_key=wa_image_key,
             not_before=int(not_before or 0),
             source=source,
         )
@@ -219,6 +221,7 @@ class BroadcastList:
                 image_url=cfg.get("image_url") or None, image_key=cfg.get("image_key") or None,
                 clientes=clientes, tg_on=True, wa_on=wa_on, wa_mode=wa_mode, wa_list_ids=wa_list_ids,
                 wa_text=mensaje, wa_image_url=self._image_url_para_whatsapp(cfg),
+                wa_image_key=cfg.get("image_key") or None,
             )
             estado = "PROGRAMADA" if habilitado else "EN ESPERA (envíos pausados)"
             logger.info("Difusión %s %s (fraccionada) para %d clientes", bid, estado, len(clientes))
@@ -294,15 +297,30 @@ class BroadcastList:
         telegram_ids=None,
         whatsapp_ids=None,
         scheduled_at: int | None = None,
+        image_key: str | None = None,
     ) -> dict:
         """Envía un mensaje propio (texto tal cual) por los canales elegidos. Destinatarios:
         contactos ad-hoc elegidos (telegram_ids/whatsapp_ids) > lista (telegram_list/whatsapp_list)
-        > target configurado. WhatsApp manual EXIGE destinatarios concretos (no manda a todos)."""
+        > target configurado. WhatsApp manual EXIGE destinatarios concretos (no manda a todos).
+        ``image_key`` (clave S3 de la imagen subida) se propaga al plan para RE-FIRMAR la URL al
+        despachar: las URL prefirmadas caducan en 1h y un envío fraccionado/programado las dejaría
+        muertas (la imagen no llegaría)."""
         cfg = self._config.get()
         # La PAUSA (interruptor maestro) solo frena los envíos AUTOMÁTICOS (captura del canal y
         # difusión programada). El envío MANUAL desde «Componer → Enviar» SIEMPRE sale: el usuario
         # lo pidió explícitamente. Por eso aquí NO se valida sending_enabled; el plan se marca
         # source="manual" para que el dispatcher y el worker lo dejen pasar aunque esté en pausa.
+        # WhatsApp manual EXIGE que el servicio esté CONECTADO: si se pide WhatsApp pero no está
+        # configurado/activo, fallamos RUIDOSAMENTE (no en silencio) para que se vea EN LA APP.
+        if whatsapp:
+            wa_listo = bool(
+                self._whatsapp and cfg.get("whatsapp_enabled")
+                and cfg.get("whatsapp_service_url") and cfg.get("whatsapp_token")
+            )
+            if not wa_listo:
+                raise ValueError(
+                    "WhatsApp no está conectado: actívalo y conéctalo (Ajustes → WhatsApp) antes de elegirlo como canal."
+                )
         wa_on = bool(whatsapp and self._whatsapp)
         wa_mode, wa_ids = self._wa_destino(cfg, whatsapp_list, whatsapp_ids)
         if wa_on and (wa_mode != "only" or not wa_ids):
@@ -329,16 +347,16 @@ class BroadcastList:
 
         if self._usar_scheduler(cfg):
             self._crear_plan(
-                bid, cfg=cfg, text=text, image_url=image_url or None, image_key=None,
+                bid, cfg=cfg, text=text, image_url=image_url or None, image_key=image_key or None,
                 clientes=clientes, tg_on=bool(telegram), wa_on=wa_on, wa_mode=wa_mode, wa_list_ids=wa_ids,
-                wa_text=text, wa_image_url=image_url or None, not_before=int(scheduled_at or 0),
-                source="manual",
+                wa_text=text, wa_image_url=image_url or None, wa_image_key=image_key or None,
+                not_before=int(scheduled_at or 0), source="manual",
             )
             return {"scheduled": True, "broadcast_id": bid, "channels": channels,
                     "telegram_total": len(clientes), "not_before": int(scheduled_at or 0)}
 
         if telegram:
-            self._queue.encolar(text, clientes, image_url=image_url or None, image_key=None, broadcast_id=bid)
+            self._queue.encolar(text, clientes, image_url=image_url or None, image_key=image_key or None, broadcast_id=bid)
         if wa_on:
             self._forward_whatsapp(cfg, text, image_url or None, bid, wa_mode, wa_ids)
         return {"broadcast_id": bid, "channels": channels, "telegram_total": len(clientes)}

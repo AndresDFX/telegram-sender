@@ -722,6 +722,7 @@ class DynamoDbPlanStore:
         wa_exclude: list[str] | None = None,
         wa_text: str | None = None,
         wa_image_url: str | None = None,
+        wa_image_key: str | None = None,
         not_before: int = 0,
         ttl_days: int = 30,
         source: str = "channel",
@@ -760,6 +761,7 @@ class DynamoDbPlanStore:
             "wa_exclude": [str(x) for x in (wa_exclude or [])],
             "wa_text": wa_text if wa_text is not None else text,
             "wa_image_url": wa_image_url or "",
+            "wa_image_key": wa_image_key or "",  # para RE-FIRMAR la URL al despachar (no congelar la prefirmada)
             "image_url": image_url or "",
             "image_key": image_key or "",
             "in_flight": "",

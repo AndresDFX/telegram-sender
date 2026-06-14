@@ -188,6 +188,7 @@ def build_dispatch_campaigns() -> DispatchCampaigns:
         queue=SqsBroadcastQueue(),
         whatsapp=whatsapp,
         config=store,
+        image_store=build_image_store(),
     )
 
 

@@ -517,11 +517,26 @@ async function enviarLote(text, image_url, targets, track) {
   // En envío fraccionado, el total del JOB lo fija el llamador (bcTotal), no el del slice.
   await bcSetTotal(table, id, bcTotal != null ? bcTotal : targets.length)
   let sent = 0, failed = 0, sentDelta = 0, failedDelta = 0
+  // Descargamos la imagen UNA sola vez a un Buffer en lugar de pasar la URL a Baileys (que la
+  // bajaría por CADA destinatario). Así evitamos el "esta imagen no está disponible" cuando la URL
+  // (S3 prefirmada) tarda, expira o devuelve 403: si la descarga falla, se envía solo el texto.
+  let imgBuffer = null
+  if (image_url) {
+    try {
+      const resp = await fetch(image_url)
+      if (!resp.ok) throw new Error('HTTP ' + resp.status)
+      imgBuffer = Buffer.from(await resp.arrayBuffer())
+      if (!imgBuffer.length) throw new Error('imagen vacía')
+    } catch (e) {
+      log.error({ err: String(e) }, 'no se pudo descargar la imagen; el lote irá solo con texto')
+      imgBuffer = null
+    }
+  }
   for (const jid of targets) {
     try {
       const hasText = !!(text && String(text).trim())
-      if (image_url) {
-        await sock.sendMessage(jid, { image: { url: image_url } })
+      if (imgBuffer) {
+        await sock.sendMessage(jid, { image: imgBuffer })  // bytes ya en memoria, no URL
         if (hasText) await sock.sendMessage(jid, { text })
       } else if (hasText) {
         await sock.sendMessage(jid, { text })

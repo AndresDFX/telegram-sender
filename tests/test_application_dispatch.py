@@ -100,11 +100,11 @@ class FakeConfig:
         return dict(self.cfg)
 
 
-def _disp(plans, broadcasts=None, queue=None, wa=None, config=None, now=1000, stale=900):
+def _disp(plans, broadcasts=None, queue=None, wa=None, config=None, now=1000, stale=900, image_store=None):
     return DispatchCampaigns(
         plans=plans, broadcasts=broadcasts or FakeBroadcasts(), queue=queue or FakeQueue(),
         whatsapp=wa or FakeWa(), config=config or FakeConfig(), broadcasts_table="x-broadcasts",
-        stale_seconds=stale, now=lambda: now,
+        stale_seconds=stale, now=lambda: now, image_store=image_store,
     )
 
 
@@ -201,6 +201,35 @@ class DispatchTests(unittest.TestCase):
         res = _disp(plans, queue=queue, config=cfg, now=22 * 3600)()  # 22:00: WA cerrado, TG 24h
         self.assertEqual(res["despachado"], "TG#0")
         self.assertEqual(len(queue.calls), 1)
+
+    def test_whatsapp_no_aceptado_marca_fallido(self):
+        # RC-C: si el servicio WhatsApp no acepta (sin 'accepted'), se marca fallido y se registra error.
+        class Wa:
+            def ping(self): pass
+            def forward(self, *a, **k): return {}  # sin 'accepted'
+        class Broad(FakeBroadcasts):
+            def __init__(self): super().__init__(); self.fallido=None; self.error=None
+            def marcar_whatsapp_fallido(self, bid): self.fallido=bid
+            def registrar_error(self, bid, msg): self.error=msg
+        plans = FakePlans(_plan(tg_next=2, tg_dispatched=300, wa_enabled=True, wa_resolved=True, wa_total=150, wa_batches=1))
+        b = Broad()
+        res = _disp(plans, broadcasts=b, wa=Wa())()
+        self.assertTrue(res.get("wa_no_aceptado"))
+        self.assertEqual(b.fallido, "b1")
+        self.assertIsNotNone(b.error)
+
+    def test_whatsapp_imagen_se_refirma_desde_key(self):
+        # RC-B: la URL de imagen de WhatsApp se RE-FIRMA desde wa_image_key al despachar.
+        captured = {}
+        class Wa:
+            def ping(self): pass
+            def forward(self, text, image_url, exclude, **k): captured['url']=image_url; return {"accepted": True}
+        class IS:
+            def url_temporal(self, key, expira=3600): return "https://fresh/"+key
+        plans = FakePlans(_plan(tg_next=2, tg_dispatched=300, wa_enabled=True, wa_resolved=True,
+                                wa_total=150, wa_batches=1, wa_image_url="https://stale/x", wa_image_key="images/x.jpg"))
+        _disp(plans, wa=Wa(), image_store=IS())()
+        self.assertEqual(captured['url'], "https://fresh/images/x.jpg")
 
     def test_whatsapp_caido_no_bloquea_telegram(self):
         # Si WhatsApp no resuelve su total (servicio caído), Telegram debe salir igual (independencia).

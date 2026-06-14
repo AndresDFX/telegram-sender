@@ -45,6 +45,11 @@ class FakeConfig:
             "strip_patterns": ["ubicad"],
             "whatsapp_footer": "📲 WhatsApp 300",
             "image_url": "",
+            # WhatsApp "listo" por defecto (enviar_manual exige conectado); los tests que prueban
+            # el caso desactivado hacen override con whatsapp_enabled=False.
+            "whatsapp_enabled": True,
+            "whatsapp_service_url": "http://wa.local",
+            "whatsapp_token": "tok",
         }
         self.cfg.update(overrides)
 
@@ -356,6 +361,25 @@ class SchedulerPathTests(unittest.TestCase):
         res = bl.enviar_manual("hola", telegram=True, whatsapp=False)
         self.assertTrue(res["scheduled"])
         self.assertEqual(plans.creados[0]["source"], "manual")
+
+    def test_manual_propaga_image_key_para_refirmar(self):
+        # La imagen subida viaja como image_key (clave S3) en el plan, para re-firmar al despachar.
+        plans = FakePlans()
+        cfg = FakeConfig(scheduling_enabled=True)
+        bl = BroadcastList(FakeSubs(["1", "2"]), FakeQueue(), cfg, plans=plans)
+        bl.enviar_manual("hola", telegram=True, whatsapp=False, image_key="images/abc.jpg")
+        self.assertEqual(plans.creados[0]["image_key"], "images/abc.jpg")
+        self.assertEqual(plans.creados[0]["wa_image_key"], "images/abc.jpg")
+
+    def test_manual_whatsapp_no_conectado_se_rechaza(self):
+        # Pedir WhatsApp sin el servicio conectado falla RUIDOSAMENTE (no en silencio).
+        cfg = FakeConfig(scheduling_enabled=True, whatsapp_enabled=False,
+                         whatsapp_lists=[{"name": "c", "ids": ["57300@s.whatsapp.net"]}],
+                         whatsapp_target={"mode": "only", "lists": ["c"]})
+        bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, whatsapp=object(), plans=FakePlans())
+        with self.assertRaises(ValueError) as ctx:
+            bl.enviar_manual("hola", telegram=False, whatsapp=True, whatsapp_list="c")
+        self.assertIn("no está conectado", str(ctx.exception))
 
     def test_manual_sin_destinatarios_se_rechaza_con_motivo(self):
         # Si los patrones excluyen a todos, el manual no "no envía en silencio": avisa la causa.
