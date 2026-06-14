@@ -77,6 +77,9 @@ _CAMPOS_EDITABLES = (
     "window_start",
     "window_end",
     "window_tz",
+    # Correo transaccional (recuperación de contraseña vía Resend).
+    "resend_api_key",
+    "mail_from",
 )
 _LISTAS = ("strip_patterns", "excluded_ids", "whatsapp_excluded")
 _LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
@@ -85,7 +88,7 @@ _FLOATS = ("tg_delay_min", "tg_delay_max")
 _ENTEROS = ("batch_size", "wa_delay_min", "wa_delay_max", "window_tz")
 _BOOLS = ("whatsapp_enabled", "scheduling_enabled", "window_enabled", "sending_enabled")
 # Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
-_NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token", "bot_token")
+_NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token", "bot_token", "resend_api_key")
 
 
 def _ensure() -> None:
@@ -196,11 +199,55 @@ def _usuario_actual(event: dict[str, Any]) -> str:
         return ""
 
 
+def _reset_email_html(usuario: str, code: str) -> str:
+    """Cuerpo HTML de marca para el correo de recuperación de contraseña."""
+    return (
+        '<div style="background:#161514;padding:32px 0;font-family:Inter,Segoe UI,Arial,sans-serif">'
+        '<div style="max-width:440px;margin:0 auto;background:#211F1E;border:1px solid #332F2D;'
+        'border-radius:16px;overflow:hidden">'
+        '<div style="height:4px;background:linear-gradient(90deg,#FD531E,#FF8A5C)"></div>'
+        '<div style="padding:28px 30px;color:#E7E7E5">'
+        '<div style="font-size:20px;font-weight:800;color:#FF8A5C;margin-bottom:4px">Replica</div>'
+        '<p style="color:#9C9892;margin:0 0 22px;font-size:14px">Recuperación de contraseña</p>'
+        f'<p style="margin:0 0 8px;font-size:15px">Hola <b>{usuario}</b>, este es tu código para '
+        'restablecer la contraseña:</p>'
+        f'<div style="margin:18px 0;text-align:center;font-size:30px;font-weight:800;letter-spacing:8px;'
+        f'color:#FBFAF9;background:#161514;border:1px dashed #4A4644;border-radius:12px;padding:16px">{code}</div>'
+        '<p style="color:#9C9892;font-size:13px;margin:0">Válido por 15 minutos. Si no lo solicitaste, '
+        'puedes ignorar este mensaje.</p>'
+        '</div></div></div>'
+    )
+
+
 def _enviar_reset_email(email: str, usuario: str, code: str) -> None:
-    """Envía el código de reseteo por SNS (al endpoint suscrito al tópico de alertas)."""
+    """Envía el código de reseteo. Prefiere Resend (correo real, gratis) si está
+    configurado; si no, cae al tópico SNS de alertas (suscripción por confirmar)."""
+    asunto = "Replica — código para restablecer tu contraseña"
+    texto = (
+        f"Código para restablecer la contraseña del usuario '{usuario}': {code}\n"
+        f"Válido por 15 minutos. Si no lo solicitaste, ignora este mensaje.\n"
+        f"(Cuenta: {email})"
+    )
+    # 1) Resend (gratis) — preferido: llega a la bandeja sin confirmar suscripción.
+    try:
+        cfg = config.get()
+    except Exception:
+        cfg = {}
+    api_key = (cfg.get("resend_api_key") or os.environ.get("RESEND_API_KEY") or "").strip()
+    mail_from = (cfg.get("mail_from") or os.environ.get("MAIL_FROM") or "Replica <onboarding@resend.dev>").strip()
+    if api_key:
+        try:
+            from adapters.email_sender import enviar_resend
+
+            if enviar_resend(api_key, mail_from, email, asunto, texto, _reset_email_html(usuario, code)):
+                return
+            logger.warning("Resend no aceptó el correo; intento SNS")
+        except Exception:
+            logger.exception("Resend falló al enviar el código; intento SNS")
+    # 2) Fallback: SNS (al endpoint suscrito al tópico de alertas).
     arn = os.environ.get("ALERTS_TOPIC_ARN", "")
     if not arn:
-        logger.warning("ALERTS_TOPIC_ARN no configurado; no se envió el código de reseteo")
+        logger.warning("Sin Resend ni ALERTS_TOPIC_ARN; no se envió el código de reseteo")
         return
     try:
         import boto3
@@ -208,11 +255,7 @@ def _enviar_reset_email(email: str, usuario: str, code: str) -> None:
         boto3.client("sns").publish(
             TopicArn=arn,
             Subject="Replica - codigo para restablecer contrasena",
-            Message=(
-                f"Codigo para restablecer la contrasena del usuario '{usuario}': {code}\n"
-                f"Valido por 15 minutos. Si no lo solicitaste, ignora este mensaje.\n"
-                f"(Cuenta: {email})"
-            ),
+            Message=texto,
         )
     except Exception:
         logger.exception("No se pudo publicar el codigo de reseteo por SNS")
@@ -357,6 +400,8 @@ def _config_publico() -> dict:
     cfg["whatsapp_token"] = ""
     cfg["bot_token_set"] = bool(cfg.get("bot_token"))
     cfg["bot_token"] = ""
+    cfg["resend_api_key_set"] = bool(cfg.get("resend_api_key"))
+    cfg["resend_api_key"] = ""
     return cfg
 
 
@@ -1039,15 +1084,16 @@ _PAGE = r"""<!doctype html><html lang="es" data-theme="dark"><head><meta charset
 }
 
 :root{
-  --bg:#1C1C1B; --bg2:#141413;
-  --card:#333332; --card2:#2A2A29; --elev:#2A2A29;
-  --bd:#3A3A39; --bd2:#5E5E5C;
-  --tx:#FAFAF9; --tx2:#E7E7E5; --mut:#A8A8A5; --mut2:#7C7C7A;
-  --ac:#FD531E; --ac-h:#FD7848; --ac2:#FD9E76;
+  --bg:#1A1917; --bg2:#111010;
+  --card:#2B2A27; --card2:#232220; --elev:#302E2B;
+  --bd:#3A3733; --bd2:#565049;
+  --tx:#FBFAF9; --tx2:#E4E1DB; --mut:#A39D93; --mut2:#787269;
+  --ac:#FD531E; --ac-h:#FF6A3C; --ac2:#FF9166;
   --ok:#34d399; --warn:#fbbf24; --bad:#fb7185; --info:#60a5fa;
   --r:14px; --r-sm:10px;
-  --sh:0 1px 0 rgba(255,255,255,.02) inset, 0 18px 50px -20px rgba(0,0,0,.7);
-  --ring:0 0 0 3px rgba(253,83,30,.22);
+  --sh:0 1px 0 rgba(255,255,255,.04) inset, 0 1px 2px rgba(0,0,0,.28), 0 24px 56px -28px rgba(0,0,0,.82);
+  --glow:0 6px 22px -8px rgba(253,83,30,.55);
+  --ring:0 0 0 3px rgba(253,83,30,.28);
   --fs:13px;
 }
 *{box-sizing:border-box}
@@ -1058,14 +1104,15 @@ body{
   min-height:100vh; font-size:var(--fs); line-height:1.5;
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
   background-image:
-    radial-gradient(900px 500px at 88% -8%, rgba(253,83,30,.12), transparent 60%),
-    radial-gradient(700px 420px at 8% 0%, rgba(253,120,72,.06), transparent 55%);
+    radial-gradient(1000px 560px at 86% -10%, rgba(253,83,30,.15), transparent 60%),
+    radial-gradient(760px 460px at 4% 2%, rgba(255,120,72,.07), transparent 55%),
+    radial-gradient(600px 600px at 100% 100%, rgba(253,83,30,.05), transparent 60%);
   background-attachment:fixed;
 }
-::selection{background:rgba(253,83,30,.35);color:#fff}
+::selection{background:rgba(253,83,30,.38);color:#fff}
 ::-webkit-scrollbar{width:10px;height:10px}
-::-webkit-scrollbar-thumb{background:#3A3A39;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
-::-webkit-scrollbar-thumb:hover{background:#5E5E5C;background-clip:padding-box}
+::-webkit-scrollbar-thumb{background:#3A3733;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:#565049;background-clip:padding-box}
 a{color:var(--ac2)}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
   background:var(--elev);border:1px solid var(--bd);padding:1px 6px;border-radius:6px;color:#E7E7E5}
@@ -1099,7 +1146,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
 #app{display:none}
 header{
   display:flex;align-items:center;justify-content:space-between;
-  background:rgba(28,28,27,.72);backdrop-filter:blur(14px) saturate(140%);
+  background:rgba(26,25,23,.74);backdrop-filter:blur(16px) saturate(150%);
   padding:13px 22px;border-bottom:1px solid var(--bd);
   position:sticky;top:0;z-index:5;
 }
@@ -1110,7 +1157,7 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
 /* ---------- nav (pestañas horizontales) ---------- */
 .nav{
   position:sticky;top:50px;z-index:4;
-  background:rgba(28,28,27,.8);backdrop-filter:blur(14px) saturate(140%);
+  background:rgba(26,25,23,.82);backdrop-filter:blur(16px) saturate(150%);
   display:flex;gap:6px;justify-content:center;align-items:center;
   padding:11px 14px;border-bottom:1px solid var(--bd);flex-wrap:wrap;
 }
@@ -1119,7 +1166,7 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
   padding:8px 15px;border-radius:999px;font-weight:600;font-size:13px;
   cursor:pointer;transition:color .15s,background .15s,border-color .15s;
 }
-.nav button:hover{color:var(--tx2);background:rgba(255,255,255,.04)}
+.nav button:hover{color:var(--tx2);background:rgba(255,255,255,.05);filter:none;box-shadow:none}
 .nav button.on{
   background:rgba(253,83,30,.14);color:#FFE0D3;border-color:rgba(253,83,30,.4);
 }
@@ -1144,35 +1191,35 @@ input,textarea,select{
 }
 input::placeholder,textarea::placeholder{color:var(--mut)}
 input:hover,textarea:hover,select:hover{border-color:var(--bd2)}
-input:focus,textarea:focus,select:focus{outline:0;border-color:var(--ac);box-shadow:var(--ring);background:#262625}
+input:focus,textarea:focus,select:focus{outline:0;border-color:var(--ac);box-shadow:var(--ring);background:var(--elev)}
 textarea{min-height:88px;resize:vertical;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:13px;line-height:1.55}
 select{appearance:none;-webkit-appearance:none;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23A8A8A5' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>");
   background-repeat:no-repeat;background-position:right 12px center;padding-right:36px;cursor:pointer}
 input[type=file]{padding:9px 12px;color:var(--mut);cursor:pointer}
 input[type=file]::file-selector-button{
-  background:#3A3A39;border:1px solid var(--bd2);color:var(--tx2);
+  background:#34322F;border:1px solid var(--bd2);color:var(--tx2);
   border-radius:8px;padding:7px 13px;margin-right:12px;cursor:pointer;font:inherit;font-weight:600}
-input[type=file]::file-selector-button:hover{background:#4A4A49}
+input[type=file]::file-selector-button:hover{background:#3F3D39}
 input[type=checkbox],input[type=radio]{accent-color:var(--ac);width:auto;cursor:pointer}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 
 /* ---------- buttons ---------- */
 button{
-  background:var(--ac);color:#fff;border:1px solid transparent;border-radius:var(--r-sm);
+  background:linear-gradient(180deg,var(--ac-h),var(--ac));color:#fff;border:1px solid rgba(255,255,255,.07);border-radius:var(--r-sm);
   padding:10px 17px;font-size:13.5px;font-weight:600;font-family:inherit;cursor:pointer;
-  transition:background .15s,transform .05s,box-shadow .15s,border-color .15s,opacity .15s;
+  transition:background .15s,filter .15s,transform .05s,box-shadow .15s,border-color .15s,opacity .15s;
 }
-button:hover{background:var(--ac-h)}
-button:active{transform:translateY(1px)}
-button:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(253,83,30,.35)}
-button:disabled{opacity:.5;cursor:not-allowed;transform:none}
-button.sec{background:#3A3A39;color:var(--tx2);border-color:var(--bd2)}
-button.sec:hover{background:#4A4A49}
+button:hover{filter:brightness(1.07);box-shadow:var(--glow)}
+button:active{transform:translateY(1px);filter:brightness(.97)}
+button:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(253,83,30,.4)}
+button:disabled{opacity:.5;cursor:not-allowed;transform:none;filter:none;box-shadow:none}
+button.sec{background:#34322F;color:var(--tx2);border-color:var(--bd2)}
+button.sec:hover{background:#3F3D39;filter:none;box-shadow:none}
 button.ghost{background:transparent;border:1px solid var(--bd2);color:var(--mut)}
-button.ghost:hover{background:rgba(255,255,255,.04);color:var(--tx2)}
+button.ghost:hover{background:rgba(255,255,255,.05);color:var(--tx2);filter:none;box-shadow:none}
 button.danger{background:var(--color-danger);color:#fff;border-color:transparent}
-button.danger:hover{background:#C02B24}
+button.danger:hover{background:#C02B24;filter:none;box-shadow:0 6px 22px -8px rgba(192,43,36,.5)}
 
 /* ---------- markup widget ---------- */
 .markup{display:flex;align-items:center;gap:18px;background:var(--elev);border:1px solid var(--bd);border-radius:var(--r);padding:18px}
@@ -1267,7 +1314,7 @@ main>.card.show{display:block}
 .bc-msg{max-width:340px}
 .bc-msg b{display:block;color:var(--tx);font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bc-meta{color:var(--mut);font-size:11.5px;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.bc-src{text-transform:uppercase;letter-spacing:.5px;font-weight:700;font-size:10px;color:#A8A8A5;
+.bc-src{text-transform:uppercase;letter-spacing:.5px;font-weight:700;font-size:10px;color:var(--mut);
   background:var(--elev);border:1px solid var(--bd);border-radius:5px;padding:1px 6px}
 
 /* progreso por canal */
@@ -1526,7 +1573,7 @@ img.preview{box-shadow:var(--sh-sm)}
 /* sub-navegación de Fuentes y listas (divide la vista por Fuente / Telegram / WhatsApp) */
 #fuentes_subnav{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 #fuentes_subnav button{background:transparent;border:1px solid var(--bd2);color:var(--mut);padding:8px 16px;border-radius:999px;font-weight:600;font-size:13px;cursor:pointer;transition:color .15s,background .15s,border-color .15s}
-#fuentes_subnav button:hover{color:var(--tx2)}
+#fuentes_subnav button:hover{color:var(--tx2);filter:none;box-shadow:none}
 #fuentes_subnav button.on{background:rgba(253,83,30,.14);color:#FFE0D3;border-color:rgba(253,83,30,.4)}
 .card.subhide{display:none !important}
 /* Tablas con selección masiva (patrón reutilizable: checkbox + barra de acciones) */
@@ -1939,6 +1986,15 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>Contraseña (mínimo 8)</label><input id="usr_new_pw" type="password">
    <button style="margin-top:10px" onclick="createUser()">Crear usuario</button>
   </div>
+  <div class="card" data-tab="ajustes"><h2>✉️ Correo de recuperación <span id="mail_status" class="hint"></span></h2>
+   <div class="hint">Servicio gratis para entregar el código cuando alguien usa «¿Olvidaste tu contraseña?». Crea una cuenta en <b>resend.com</b> (100 correos/día gratis), genera una API key y pégala aquí. Sin esto, el código se intenta enviar por el correo de alertas de AWS (SNS).</div>
+   <label>Remitente (From)</label>
+   <input id="mail_from" placeholder="Replica &lt;onboarding@resend.dev&gt;">
+   <div class="hint">Para enviar a cualquier destinatario, verifica tu dominio en Resend. <code>onboarding@resend.dev</code> solo entrega al correo con el que te registraste.</div>
+   <label>API key de Resend</label>
+   <input id="resend_api_key" type="password" placeholder="(pegar solo si quieres cambiarla)">
+   <div style="margin-top:10px"><button onclick="saveEmail()">Guardar correo</button> <span id="mail_save_status" class="hint" style="margin-left:10px"></span></div>
+  </div>
   <div class="card" data-tab="ajustes"><h2>🔑 Cambiar mi contraseña</h2>
    <label>Contraseña actual</label><input id="cp_cur" type="password">
    <label>Nueva contraseña (mínimo 8)</label><input id="cp_new" type="password">
@@ -2098,7 +2154,15 @@ async function loadCfg(){ const c=await api('/api/config');
   ['batch_size','tg_delay_min','tg_delay_max','wa_delay_min','wa_delay_max','window_tz','window_start','window_end'].forEach(k=>{ if($(k)) $(k).value=c[k]??''; });
   if($('scheduling_enabled')) $('scheduling_enabled').checked = c.scheduling_enabled!==false;
   if($('window_enabled')) $('window_enabled').checked = !!c.window_enabled;
+  if($('mail_from')) $('mail_from').value=c.mail_from||'';
+  if($('mail_status')) $('mail_status').textContent = c.resend_api_key_set ? '· API key configurada ✓' : '· sin API key (usa SNS)';
   renderSendingState(c.sending_enabled!==false); }
+async function saveEmail(){ const b={ mail_from:($('mail_from').value||'').trim() };
+  const k=$('resend_api_key').value; if(k) b.resend_api_key=k.trim();
+  $('mail_save_status').textContent='guardando...';
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+    $('resend_api_key').value=''; $('mail_save_status').textContent='✅ guardado'; toast('✓ Correo guardado'); loadCfg(); }
+  catch(e){ $('mail_save_status').textContent=''; toast('Error al guardar',true); } }
 function renderSendingState(on){
   if($('sending_enabled')) $('sending_enabled').checked = on;
   const badge=$('sys_badge'); if(badge){ badge.className='pill '+(on?'active':'failed'); badge.textContent = on?'ACTIVOS':'PAUSADOS'; }

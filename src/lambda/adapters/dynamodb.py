@@ -183,6 +183,9 @@ class DynamoDbConfigStore(ConfigStore):
         "window_start",
         "window_end",
         "window_tz",
+        # Correo transaccional (recuperación de contraseña).
+        "resend_api_key",
+        "mail_from",
     )
     _CONTACTS_ID = "__contacts__"
     _LOGIN_ID = "__telethon_login__"  # sesión temporal del login userbot (entre código y confirmación)
@@ -234,6 +237,9 @@ class DynamoDbConfigStore(ConfigStore):
             "window_start": os.environ.get("WINDOW_START", "08:00"),
             "window_end": os.environ.get("WINDOW_END", "20:00"),
             "window_tz": int(os.environ.get("WINDOW_TZ_OFFSET", "-300")),  # min vs UTC (UTC-5 Colombia)
+            # Correo transaccional (Resend) para recuperar contraseña.
+            "resend_api_key": os.environ.get("RESEND_API_KEY", ""),
+            "mail_from": os.environ.get("MAIL_FROM", ""),
         }
 
     def get(self) -> dict:
