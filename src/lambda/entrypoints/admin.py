@@ -1300,6 +1300,14 @@ main>.card.show{display:block}
   .bc-msg{max-width:none}
   .nav{gap:4px;padding:9px 8px}
   .nav button{padding:7px 11px;font-size:12.5px}
+  table{font-size:12.5px}
+  th,td{padding:8px 7px}
+  .tbl-toolbar button,.compose-actions button{flex:1 1 auto}
+  .ds-modal-actions button{flex:1}
+  .markup{flex-wrap:wrap}
+  .markup input{width:100%}
+  #fuentes_subnav{width:100%}
+  #fuentes_subnav button{flex:1 1 auto}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
@@ -2487,7 +2495,7 @@ async function sendBroadcast(){
   let msg = body.scheduled_at ? ('¿Programar este envío para '+new Date(sv).toLocaleString('es')+'?') : '¿Enviar este mensaje ahora?';
   if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
   if(!await confirmModal(msg,{okText:'Enviar'})) return;
-  const btn=$('bc_send'); btn.disabled=true; $('bc_status').textContent='guardando...';
+  const btn=$('bc_send'); btn.disabled=true; btn.classList.add('btn-loading'); $('bc_status').textContent='guardando...';
   try{
     await api('/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     // "programado" != "entregado": el envío se fracciona y la ENTREGA real se confirma abajo en Envíos.
@@ -2496,7 +2504,7 @@ async function sendBroadcast(){
     showTab('envios');
     loadBroadcasts();
   }catch(e){ $('bc_status').textContent=''; toast('Error al programar',true); }
-  finally{ btn.disabled=false; }
+  finally{ btn.disabled=false; btn.classList.remove('btn-loading'); }
 }
 // Al abrir la pestaña Enviar: rellenar listas + previsualizar (hook aditivo sobre showTab).
 (function(){ const _s=window.showTab;
@@ -2544,14 +2552,14 @@ async function sgCreate(){
   if(t==='once'){ const v=$('sg_run_at').value; if(!v){ toast('Elige fecha y hora',true); return; }
     body.run_at=Math.floor(new Date(v).getTime()/1000); }
   else { body.at=$('sg_at').value; if(t==='weekly') body.days=[...SG_DAYS]; }
-  $('sg_create').disabled=true; $('sg_status').textContent='Guardando…';
+  $('sg_create').disabled=true; $('sg_create').classList.add('btn-loading'); $('sg_status').textContent='Guardando…';
   try{
     const r=await fetch(BASE+'/api/schedules',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify(body)});
     const j=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(j.error||('error '+r.status));
     toast('✓ Mensaje programado'); $('sg_status').textContent=''; sgClear(); loadSchedules();
   }catch(e){ toast(e.message||'Error al programar',true); $('sg_status').textContent=e.message||''; }
-  finally{ $('sg_create').disabled=false; }
+  finally{ $('sg_create').disabled=false; $('sg_create').classList.remove('btn-loading'); }
 }
 function sgDesc(s){
   if(s.type==='daily') return 'Diario · '+s.at;
