@@ -1621,6 +1621,13 @@ tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .tbl-toolbar .sel-all input{width:auto;margin:0}
 .pl-card{transition:border-color .15s,box-shadow .15s}
 .pl-card.sel-card{border-color:rgba(253,83,30,.55);box-shadow:0 0 0 1px rgba(253,83,30,.35)}
+/* filtro segmentado (Todos / Incluidos / Excluidos) en Destinatarios */
+.segf{display:inline-flex;border:1px solid var(--bd2);border-radius:999px;overflow:hidden;background:var(--elev);vertical-align:middle}
+.segf button{background:transparent;border:none;border-radius:0;color:var(--mut);padding:7px 15px;font-weight:600;font-size:12.5px;cursor:pointer;transition:color .15s,background .15s}
+.segf button+button{border-left:1px solid var(--bd2)}
+.segf button:hover{color:var(--tx2);background:rgba(255,255,255,.05);filter:none;box-shadow:none}
+.segf button.on{background:rgba(253,83,30,.16);color:#FFE0D3}
+.segf button.on.exc{background:rgba(251,191,36,.16);color:#FCE7B0}
 .bc-err{color:var(--bad);font-size:11px;margin-top:4px;line-height:1.35;max-width:240px;cursor:pointer;border-bottom:1px dotted rgba(255,107,90,.5);display:inline-block}
 .bc-err:hover{color:#ff8f7d}
 .bc-err:focus-visible{outline:2px solid var(--ac2);outline-offset:2px;border-radius:3px}
@@ -1840,6 +1847,14 @@ th.selcol,td.selcol{width:34px;text-align:center}
   <div class="card" data-tab="fuentes" data-sub="tg"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
    <input id="subsearch" placeholder="🔎 Buscar por nombre o número..." oninput="onSearch()" style="margin-top:10px">
+   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
+     <span class="hint" style="margin:0">Mostrar:</span>
+     <div class="segf" id="seg_tg">
+       <button class="on" data-v="" onclick="setStateFilter('')">Todos</button>
+       <button data-v="inc" onclick="setStateFilter('inc')">✅ Incluidos</button>
+       <button data-v="exc" onclick="setStateFilter('exc')">⛔ Excluidos</button>
+     </div>
+   </div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
      <button class="sec" onclick="toggleAll(true)">Marcar visibles</button>
      <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
@@ -1872,6 +1887,14 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="hint">Carga tus contactos (servicio conectado), busca por nombre, y marca para <b>excluir/incluir</b>. Los excluidos NO reciben las difusiones por WhatsApp.</div>
    <button class="sec" style="margin-top:10px" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button>
    <input id="wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="renderWa()" style="margin-top:10px">
+   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
+     <span class="hint" style="margin:0">Mostrar:</span>
+     <div class="segf" id="seg_wa">
+       <button class="on" data-v="" onclick="setWaStateFilter('')">Todos</button>
+       <button data-v="inc" onclick="setWaStateFilter('inc')">✅ Incluidos</button>
+       <button data-v="exc" onclick="setWaStateFilter('exc')">⛔ Excluidos</button>
+     </div>
+   </div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
      <button class="sec" onclick="waToggleAll(true)">Marcar visibles</button>
      <button class="sec" onclick="waToggleAll(false)">Desmarcar</button>
@@ -2464,16 +2487,24 @@ async function loadDashboard(){
   }catch(e){ if($('dash_estado')) $('dash_estado').textContent='no se pudo cargar el resumen';
     ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e2=$(id); if(e2) e2.classList.remove('kpi-load');}); }
 }
-let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0;
+let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0, STATEF='';
 const PAGE_SIZE=50;
-function filtered(){ if(!FILTER) return DEST; const q=FILTER.toLowerCase();
-  return DEST.filter(s=> (s.name||'').toLowerCase().includes(q) || String(s.chatId||'').toLowerCase().includes(q) || String(s.phone||'').toLowerCase().includes(q)); }
+function filtered(){ let arr=DEST;
+  if(FILTER){ const q=FILTER.toLowerCase();
+    arr=arr.filter(s=> (s.name||'').toLowerCase().includes(q) || String(s.chatId||'').toLowerCase().includes(q) || String(s.phone||'').toLowerCase().includes(q)); }
+  if(STATEF==='inc') arr=arr.filter(s=>!EXCLUDED.has(String(s.chatId)));
+  else if(STATEF==='exc') arr=arr.filter(s=>EXCLUDED.has(String(s.chatId)));
+  return arr; }
+function setStateFilter(v){ STATEF=v; PAGE=0;
+  document.querySelectorAll('#seg_tg button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.classList.toggle('exc',on&&v==='exc'); });
+  render(); }
 function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
   if(PAGE>=pages) PAGE=pages-1; if(PAGE<0) PAGE=0;
   const slice=f.slice(PAGE*PAGE_SIZE,(PAGE+1)*PAGE_SIZE);
   const t=$('subs'); t.innerHTML=''; $('selall').checked=false;
   $('subsempty').style.display=DEST.length?'none':'block';
-  $('subcount').textContent = DEST.length ? `· ${f.length}${FILTER?' filtrados':''} de ${DEST.length} (${EXCLUDED.size} excluidos)` : '';
+  const inc=DEST.length-EXCLUDED.size;
+  $('subcount').textContent = DEST.length ? `· ${f.length} en vista · ${inc} incluidos · ${EXCLUDED.size} excluidos` : '';
   $('pageinfo').textContent = f.length ? `página ${PAGE+1} de ${pages}` : 'sin resultados';
   slice.forEach(s=>{ const ex=EXCLUDED.has(String(s.chatId)); const label=s.name||'(sin nombre)'; const tr=document.createElement('tr');
     tr.innerHTML=`<td><input type="checkbox" class="selrow" data-id="${s.chatId}"></td>`+
@@ -2537,17 +2568,24 @@ async function createListFromGrid(ch){
   toast('✓ Lista "'+n+'" creada con '+ids.length+' contactos');
 }
 // --- contactos de WhatsApp (para armar listas de WhatsApp) ---
-let WA_DEST=[], WA_PAGE=0, WA_EXCLUDED=new Set();
+let WA_DEST=[], WA_PAGE=0, WA_EXCLUDED=new Set(), WA_STATEF='';
 function waName(c){ return c.name || '(sin nombre)'; }
 async function loadWaContacts(){ $('wa_c_count').textContent='· cargando...';
   try{ const r=await api('/api/whatsapp/contacts'); WA_DEST=r.contacts||[]; WA_PAGE=0; renderWa(); }
   catch(e){ $('wa_c_count').textContent='· servicio inaccesible (¿conectado?)'; } }
-function waFiltered(){ const q=($('wa_search').value||'').trim().toLowerCase(); if(!q) return WA_DEST;
-  return WA_DEST.filter(c=> waName(c).toLowerCase().includes(q) || String(c.id||'').toLowerCase().includes(q)); }
+function waFiltered(){ let arr=WA_DEST; const q=($('wa_search').value||'').trim().toLowerCase();
+  if(q) arr=arr.filter(c=> waName(c).toLowerCase().includes(q) || String(c.id||'').toLowerCase().includes(q));
+  if(WA_STATEF==='inc') arr=arr.filter(c=>!WA_EXCLUDED.has(String(c.id||'')));
+  else if(WA_STATEF==='exc') arr=arr.filter(c=>WA_EXCLUDED.has(String(c.id||'')));
+  return arr; }
+function setWaStateFilter(v){ WA_STATEF=v; WA_PAGE=0;
+  document.querySelectorAll('#seg_wa button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.classList.toggle('exc',on&&v==='exc'); });
+  renderWa(); }
 function renderWa(){ const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
   if(WA_PAGE>=pages)WA_PAGE=pages-1; if(WA_PAGE<0)WA_PAGE=0; const slice=f.slice(WA_PAGE*PAGE_SIZE,(WA_PAGE+1)*PAGE_SIZE);
   const t=$('wa_subs'); t.innerHTML='';
-  $('wa_c_count').textContent = WA_DEST.length ? `· ${f.length} de ${WA_DEST.length} (${WA_EXCLUDED.size} excluidos)` : '';
+  const inc=WA_DEST.length-WA_EXCLUDED.size;
+  $('wa_c_count').textContent = WA_DEST.length ? `· ${f.length} en vista · ${inc} incluidos · ${WA_EXCLUDED.size} excluidos` : '';
   slice.forEach(c=>{ const id=String(c.id||''); const ex=WA_EXCLUDED.has(id); const tr=document.createElement('tr');
     tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${bcEsc(waName(c))}</b><div class="hint" style="margin-top:2px;font-size:11px">${bcEsc(id)}</div></td>`+
       `<td><span class="pill ${ex?'inactive':'active'}">${ex?'Excluido':'Incluido'}</span></td>`; t.appendChild(tr); });
