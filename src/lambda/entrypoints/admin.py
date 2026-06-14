@@ -206,6 +206,30 @@ def _usuario_actual(event: dict[str, Any]) -> str:
         return ""
 
 
+def _rol_de(usuario: str) -> str:
+    """Rol del usuario: 'admin' (gestiona usuarios + todo) o 'user' (todo MENOS gestión de
+    usuarios). El usuario de entorno (bootstrap ADMIN_USER) es admin SIEMPRE. Los usuarios
+    guardados SIN campo 'role' se tratan como 'admin' por compatibilidad (no dejar sin acceso a
+    quien ya existía al introducir los roles); los usuarios nuevos se crean con rol explícito."""
+    if usuario and usuario == admin_user():
+        return "admin"
+    try:
+        u = (config.get_users() or {}).get(usuario) or {}
+    except Exception:
+        u = {}
+    if not u:
+        return "user"  # usuario desconocido → mínimo privilegio
+    return "admin" if str(u.get("role", "admin")) == "admin" else "user"
+
+
+def _rol_actual(event: dict[str, Any]) -> str:
+    return _rol_de(_usuario_actual(event))
+
+
+def _es_admin(event: dict[str, Any]) -> bool:
+    return _rol_actual(event) == "admin"
+
+
 def _reset_email_html(usuario: str, code: str) -> str:
     """Cuerpo HTML de marca para el correo de recuperación de contraseña."""
     return (
@@ -499,16 +523,28 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     try:
         if sub == "/api/me" and method == "GET":
-            return _json({"ok": True, "user": _usuario_actual(event) or admin_user()})
+            return _json({
+                "ok": True,
+                "user": _usuario_actual(event) or admin_user(),
+                "role": _rol_actual(event),
+                "is_admin": _es_admin(event),
+            })
         if sub == "/api/users" and method == "GET":
+            # Solo un administrador puede ver/gestionar la lista de usuarios del panel.
+            if not _es_admin(event):
+                return _json({"error": "Solo un administrador puede gestionar usuarios."}, 403)
             users = config.get_users() or {}
-            return _json({"me": _usuario_actual(event), "users": [
-                {"username": k, "email": v.get("email", ""), "created_at": int(v.get("created_at", 0) or 0)}
+            return _json({"me": _usuario_actual(event), "is_admin": True, "users": [
+                {"username": k, "email": v.get("email", ""), "role": str(v.get("role", "admin")),
+                 "created_at": int(v.get("created_at", 0) or 0)}
                 for k, v in users.items()]})
         if sub == "/api/users" and method == "POST":
+            if not _es_admin(event):
+                return _json({"error": "Solo un administrador puede crear usuarios."}, 403)
             c = _body(event)
             username = str(c.get("username", "")).strip()
             pw = c.get("password") or ""
+            rol = "admin" if str(c.get("role", "user")) == "admin" else "user"
             if not username:
                 return _json({"error": "El usuario es obligatorio."}, 400)
             if not auth_dom.password_valida(pw):
@@ -516,17 +552,40 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             users = config.get_users() or {}
             if username in users:
                 return _json({"error": "Ya existe un usuario con ese nombre."}, 400)
-            users[username] = {"email": str(c.get("email", "")).strip(), "hash": auth_dom.hash_password(pw), "created_at": int(time.time())}
+            users[username] = {"email": str(c.get("email", "")).strip(), "hash": auth_dom.hash_password(pw),
+                               "role": rol, "created_at": int(time.time())}
             config.set_users(users)
-            _audit("user:crear", username)
+            _audit("user:crear", f"{username} ({rol})")
+            return _json({"ok": True})
+        if sub == "/api/users/role" and method == "POST":
+            # Cambiar el rol (admin ⇄ user). Solo admins; nunca dejar el panel sin administradores.
+            if not _es_admin(event):
+                return _json({"error": "Solo un administrador puede cambiar roles."}, 403)
+            c = _body(event)
+            username = str(c.get("username", "")).strip()
+            nuevo = "admin" if str(c.get("role", "")) == "admin" else "user"
+            users = config.get_users() or {}
+            if username not in users:
+                return _json({"error": "Usuario no encontrado."}, 400)
+            if username == admin_user():
+                # El admin principal (el del bootstrap ADMIN_USER) es el piso garantizado:
+                # nunca se degrada, así que el panel siempre tiene al menos un administrador.
+                return _json({"error": "El administrador principal no puede cambiar de rol."}, 400)
+            users[username]["role"] = nuevo
+            config.set_users(users)
+            _audit("user:rol", f"{username} → {nuevo}")
             return _json({"ok": True})
         if sub == "/api/users/delete" and method == "POST":
+            if not _es_admin(event):
+                return _json({"error": "Solo un administrador puede borrar usuarios."}, 403)
             username = str(_body(event).get("username", "")).strip()
             users = config.get_users() or {}
             if username not in users:
                 return _json({"error": "Usuario no encontrado."}, 400)
             if len(users) <= 1:
                 return _json({"error": "No puedes borrar el último usuario."}, 400)
+            if username == admin_user():
+                return _json({"error": "No puedes borrar al administrador principal."}, 400)
             if username == _usuario_actual(event):
                 return _json({"error": "No puedes borrar el usuario con el que iniciaste sesión."}, 400)
             del users[username]
@@ -707,6 +766,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     scheduled_at=sched or None,
                 )
             except ValueError as e:
+                # Auditamos el RECHAZO para que se vea EN LA APP por qué un envío "no salió"
+                # (p. ej. sin destinatarios por patrones de exclusión), no solo en el error del momento.
+                canales = "+".join([c for c, on in (("tg", a_tg), ("wa", a_wa)) if on])
+                _audit("broadcast:rechazado", f"[{canales}] {str(e)[:160]}")
                 return _json({"error": str(e)}, 400)
             canales = "+".join([c for c, on in (("tg", a_tg), ("wa", a_wa)) if on])
             _audit("broadcast" + (" (programado)" if sched else ""), f"[{canales}] {texto[:60]}")
@@ -1766,7 +1829,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
 </div></div>
 
 <div id="app">
- <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="conn_tg" class="pill" title="Estado del bot de Telegram" style="margin-right:6px"></span><span id="conn_wa" class="pill" title="Estado del servicio WhatsApp" style="margin-right:6px"></span><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span>
+ <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="conn_tg" class="pill" title="Estado del bot de Telegram" style="margin-right:6px"></span><span id="conn_wa" class="pill" title="Estado del servicio WhatsApp" style="margin-right:6px"></span><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span><span id="who_role" class="pill" style="display:none;margin-left:7px;padding:2px 8px;font-size:11px"></span>
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
  <nav class="nav">
    <button data-tab="inicio" onclick="showTab('inicio')">🏠 Inicio</button>
@@ -2134,15 +2197,19 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Crea uno arriba para enviarlo automáticamente.</p></div>
    <div style="margin-top:14px"><button class="sec" onclick="loadSchedules()">Refrescar</button></div>
   </div>
-  <div class="card accent" data-tab="ajustes" data-sub="cuenta"><h2>👥 Usuarios del panel <span id="usr_n" class="hint"></span></h2>
-   <div class="hint">Cada usuario entra con sus propias credenciales (independientes). El correo se usa para recuperar la contraseña.</div>
-   <div style="overflow-x:auto;margin-top:12px"><table id="usr_table"><thead><tr><th>Usuario</th><th>Correo</th><th></th></tr></thead><tbody id="usr_rows"></tbody></table></div>
+  <div class="card accent" id="usr_card" data-tab="ajustes" data-sub="cuenta" style="display:none"><h2>👥 Usuarios del panel <span id="usr_n" class="hint"></span></h2>
+   <div class="hint">Cada usuario entra con sus propias credenciales (independientes). El correo se usa para recuperar la contraseña. Solo un <b>administrador</b> ve esta sección y gestiona usuarios; los usuarios normales pueden hacer todo lo demás.</div>
+   <div style="overflow-x:auto;margin-top:12px"><table id="usr_table"><thead><tr><th>Usuario</th><th>Correo</th><th>Rol</th><th></th></tr></thead><tbody id="usr_rows"></tbody></table></div>
    <div class="section-label" style="margin-top:14px">Crear usuario</div>
    <div class="row">
      <div><label>Usuario o correo</label><input id="usr_new_name" placeholder="nuevo@correo.com"></div>
      <div><label>Correo (para recuperación)</label><input id="usr_new_email" placeholder="correo@dominio.com"></div>
    </div>
-   <label>Contraseña (mínimo 8)</label><input id="usr_new_pw" type="password">
+   <div class="row">
+     <div><label>Contraseña (mínimo 8)</label><input id="usr_new_pw" type="password"></div>
+     <div><label>Rol<span class="help" tabindex="0" data-tip="Administrador: gestiona usuarios y todo lo demás. Usuario: hace todo MENOS gestionar usuarios.">ⓘ</span></label>
+       <select id="usr_new_role"><option value="user" selected>Usuario (sin gestión de usuarios)</option><option value="admin">Administrador</option></select></div>
+   </div>
    <button style="margin-top:10px" onclick="createUser()">Crear usuario</button>
   </div>
   <div class="card" data-tab="ajustes" data-sub="cuenta"><h2>✉️ Correo de recuperación<span class="help" tabindex="0" data-tip="Servicio gratis (Resend, 100/día) para enviar el código de «¿Olvidaste tu contraseña?». Sin API key, el código se intenta enviar por el correo de alertas de AWS (SNS).">ⓘ</span> <span id="mail_status" class="hint"></span></h2>
@@ -2272,25 +2339,50 @@ async function fpReset(){
     $('fp_status').textContent='✅ Contraseña actualizada. Ya puedes iniciar sesión.'; $('fp_step2').style.display='none';
   }catch(e){ $('fp_status').textContent=e.message||'No se pudo restablecer.'; }
 }
-// --- usuarios del panel ---
-let USR_ME='';
+// --- usuarios del panel (solo administradores) ---
+let USR_ME='', IS_ADMIN=false;
+// Carga quién soy + mi rol; muestra/oculta la gestión de usuarios según sea admin.
+async function loadMe(){
+  try{ const m=await api('/api/me'); USR_ME=m.user||USR_ME; IS_ADMIN=!!m.is_admin;
+    const w=$('who'); if(w) w.title=(IS_ADMIN?'Administrador':'Usuario')+' · '+(m.user||'');
+    const badge=$('who_role'); if(badge){ badge.textContent=IS_ADMIN?'admin':'usuario'; badge.className='pill '+(IS_ADMIN?'active':'inactive'); badge.style.display='inline-block'; }
+    const card=$('usr_card'); if(card) card.style.display=IS_ADMIN?'':'none';
+    if(IS_ADMIN) loadUsers();
+  }catch(e){}
+}
+function roleBadge(rol){ return rol==='admin'
+  ? '<span class="pill active" style="padding:2px 8px">Administrador</span>'
+  : '<span class="pill inactive" style="padding:2px 8px">Usuario</span>'; }
 async function loadUsers(){
-  { const _u=$('usr_rows'); if(_u && !_u.children.length) skelTable('usr_rows',3,3); }
+  if(!IS_ADMIN) return;
+  { const _u=$('usr_rows'); if(_u && !_u.children.length) skelTable('usr_rows',4,3); }
   try{ const r=await api('/api/users'); USR_ME=r.me||''; const list=r.users||[];
     $('usr_n').textContent='· '+list.length;
-    $('usr_rows').innerHTML=list.map(u=>{ const me=u.username===USR_ME;
+    $('usr_rows').innerHTML=list.map(u=>{ const me=u.username===USR_ME; const rol=u.role||'admin';
+      const toggle = (rol==='admin')
+        ? `<button class="ghost" style="padding:4px 9px" onclick="setUserRole('${bcEsc(u.username)}','user')" title="Quitar permisos de administrador">↓ a usuario</button>`
+        : `<button class="ghost" style="padding:4px 9px" onclick="setUserRole('${bcEsc(u.username)}','admin')" title="Dar permisos de administrador">↑ a admin</button>`;
       return `<tr><td><b>${bcEsc(u.username)}</b>${me?' <span class="hint">(tú)</span>':''}</td><td>${bcEsc(u.email||'—')}</td>`+
-        `<td style="text-align:right">${me?'':`<button class="danger" style="padding:4px 9px" onclick="deleteUser('${bcEsc(u.username)}')">🗑</button>`}</td></tr>`; }).join('');
+        `<td>${roleBadge(rol)}</td>`+
+        `<td style="text-align:right;white-space:nowrap">${(u.username==='admin')?'<span class="hint">principal</span>':(toggle+' '+(me?'':`<button class="danger" style="padding:4px 9px" onclick="deleteUser('${bcEsc(u.username)}')">🗑</button>`))}</td></tr>`; }).join('');
   }catch(e){}
 }
 async function createUser(){
   const username=$('usr_new_name').value.trim(), email=$('usr_new_email').value.trim(), pw=$('usr_new_pw').value;
+  const role=($('usr_new_role')&&$('usr_new_role').value)||'user';
   if(!username||!pw){ toast('Usuario y contraseña requeridos',true); return; }
-  try{ const r=await fetch(BASE+'/api/users',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({username:username,email:email,password:pw})});
+  try{ const r=await fetch(BASE+'/api/users',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({username:username,email:email,password:pw,role:role})});
     const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status));
-    toast('✓ Usuario creado'); $('usr_new_name').value=''; $('usr_new_email').value=''; $('usr_new_pw').value=''; loadUsers();
+    toast('✓ Usuario creado'); $('usr_new_name').value=''; $('usr_new_email').value=''; $('usr_new_pw').value=''; if($('usr_new_role'))$('usr_new_role').value='user'; loadUsers();
   }catch(e){ toast(e.message||'Error al crear',true); }
 }
+async function setUserRole(u,role){
+  const txt = role==='admin' ? ('¿Dar permisos de ADMINISTRADOR a "'+u+'"? Podrá gestionar usuarios.')
+                             : ('¿Quitar a "'+u+'" los permisos de administrador? Pasará a usuario normal (sin gestión de usuarios).');
+  if(!await confirmModal(txt,{okText:'Cambiar rol',danger:role!=='admin'})) return;
+  try{ const r=await fetch(BASE+'/api/users/role',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({username:u,role:role})});
+    const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status)); toast('✓ Rol actualizado'); loadUsers();
+  }catch(e){ toast(e.message||'Error',true); } }
 async function deleteUser(u){ if(!await confirmModal('¿Borrar el usuario "'+u+'"?',{danger:true,okText:'Borrar'})) return;
   try{ const r=await fetch(BASE+'/api/users/delete',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({username:u})});
     const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status)); toast('✓ Usuario borrado'); loadUsers();
@@ -2355,11 +2447,11 @@ function renderSendingState(on){
   const hb=$('hdr_badge'); if(hb){
     if(on){ hb.style.display='none'; hb.onclick=null; }
     else { hb.style.display='inline-block'; hb.className='pill failed'; hb.style.cursor='pointer';
-      hb.title='Los envíos están en pausa — clic para activarlos'; hb.textContent='⏸ Pausado · activar'; hb.onclick=enableSending; }
+      hb.title='Envíos AUTOMÁTICOS en pausa (puedes seguir enviando manualmente) — clic para activarlos'; hb.textContent='⏸ Auto en pausa · activar'; hb.onclick=enableSending; }
   }
   const sb=$('send_banner'); if(sb){ sb.hidden=false;
-    if(on){ sb.className='active'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>Envíos activos.</b> Tus mensajes se entregan con normalidad.</span><button class="sb-pause" onclick="setSending(false)">Pausar envíos</button>'; }
-    else { sb.className='paused'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>⏸ Los envíos están EN PAUSA.</b> Ningún mensaje (Telegram ni WhatsApp) saldrá hasta que los actives. Lo que se captura queda en espera.</span><button class="sb-go" onclick="enableSending()">▶ Activar envíos</button>'; }
+    if(on){ sb.className='active'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>Envíos automáticos activos.</b> La captura del canal se entrega con normalidad.</span><button class="sb-pause" onclick="setSending(false)">Pausar automáticos</button>'; }
+    else { sb.className='paused'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>⏸ Envíos AUTOMÁTICOS en pausa.</b> La captura del canal queda en espera y no sale sola. <b>Tú sí puedes enviar manualmente</b> desde «Componer → Enviar en el momento».</span><button class="sb-go" onclick="enableSending()">▶ Activar automáticos</button>'; }
   }
 }
 async function pendingSummary(){
@@ -2373,7 +2465,7 @@ async function pendingSummary(){
   }catch(e){ return {planes:0,envios:0,items:[]}; }
 }
 async function setSending(on){
-  if(!on){ if(!(await confirmModal('¿Pausar TODOS los envíos (Telegram y WhatsApp)? Nada saldrá hasta que los reactives.',{okText:'Pausar envíos',danger:true}))){ renderSendingState(true); return; } }
+  if(!on){ if(!(await confirmModal('¿Pausar los envíos AUTOMÁTICOS? La captura del canal dejará de salir sola (queda en espera). Podrás seguir enviando manualmente desde «Componer → Enviar en el momento».',{okText:'Pausar automáticos',danger:true}))){ renderSendingState(true); return; } }
   else {
     toast('Calculando a quién se enviará…','info');
     const ps=await pendingSummary();
@@ -2392,7 +2484,7 @@ async function setSending(on){
     if(!(await confirmModal(msg,{okText:'Activar envíos',danger:ps.planes>0}))){ renderSendingState(false); return; }
   }
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sending_enabled:on})});
-    renderSendingState(on); toast(on?'✓ Envíos ACTIVADOS — los mensajes ya se entregan':'⏸ Envíos PAUSADOS', on?'info':'warn');
+    renderSendingState(on); toast(on?'✓ Envíos automáticos ACTIVADOS':'⏸ Automáticos en pausa — el envío manual sigue activo', on?'info':'warn');
     if($('k_sent')) loadDashboard(); }
   catch(e){ toast('Error al cambiar el estado',true); renderSendingState(!on); }
 }
@@ -2556,7 +2648,9 @@ async function refreshConn(){
     if(tg){ tg.className='pill '+(ok?'active':'failed'); tg.textContent=ok?('✈️ @'+(r.result.username||'bot')):'✈️ bot ✕'; } }
   catch(e){ if(tg){ tg.className='pill failed'; tg.textContent='✈️ ✕'; } }
   try{ const s=await api('/api/whatsapp/status'); const ok=s&&s.connected;
-    if(wa){ wa.className='pill '+(ok?'active':'failed'); wa.textContent=ok?'🟢 WhatsApp':'🟢 WA ✕'; wa.title=ok?('conectado'+(s.contacts?(' · '+s.contacts+' contactos'):'')):('desconectado'+(s.lastCloseMsg?(' · '+s.lastCloseMsg):'')); } }
+    if(wa){ const num=(ok&&s.me&&s.me.id)?('+'+String(s.me.id).split('@')[0].split(':')[0]):'';
+      wa.className='pill '+(ok?'active':'failed'); wa.textContent=ok?('🟢 '+(num||'WhatsApp')):'🟢 WA ✕';
+      wa.title=ok?((num?('WhatsApp '+num):'WhatsApp conectado')+(s.contacts?(' · '+s.contacts+' contactos'):'')):('desconectado'+(s.lastCloseMsg?(' · '+s.lastCloseMsg):'')); } }
   catch(e){ if(wa){ wa.className='pill inactive'; wa.textContent='🟢 WA ?'; wa.title='servicio no configurado o inaccesible'; } }
 }
 let CONN_TIMER=null;
@@ -2803,7 +2897,7 @@ function showTab(t){
   if(t==='envios'){ sgFillLists(); sgChan(); sgType(); loadSchedules(); }
   if(SUB_DEFAULT[t]){ showSub(t, (function(){try{return localStorage.getItem('sub_'+t)}catch(e){return null}})()||SUB_DEFAULT[t]); }
   window.scrollTo(0,0); }
-function boot(){ showTab((()=>{try{const s=localStorage.getItem('tab');return ['inicio','fuentes','envios','ajustes'].includes(s)?s:'inicio'}catch(e){return 'inicio'}})()); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
+function boot(){ showTab((()=>{try{const s=localStorage.getItem('tab');return ['inicio','fuentes','envios','ajustes'].includes(s)?s:'inicio'}catch(e){return 'inicio'}})()); loadMe(); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
 if(CRED && !sessionFresca()){ logout(); }
 else if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } else { logout(); } }).catch(()=>{}); }
 

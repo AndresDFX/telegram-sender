@@ -71,14 +71,15 @@ def _resolver_imagen(body: dict) -> str | None:
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     _ensure()
 
-    # Interruptor maestro: si los envíos están desactivados, NO enviar. Confirmamos (ack)
-    # los lotes en vuelo sin entregarlos para no reintentarlos ni mandarlos al reactivar.
+    # Interruptor maestro: en PAUSA NO se entregan los lotes AUTOMÁTICOS (captura del canal).
+    # Los lotes MANUALES (Componer → Enviar, body["manual"]=True) SÍ se entregan aun en pausa:
+    # la pausa solo frena lo automático. Los lotes automáticos descartados se confirman (ack)
+    # sin entregar, para no reintentarlos ni mandarlos al reactivar.
     try:
-        if not config_store.get().get("sending_enabled", True):
-            logger.info("Envíos PAUSADOS; se descartan %d registro(s) sin enviar.", len(event.get("Records", [])))
-            return {"batchItemFailures": []}
+        paused = not config_store.get().get("sending_enabled", True)
     except Exception:
         logger.exception("No se pudo leer sending_enabled; continúo (fail-open al envío)")
+        paused = False
 
     batch_item_failures: list[dict[str, str]] = []
 
@@ -86,6 +87,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         message_id = record.get("messageId")
         try:
             body = json.loads(record["body"])
+            # En pausa solo dejamos pasar lo manual; lo automático se descarta sin enviar (ack).
+            if paused and not body.get("manual"):
+                logger.info("Envíos PAUSADOS; lote automático %s descartado sin enviar", message_id)
+                continue
             # IDEMPOTENCIA: si este lote ya se entregó (reentrega SQS espuria), no reenviar.
             batch_id = body.get("batch_id")
             if batch_id and dedup.procesado(batch_id):

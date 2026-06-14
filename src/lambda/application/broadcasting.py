@@ -83,6 +83,7 @@ class BroadcastList:
         wa_text: str,
         wa_image_url: str | None,
         not_before: int = 0,
+        source: str = "channel",
     ) -> None:
         bs = int(cfg.get("batch_size", 150))
         tg_lotes = self._chunk(clientes, bs) if tg_on else []
@@ -108,6 +109,7 @@ class BroadcastList:
             wa_text=wa_text,
             wa_image_url=wa_image_url,
             not_before=int(not_before or 0),
+            source=source,
         )
 
     @staticmethod
@@ -297,8 +299,10 @@ class BroadcastList:
         contactos ad-hoc elegidos (telegram_ids/whatsapp_ids) > lista (telegram_list/whatsapp_list)
         > target configurado. WhatsApp manual EXIGE destinatarios concretos (no manda a todos)."""
         cfg = self._config.get()
-        if not cfg.get("sending_enabled", True):
-            raise ValueError("Envíos pausados: actívalos en la pestaña «Ajustes y estado» (interruptor de envíos) para poder enviar.")
+        # La PAUSA (interruptor maestro) solo frena los envíos AUTOMÁTICOS (captura del canal y
+        # difusión programada). El envío MANUAL desde «Componer → Enviar» SIEMPRE sale: el usuario
+        # lo pidió explícitamente. Por eso aquí NO se valida sending_enabled; el plan se marca
+        # source="manual" para que el dispatcher y el worker lo dejen pasar aunque esté en pausa.
         wa_on = bool(whatsapp and self._whatsapp)
         wa_mode, wa_ids = self._wa_destino(cfg, whatsapp_list, whatsapp_ids)
         if wa_on and (wa_mode != "only" or not wa_ids):
@@ -306,6 +310,19 @@ class BroadcastList:
                 "Elige contactos o una lista de WhatsApp en 'Enviar a' (evita mandar a todos por error)."
             )
         clientes = self._tg_clientes(cfg, telegram, telegram_list, telegram_ids)
+        # Sin destinatarios reales en NINGÚN canal no hay envío. En vez de fallar en silencio
+        # (crear un plan vacío que "no envía nada"), avisamos con la causa probable para que se
+        # vea EN LA APP por qué no salió: casi siempre, patrones de exclusión que dejan fuera a todos.
+        tg_count = len(clientes) if telegram else 0
+        wa_count = len(wa_ids) if wa_on else 0
+        if tg_count == 0 and wa_count == 0:
+            if telegram:
+                raise ValueError(
+                    "No hay destinatarios para este envío: la selección de Telegram quedó vacía. "
+                    "Revisa los patrones de exclusión (pestaña «Fuentes y listas» → Destinatarios): "
+                    "es probable que estén excluyendo a todos los contactos."
+                )
+            raise ValueError("No hay destinatarios para este envío: elige al menos un canal con contactos.")
         channels = (["telegram"] if telegram else []) + (["whatsapp"] if wa_on else [])
         bid = self._nuevo_id()
         self._registrar(bid, text, "manual", channels, len(clientes))
@@ -315,6 +332,7 @@ class BroadcastList:
                 bid, cfg=cfg, text=text, image_url=image_url or None, image_key=None,
                 clientes=clientes, tg_on=bool(telegram), wa_on=wa_on, wa_mode=wa_mode, wa_list_ids=wa_ids,
                 wa_text=text, wa_image_url=image_url or None, not_before=int(scheduled_at or 0),
+                source="manual",
             )
             return {"scheduled": True, "broadcast_id": bid, "channels": channels,
                     "telegram_total": len(clientes), "not_before": int(scheduled_at or 0)}

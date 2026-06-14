@@ -121,8 +121,10 @@ y endpoints (`/status`, `/qr`, `/pair`, `/reset`, `/reconnect`, `/sync`, `/send`
 
 `AdminUrl` (HTTP Basic Auth: `AdminUser`/`AdminPassword`). El panel es un único HTML/CSS/JS embebido
 (`_PAGE` en `entrypoints/admin.py`). Sobre todas las pestañas, una **barra global de estado de envíos**
-siempre visible muestra si los envíos están **ACTIVOS** (verde) o **EN PAUSA** (rojo) con acción directa
-para activar/pausar (al activar avisa cuántas difusiones hay en cola).
+siempre visible muestra si los envíos automáticos están **ACTIVOS** (verde) o **EN PAUSA** (rojo) con acción
+directa para activar/pausar (la pausa solo frena lo automático; el envío manual sigue disponible; al activar
+avisa cuántas difusiones hay en cola). El header muestra el bot de Telegram y el **número de WhatsApp conectado**,
+y un badge con el **rol** del usuario.
 
 Cuatro pestañas:
 
@@ -140,14 +142,20 @@ Cuatro pestañas:
   **Mensajes programados** (once/daily/weekly); **Envíos fraccionados** (monitor de planes con borrado
   individual/masivo).
 - **⚙️ Ajustes y estado**: Cuenta de Telegram (bot/userbot), WhatsApp (reenvío), **Correo de recuperación**
-  (Resend), cambio de contraseña, **interruptor maestro de envíos**, anti-baneo (lote/delays), ventana
-  horaria, cola/DLQ, auditoría y usuarios del panel.
+  (Resend), cambio de contraseña, **interruptor maestro de envíos** (solo automáticos), anti-baneo (lote/delays),
+  ventana horaria, cola/DLQ, auditoría y **usuarios del panel con roles** (gestión solo visible para administradores).
 
-API (Basic Auth) bajo `/admin/api/`: `config`, `subscribers`, `image`, `queue`, `dlq[/redrive|/purge]`,
-`audit`, `users`, `metrics`, `broadcast` (envío manual), `broadcast/preview`, `broadcasts[/delete]`,
+API (Basic Auth) bajo `/admin/api/`: `me`, `config`, `subscribers`, `image`, `queue`, `dlq[/redrive|/purge]`,
+`audit`, `users[/role|/delete]`, `metrics`, `broadcast` (envío manual), `broadcast/preview`, `broadcasts[/delete]`,
 `plans[/cancel|/delete]`, `schedules[/toggle|/delete]`, `auth/{forgot,reset,change-password}`,
 `telethon/{send-code,sign-in,logout}`, `whatsapp/{status,contacts,pair,reset,reconnect,sync,blocked}`,
 `telegram/{me,webhook}`. Endpoints **públicos** (sin auth, con anti-fuerza-bruta): `auth/forgot`, `auth/reset`.
+
+**Roles** (`role` en el registro del usuario: `admin` | `user`): un **administrador** gestiona usuarios (crear,
+borrar, promover/degradar) y hace todo lo demás; un **usuario** normal hace **todo MENOS gestionar usuarios**.
+Los endpoints `users[/role|/delete]` exigen rol admin (403 si no). El **admin principal** (bootstrap `ADMIN_USER`)
+no se degrada ni se borra (piso garantizado). Usuarios previos sin `role` se tratan como admin (compatibilidad);
+los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oculta la gestión según `/api/me`.
 
 ---
 
@@ -168,9 +176,13 @@ API (Basic Auth) bajo `/admin/api/`: `config`, `subscribers`, `image`, `queue`, 
   **UNIÓN** de todos los usuarios (`ConfigStore.get()` los unifica con `union_ordenada`); el panel muestra
   LO TUYO. Así no se pierden al guardar otra config (no pasan por `/api/config`). La infraestructura
   compartida (tokens, sesión, canal fuente, markup, listas, interruptor, anti-baneo, ventana) sigue **global**.
-- **Interruptor maestro** (`sending_enabled`): pausa/activa TODOS los envíos. La **captura del canal nunca se
-  detiene** — mientras está en pausa se crean planes EN ESPERA que salen al reactivar (la info no se pierde).
-  Auto-pausa anti-baneo tras 2 lotes totalmente fallidos.
+- **Interruptor maestro** (`sending_enabled`): pausa/activa los envíos **AUTOMÁTICOS** (captura del canal y
+  difusión programada). El **envío MANUAL** (Componer → Enviar) **SIEMPRE sale**, aun en pausa: el plan se marca
+  `source="manual"` y el dispatcher/worker lo dejan pasar (lo automático es `source="channel"`). La **captura del
+  canal nunca se detiene** — en pausa se crean planes EN ESPERA que salen al reactivar (la info no se pierde).
+  Si un envío manual queda **sin destinatarios** (p. ej. patrones que excluyen a todos) se rechaza con motivo y se
+  audita (`broadcast:rechazado`), para que se vea EN LA APP por qué "no envió". Auto-pausa anti-baneo tras 2 lotes
+  totalmente fallidos.
 - **Programación y fraccionado**: **schedules** (once/daily/weekly; `application/materialize_schedules.py` los
   materializa en envíos) y **plans** (envío fraccionado y secuencial: un lote a la vez con jitter y ventana
   horaria; `application/dispatch.py` los gotea). Un EventBridge cron dispara el dispatcher cada minuto.

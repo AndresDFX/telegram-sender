@@ -333,6 +333,39 @@ class SchedulerPathTests(unittest.TestCase):
         self.assertTrue(res["scheduled"])
         self.assertEqual(plans.creados[0]["not_before"], 1750000000)
 
+    def test_manual_etiqueta_source_manual(self):
+        # El plan manual se marca source="manual" (el dispatcher/worker lo dejan pasar en pausa).
+        plans = FakePlans()
+        cfg = FakeConfig(scheduling_enabled=True)
+        bl = BroadcastList(FakeSubs(["1", "2"]), FakeQueue(), cfg, plans=plans)
+        bl.enviar_manual("hola", telegram=True, whatsapp=False)
+        self.assertEqual(plans.creados[0]["source"], "manual")
+
+    def test_canal_etiqueta_source_channel(self):
+        plans = FakePlans()
+        cfg = FakeConfig(scheduling_enabled=True)
+        bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, plans=plans)
+        bl("A06 $100.000")
+        self.assertEqual(plans.creados[0]["source"], "channel")
+
+    def test_manual_sale_aunque_este_pausado(self):
+        # La PAUSA solo frena lo automático: el envío MANUAL crea su plan igual (sin lanzar error).
+        plans = FakePlans()
+        cfg = FakeConfig(scheduling_enabled=True, sending_enabled=False)
+        bl = BroadcastList(FakeSubs(["1", "2"]), FakeQueue(), cfg, plans=plans)
+        res = bl.enviar_manual("hola", telegram=True, whatsapp=False)
+        self.assertTrue(res["scheduled"])
+        self.assertEqual(plans.creados[0]["source"], "manual")
+
+    def test_manual_sin_destinatarios_se_rechaza_con_motivo(self):
+        # Si los patrones excluyen a todos, el manual no "no envía en silencio": avisa la causa.
+        subs = FakeSubs(["1", "2"], names={"1": "FAM Uno", "2": "FAM Dos"})
+        cfg = FakeConfig(scheduling_enabled=True, telegram_exclude_patterns=["fam"])
+        bl = BroadcastList(subs, FakeQueue(), cfg, plans=FakePlans())
+        with self.assertRaises(ValueError) as ctx:
+            bl.enviar_manual("hola", telegram=True, whatsapp=False)
+        self.assertIn("patrones de exclusión", str(ctx.exception))
+
     def test_fallback_legacy_si_no_hay_plans(self):
         # scheduling_enabled pero sin store de planes -> envío inmediato (compatibilidad)
         queue = FakeQueue()

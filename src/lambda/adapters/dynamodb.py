@@ -710,6 +710,7 @@ class DynamoDbPlanStore:
         wa_image_url: str | None = None,
         not_before: int = 0,
         ttl_days: int = 30,
+        source: str = "channel",
     ) -> None:
         from domain.scheduling import total_lotes
 
@@ -722,6 +723,9 @@ class DynamoDbPlanStore:
             "created_at": now,
             "not_before": int(not_before or 0),  # 0 = ya; >0 = programado para esa hora (epoch)
             "broadcast_id": broadcast_id,
+            # origen del plan: "manual" (Componer → Enviar) o "channel" (captura automática del canal).
+            # La PAUSA solo frena lo "channel"; los "manual" se despachan igual (el usuario los pidió).
+            "source": source if source in ("manual", "channel") else "channel",
             # OJO: este 'text' es el que SE ENVÍA (dispatch lo pasa a encolar_uno). Debe ser el
             # mensaje COMPLETO procesado, no un resumen: por eso el tope es 4096 (límite Telegram),
             # no 280. Truncarlo a 280 cortaba los envíos a la mitad de la lista.

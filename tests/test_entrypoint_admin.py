@@ -20,6 +20,7 @@ class FakeConfig:
         self.cfg = {"source_channel": "iproparts", "markup_percentage": 15.0, "currency_symbols": "$",
                     "strip_patterns": ["ubicad"], "whatsapp_footer": "", "image_url": "",
                     "send_mode": "bot", "telethon_api_id": "", "telethon_api_hash": "", "telethon_session": ""}
+        self.users = {}
 
     def get(self):
         return dict(self.cfg)
@@ -28,6 +29,12 @@ class FakeConfig:
         self.saved = cambios
         self.cfg.update(cambios)
         return dict(self.cfg)
+
+    def get_users(self):
+        return dict(self.users)
+
+    def set_users(self, users):
+        self.users = dict(users)
 
 
 class FakeSubs:
@@ -230,6 +237,78 @@ class AdminTests(unittest.TestCase):
         admin.config.cfg["telethon_session"] = "YA_EXISTE"
         admin.lambda_handler(_event("POST", "/admin/api/config", {"source_channel": "x", "telethon_session": ""}), None)
         self.assertNotIn("telethon_session", admin.config.saved)  # vacío → no se guarda (no borra)
+
+
+class RoleTests(unittest.TestCase):
+    """Roles: admin gestiona usuarios; los usuarios normales hacen todo MENOS eso."""
+
+    def setUp(self):
+        admin.config = FakeConfig()
+        admin.subscribers = FakeSubs()
+        admin.audit_store = FakeAudit()
+        os.environ["ADMIN_USER"] = "admin"
+        os.environ["ADMIN_PASSWORD"] = "secret123"
+        admin._AUTH["fails"] = 0; admin._AUTH["locked_until"] = 0.0
+        # Un usuario normal (rol "user") con contraseña válida para que pase el Basic Auth.
+        admin.config.users = {
+            "ana": {"email": "ana@x.com", "hash": admin.auth_dom.hash_password("clave1234"), "role": "user"},
+        }
+
+    def tearDown(self):
+        admin.config = admin.subscribers = admin.audit_store = None
+        os.environ.pop("ADMIN_USER", None)
+        os.environ.pop("ADMIN_PASSWORD", None)
+
+    def _ev(self, method, path, body=None, user="admin", pw="secret123"):
+        token = base64.b64encode(f"{user}:{pw}".encode()).decode()
+        return {
+            "rawPath": f"/dev{path}",
+            "requestContext": {"http": {"method": method, "path": f"/dev{path}"}},
+            "headers": {"authorization": f"Basic {token}"},
+            "body": json.dumps(body) if body is not None else None,
+        }
+
+    def test_me_admin_es_admin(self):
+        b = json.loads(admin.lambda_handler(self._ev("GET", "/admin/api/me"), None)["body"])
+        self.assertTrue(b["is_admin"]); self.assertEqual(b["role"], "admin")
+
+    def test_me_usuario_no_es_admin(self):
+        b = json.loads(admin.lambda_handler(self._ev("GET", "/admin/api/me", user="ana", pw="clave1234"), None)["body"])
+        self.assertFalse(b["is_admin"]); self.assertEqual(b["role"], "user")
+
+    def test_usuario_no_lista_usuarios_403(self):
+        r = admin.lambda_handler(self._ev("GET", "/admin/api/users", user="ana", pw="clave1234"), None)
+        self.assertEqual(r["statusCode"], 403)
+
+    def test_usuario_no_crea_usuarios_403(self):
+        r = admin.lambda_handler(self._ev("POST", "/admin/api/users",
+                                          {"username": "x", "password": "abcdefgh", "role": "user"},
+                                          user="ana", pw="clave1234"), None)
+        self.assertEqual(r["statusCode"], 403)
+        self.assertNotIn("x", admin.config.users)
+
+    def test_admin_crea_usuario_con_rol(self):
+        r = admin.lambda_handler(self._ev("POST", "/admin/api/users",
+                                          {"username": "leo", "password": "abcdefgh", "role": "user"}), None)
+        self.assertEqual(r["statusCode"], 200)
+        self.assertEqual(admin.config.users["leo"]["role"], "user")
+
+    def test_admin_puede_promover_y_degradar(self):
+        admin.lambda_handler(self._ev("POST", "/admin/api/users/role", {"username": "ana", "role": "admin"}), None)
+        self.assertEqual(admin.config.users["ana"]["role"], "admin")
+        admin.lambda_handler(self._ev("POST", "/admin/api/users/role", {"username": "ana", "role": "user"}), None)
+        self.assertEqual(admin.config.users["ana"]["role"], "user")
+
+    def test_no_degrada_al_admin_principal(self):
+        admin.config.users["admin"] = {"email": "", "hash": admin.auth_dom.hash_password("secret123"), "role": "admin"}
+        r = admin.lambda_handler(self._ev("POST", "/admin/api/users/role", {"username": "admin", "role": "user"}), None)
+        self.assertEqual(r["statusCode"], 400)
+
+    def test_no_borra_al_admin_principal(self):
+        admin.config.users["admin"] = {"email": "", "hash": admin.auth_dom.hash_password("secret123"), "role": "admin"}
+        r = admin.lambda_handler(self._ev("POST", "/admin/api/users/delete", {"username": "admin"}), None)
+        self.assertEqual(r["statusCode"], 400)
+        self.assertIn("admin", admin.config.users)
 
 
 if __name__ == "__main__":

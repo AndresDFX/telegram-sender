@@ -49,12 +49,21 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [])
         worker.deliver.assert_called_once_with("x", ["1", "2"], None)
 
-    def test_pausado_descarta_sin_enviar(self):
+    def test_pausado_descarta_lote_automatico(self):
+        # En pausa, un lote AUTOMÁTICO (sin flag manual) se descarta sin enviar.
         worker.config_store.get.return_value = {"sending_enabled": False}
         worker.deliver = MagicMock()
         event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1", "2"]})]}
         self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [])  # ack sin reencolar
         worker.deliver.assert_not_called()  # no se intenta enviar
+
+    def test_pausado_entrega_lote_manual(self):
+        # En pausa, un lote MANUAL (body["manual"]=True) SÍ se entrega: la pausa es solo automática.
+        worker.config_store.get.return_value = {"sending_enabled": False}
+        worker.deliver = MagicMock(return_value=_stats(2, sent=2))
+        event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1", "2"], "manual": True})]}
+        self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [])
+        worker.deliver.assert_called_once_with("x", ["1", "2"], None)
 
     def test_plan_cancelado_descarta_lote(self):
         worker.plans.descartar.return_value = True

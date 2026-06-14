@@ -47,14 +47,16 @@ class DispatchCampaigns:
 
     def __call__(self) -> dict:
         cfg = self._config.get()
-        # Interruptor maestro: si los envíos están desactivados, no se despacha NADA
-        # (ni Telegram ni WhatsApp). Las difusiones quedan en espera hasta reactivar.
-        if not cfg.get("sending_enabled", True):
-            return {"paused": True}
+        # Interruptor maestro: en PAUSA solo se frena lo AUTOMÁTICO (captura del canal y
+        # difusión programada → planes source="channel"). Los envíos MANUALES (Componer → Enviar,
+        # planes source="manual") SÍ se despachan: el usuario los pidió explícitamente.
+        paused = not cfg.get("sending_enabled", True)
         now = int(self._now())
         planes = self._plans.activos()
+        if paused:
+            planes = [p for p in planes if p.get("source") == "manual"]
         if not planes:
-            return {"planes": 0}
+            return {"paused": True} if paused else {"planes": 0}
 
         # Programación a hora exacta: solo despachamos planes cuyo not_before ya pasó.
         listos = [p for p in planes if int(p.get("not_before", 0)) <= now]
@@ -135,6 +137,8 @@ class DispatchCampaigns:
                 broadcast_id=bid,
                 batch_index=tg_next,
                 pid=pid,
+                # el worker lee este flag: en pausa entrega solo los lotes manuales (no los automáticos).
+                manual=(plan.get("source") == "manual"),
             )
             logger.info("Plan %s: despachado TG#%d (%d destinatarios)", pid, tg_next, len(ids))
             return {"plan": pid, "despachado": f"TG#{tg_next}", "n": len(ids)}

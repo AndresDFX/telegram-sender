@@ -71,8 +71,8 @@ class FakeQueue:
     def __init__(self):
         self.calls = []
 
-    def encolar_uno(self, text, chat_ids, image_url=None, image_key=None, broadcast_id=None, batch_index=0, pid=None):
-        self.calls.append({"text": text, "n": len(chat_ids), "bid": broadcast_id, "idx": batch_index, "pid": pid})
+    def encolar_uno(self, text, chat_ids, image_url=None, image_key=None, broadcast_id=None, batch_index=0, pid=None, manual=False):
+        self.calls.append({"text": text, "n": len(chat_ids), "bid": broadcast_id, "idx": batch_index, "pid": pid, "manual": manual})
 
 
 class FakeWa:
@@ -119,12 +119,21 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(queue.calls, [])
         self.assertEqual(plans.dispatched, [])
 
-    def test_pausado_no_despacha(self):
+    def test_pausado_no_despacha_automatico(self):
+        # En pausa, un plan AUTOMÁTICO (source channel/ausente) no se despacha.
         plans, queue = FakePlans(_plan()), FakeQueue()
         res = _disp(plans, queue=queue, config=FakeConfig(sending_enabled=False))()
         self.assertEqual(res, {"paused": True})
         self.assertEqual(queue.calls, [])  # nada se libera
         self.assertEqual(plans.dispatched, [])
+
+    def test_pausado_si_despacha_manual(self):
+        # En pausa, un plan MANUAL (source="manual") SÍ se despacha: la pausa es solo para automáticos.
+        plans, queue = FakePlans(_plan(source="manual")), FakeQueue()
+        res = _disp(plans, queue=queue, config=FakeConfig(sending_enabled=False))()
+        self.assertEqual(res.get("despachado"), "TG#0")
+        self.assertEqual(len(queue.calls), 1)
+        self.assertTrue(queue.calls[0]["manual"])  # el lote viaja marcado como manual
 
     def test_despacha_primer_lote_tg(self):
         plans, queue = FakePlans(_plan()), FakeQueue()
