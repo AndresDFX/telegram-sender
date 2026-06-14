@@ -2192,9 +2192,23 @@ function renderSendingState(on){
     else { sb.className='paused'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>⏸ Los envíos están EN PAUSA.</b> Ningún mensaje (Telegram ni WhatsApp) saldrá hasta que los actives. Lo que se captura queda en espera.</span><button class="sb-go" onclick="enableSending()">▶ Activar envíos</button>'; }
   }
 }
+async function pendingSummary(){
+  try{ const r=await api('/api/plans'); let planes=0,envios=0;
+    (r.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running'){ planes++; envios+=((p.tg&&p.tg.total)|0)+((p.wa&&p.wa.total)|0); } });
+    return {planes,envios};
+  }catch(e){ return {planes:0,envios:0}; }
+}
 async function setSending(on){
   if(!on){ if(!(await confirmModal('¿Pausar TODOS los envíos (Telegram y WhatsApp)? Nada saldrá hasta que los reactives.',{okText:'Pausar envíos',danger:true}))){ renderSendingState(true); return; } }
-  else { if(!(await confirmModal('¿Activar los envíos? A partir de ahora los mensajes —incluidos los que estén en cola— se entregarán a tus contactos, de forma gradual (anti-baneo).',{okText:'Activar envíos'}))){ renderSendingState(false); return; } }
+  else {
+    const ps=await pendingSummary();
+    let msg='¿Activar los envíos? A partir de ahora los mensajes se entregarán a tus contactos, de forma gradual (anti-baneo).';
+    if(ps.planes>0){
+      const ne = ps.envios>0 ? (' (~'+ps.envios.toLocaleString('es')+' envíos en total)') : '';
+      msg='⚠️ Hay '+ps.planes+' difusión(es) en cola'+ne+'. Al activar empezarán a salir de forma gradual a tus contactos. Si no quieres enviarlas, pausa y cancélalas primero (Ajustes → Interruptor de envíos). ¿Activar los envíos?';
+    }
+    if(!(await confirmModal(msg,{okText:'Activar envíos',danger:ps.planes>0}))){ renderSendingState(false); return; }
+  }
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sending_enabled:on})});
     renderSendingState(on); toast(on?'✓ Envíos ACTIVADOS — los mensajes ya se entregan':'⏸ Envíos PAUSADOS', on?'info':'warn');
     if($('k_sent')) loadDashboard(); }
