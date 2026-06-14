@@ -121,6 +121,38 @@ class TelethonContacts(_TelethonBase):
         return contactos
 
 
+class TelethonAccount(_TelethonBase):
+    """Estado de la sesión userbot: ¿sigue autorizada (válida) o hay que RENOVARLA? + identidad.
+
+    La usa el panel para mostrar en el header si la cuenta de Telegram con la que se envía está
+    conectada correctamente o caducó/se revocó (en cuyo caso hay que volver a iniciar sesión)."""
+
+    def estado(self) -> dict:
+        c = self._c()
+        try:
+            if not c.is_user_authorized():
+                # Hay sesión guardada pero Telegram ya no la acepta → hay que renovar (re-login).
+                return {"authorized": False, "me": None}
+            me = c.get_me()
+            nombre = " ".join(filter(None, [getattr(me, "first_name", ""), getattr(me, "last_name", "")]))
+            return {
+                "authorized": True,
+                "me": {
+                    "id": str(getattr(me, "id", "")),
+                    "name": nombre or (getattr(me, "username", "") or ""),
+                    "username": getattr(me, "username", "") or "",
+                    "phone": str(getattr(me, "phone", "") or ""),
+                },
+            }
+        finally:
+            # El verificador se llama en un poll (60s): cerramos la conexión para no acumularlas
+            # en contenedores Lambda calientes (cada request crea una instancia nueva).
+            try:
+                c.disconnect()
+            except Exception:
+                pass
+
+
 class ContactRecipients:
     """Adapta los contactos de Telethon a la interfaz que usan BroadcastList/DeliverBatch."""
 

@@ -727,6 +727,37 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json({"ok": True})
         if sub == "/api/telegram/me" and method == "GET":
             return _telegram_api("getMe", {})  # verifica el token + muestra el bot
+        if sub == "/api/telegram/account" and method == "GET":
+            # Estado de la IDENTIDAD que ENVÍA por Telegram, para el header:
+            #  - userbot: verifica la sesión de la cuenta (¿válida o hay que renovar?) + teléfono/nombre.
+            #  - bot: identidad del bot (getMe) + id numérico.
+            cfg = config.get()
+            if str(cfg.get("send_mode", "bot")).lower() == "userbot":
+                if not cfg.get("telethon_session"):
+                    return _json({"mode": "userbot", "configured": False, "connected": False, "needs_renew": True})
+                try:
+                    cuenta = wiring.build_telethon_account()
+                    est = cuenta.estado() if cuenta else {"authorized": False, "me": None}
+                    return _json({
+                        "mode": "userbot", "configured": True,
+                        "connected": bool(est.get("authorized")),
+                        "needs_renew": not bool(est.get("authorized")),
+                        "me": est.get("me"),
+                    })
+                except Exception:
+                    logger.exception("No se pudo verificar la sesión userbot de Telegram")
+                    # No afirmamos "renovar" ante un fallo transitorio: estado desconocido.
+                    return _json({"mode": "userbot", "configured": True, "connected": None, "needs_renew": False, "error": "no verificable"})
+            r = _telegram_api("getMe", {})
+            try:
+                res = json.loads(r["body"]).get("result") or {}
+            except Exception:
+                res = {}
+            ok = bool(res)
+            return _json({"mode": "bot", "configured": bool(cfg.get("bot_token") or os.environ.get("BOT_TOKEN")),
+                          "connected": ok, "needs_renew": not ok,
+                          "me": {"id": str(res.get("id", "")), "username": res.get("username", ""),
+                                 "name": res.get("first_name", "")} if ok else None})
         if sub == "/api/telegram/webhook" and method == "GET":
             return _telegram_api("getWebhookInfo", {})
         if sub == "/api/telegram/webhook" and method == "POST":
@@ -1829,7 +1860,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
 </div></div>
 
 <div id="app">
- <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="conn_tg" class="pill" title="Estado del bot de Telegram" style="margin-right:6px"></span><span id="conn_wa" class="pill" title="Estado del servicio WhatsApp" style="margin-right:6px"></span><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span><span id="who_role" class="pill" style="display:none;margin-left:7px;padding:2px 8px;font-size:11px"></span>
+ <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="conn_tg" class="pill" title="Estado del bot de Telegram" style="margin-right:6px"></span><span id="conn_tg_src" class="pill" title="Canal fuente del que Telegram lee las listas" style="margin-right:6px;display:none"></span><span id="conn_wa" class="pill" title="Estado del servicio WhatsApp" style="margin-right:6px"></span><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span><span id="who_role" class="pill" style="display:none;margin-left:7px;padding:2px 8px;font-size:11px"></span>
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
  <nav class="nav">
    <button data-tab="inicio" onclick="showTab('inicio')">🏠 Inicio</button>
@@ -2226,7 +2257,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>Nueva contraseña (mínimo 8)</label><input id="cp_new" type="password">
    <div style="margin-top:10px"><button onclick="changePassword()">Cambiar contraseña</button> <span id="cp_status" class="hint" style="margin-left:10px"></span></div>
   </div>
-  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Interruptor de envíos<span class="help" tabindex="0" data-tip="Pausa o activa TODOS los envíos (Telegram y WhatsApp). La captura del canal NUNCA se detiene: lo capturado en pausa queda en espera y sale al reactivar.">ⓘ</span></h2>
+  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Interruptor de envíos<span class="help" tabindex="0" data-tip="Pausa o activa los envíos AUTOMÁTICOS (captura del canal y difusión programada). El envío MANUAL (Componer → Enviar) SIEMPRE sale, aun en pausa. La captura del canal NUNCA se detiene: lo capturado en pausa queda en espera y sale al reactivar.">ⓘ</span></h2>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
      <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos activos</b></label>
      <span id="sys_badge" class="pill">—</span>
@@ -2395,8 +2426,15 @@ async function changePassword(){
     $('cp_status').textContent='✅ Contraseña cambiada'; $('cp_cur').value=''; $('cp_new').value=''; toast('✓ Contraseña cambiada');
   }catch(e){ $('cp_status').textContent=e.message||''; toast(e.message||'Error',true); }
 }
+let SRC_CHANNEL='';
+// Badge del header con el canal fuente al que Telegram está integrado (de dónde lee las listas).
+function renderTgSource(){ const e=$('conn_tg_src'); if(!e) return;
+  const ch=(SRC_CHANNEL||'').replace(/^@/,'').trim();
+  if(ch){ e.style.display='inline-block'; e.className='pill'; e.textContent='📡 @'+ch; e.title='Canal fuente del que Telegram lee las listas: @'+ch; }
+  else{ e.style.display='none'; } }
 async function loadCfg(){ const c=await api('/api/config');
   ['source_channel','markup_percentage','currency_symbols','whatsapp_footer','image_url','telethon_api_id','telethon_api_hash'].forEach(k=>$(k).value=c[k]??'');
+  SRC_CHANNEL=(c.source_channel||'').trim(); renderTgSource();
   $('send_mode').value=c.send_mode||'bot';
   $('sess_status').textContent = c.telethon_session_set ? '· conectada ✓' : '· no configurada';
   $('bot_status').textContent = c.bot_token_set ? '· configurado ✓' : '· no configurado';
@@ -2644,9 +2682,26 @@ async function loadAudit(){
 // --- Estado de conexiones (Telegram bot + WhatsApp) en el header ---
 async function refreshConn(){
   const tg=$('conn_tg'), wa=$('conn_wa');
-  try{ const r=await api('/api/telegram/me'); const ok=r&&(r.ok&&r.result);
-    if(tg){ tg.className='pill '+(ok?'active':'failed'); tg.textContent=ok?('✈️ @'+(r.result.username||'bot')):'✈️ bot ✕'; } }
-  catch(e){ if(tg){ tg.className='pill failed'; tg.textContent='✈️ ✕'; } }
+  try{ const a=await api('/api/telegram/account');
+    if(tg){ tg.onclick=null; tg.style.cursor='';
+      const irCuenta=()=>{ showTab('ajustes'); try{ showSub('ajustes','cuenta'); }catch(e){} };
+      if(a.mode==='userbot'){
+        const me=a.me||{}; const phone=me.phone?('+'+String(me.phone).replace(/^\+/,'')):''; const who=phone||me.name||'cuenta';
+        if(a.connected===true){ tg.className='pill active'; tg.textContent='✈️ '+who+' ✓';
+          tg.title='Cuenta de Telegram '+(me.name||'')+(phone?(' ('+phone+')'):'')+' · sesión válida ✓'; }
+        else if(a.connected===false){ tg.className='pill failed'; tg.style.cursor='pointer'; tg.textContent='✈️ Telegram: renovar ✕';
+          tg.title='La sesión de Telegram caducó o se revocó — clic para volver a conectar la cuenta (Ajustes → Cuenta de Telegram)';
+          tg.onclick=irCuenta; }
+        else { tg.className='pill inactive'; tg.textContent='✈️ Telegram ?'; tg.title='No se pudo verificar la sesión de Telegram ahora mismo'; }
+      } else {
+        const me=a.me||{}; const uname=me.username?('@'+me.username):'bot'; const id=me.id?(' · '+me.id):'';
+        if(a.connected){ tg.className='pill active'; tg.textContent='✈️ '+uname+id;
+          tg.title='Bot de Telegram: '+(me.name||'')+' '+uname+(me.id?(' · ID '+me.id):''); }
+        else { tg.className='pill failed'; tg.style.cursor='pointer'; tg.textContent='✈️ bot ✕';
+          tg.title='El bot de Telegram no responde (¿token?) — clic para revisar'; tg.onclick=irCuenta; }
+      }
+    } }
+  catch(e){ if(tg){ tg.className='pill failed'; tg.textContent='✈️ ✕'; tg.onclick=null; } }
   try{ const s=await api('/api/whatsapp/status'); const ok=s&&s.connected;
     if(wa){ const num=(ok&&s.me&&s.me.id)?('+'+String(s.me.id).split('@')[0].split(':')[0]):'';
       wa.className='pill '+(ok?'active':'failed'); wa.textContent=ok?('🟢 '+(num||'WhatsApp')):'🟢 WA ✕';

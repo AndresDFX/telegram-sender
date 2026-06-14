@@ -311,5 +311,62 @@ class RoleTests(unittest.TestCase):
         self.assertIn("admin", admin.config.users)
 
 
+class TelegramAccountTests(unittest.TestCase):
+    """/api/telegram/account: estado de la identidad que envía (userbot: ¿válida o renovar?)."""
+
+    def setUp(self):
+        admin.config = FakeConfig()
+        admin.subscribers = FakeSubs()  # evita que _ensure() haga I/O real (build_subscribers)
+        admin.audit_store = FakeAudit()
+        os.environ["ADMIN_USER"] = "admin"; os.environ["ADMIN_PASSWORD"] = "secret123"
+        admin._AUTH["fails"] = 0; admin._AUTH["locked_until"] = 0.0
+        self._wiring_orig = admin.wiring.build_telethon_account
+
+    def tearDown(self):
+        admin.wiring.build_telethon_account = self._wiring_orig
+        admin.config = admin.subscribers = admin.audit_store = None
+        os.environ.pop("ADMIN_USER", None); os.environ.pop("ADMIN_PASSWORD", None)
+
+    def _ev(self):
+        token = base64.b64encode(b"admin:secret123").decode()
+        return {"rawPath": "/dev/admin/api/telegram/account",
+                "requestContext": {"http": {"method": "GET", "path": "/dev/admin/api/telegram/account"}},
+                "headers": {"authorization": f"Basic {token}"}, "body": None}
+
+    def test_userbot_sin_sesion_pide_renovar(self):
+        admin.config.cfg["send_mode"] = "userbot"; admin.config.cfg["telethon_session"] = ""
+        b = json.loads(admin.lambda_handler(self._ev(), None)["body"])
+        self.assertEqual(b["mode"], "userbot"); self.assertFalse(b["configured"]); self.assertTrue(b["needs_renew"])
+
+    def test_userbot_conectada(self):
+        admin.config.cfg["send_mode"] = "userbot"; admin.config.cfg["telethon_session"] = "SESS"
+
+        class FakeAcc:
+            def estado(self):
+                return {"authorized": True, "me": {"id": "1", "name": "Yo", "username": "yo", "phone": "573001112233"}}
+        admin.wiring.build_telethon_account = lambda: FakeAcc()
+        b = json.loads(admin.lambda_handler(self._ev(), None)["body"])
+        self.assertTrue(b["connected"]); self.assertFalse(b["needs_renew"]); self.assertEqual(b["me"]["phone"], "573001112233")
+
+    def test_userbot_sesion_revocada_pide_renovar(self):
+        admin.config.cfg["send_mode"] = "userbot"; admin.config.cfg["telethon_session"] = "SESS"
+
+        class FakeAcc:
+            def estado(self):
+                return {"authorized": False, "me": None}
+        admin.wiring.build_telethon_account = lambda: FakeAcc()
+        b = json.loads(admin.lambda_handler(self._ev(), None)["body"])
+        self.assertFalse(b["connected"]); self.assertTrue(b["needs_renew"])
+
+    def test_userbot_error_no_afirma_renovar(self):
+        admin.config.cfg["send_mode"] = "userbot"; admin.config.cfg["telethon_session"] = "SESS"
+
+        def _boom():
+            raise RuntimeError("telethon caído")
+        admin.wiring.build_telethon_account = _boom
+        b = json.loads(admin.lambda_handler(self._ev(), None)["body"])
+        self.assertIsNone(b["connected"]); self.assertFalse(b["needs_renew"])  # estado desconocido, no falsa alarma
+
+
 if __name__ == "__main__":
     unittest.main()

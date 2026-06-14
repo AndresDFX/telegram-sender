@@ -123,8 +123,10 @@ y endpoints (`/status`, `/qr`, `/pair`, `/reset`, `/reconnect`, `/sync`, `/send`
 (`_PAGE` en `entrypoints/admin.py`). Sobre todas las pestañas, una **barra global de estado de envíos**
 siempre visible muestra si los envíos automáticos están **ACTIVOS** (verde) o **EN PAUSA** (rojo) con acción
 directa para activar/pausar (la pausa solo frena lo automático; el envío manual sigue disponible; al activar
-avisa cuántas difusiones hay en cola). El header muestra el bot de Telegram y el **número de WhatsApp conectado**,
-y un badge con el **rol** del usuario.
+avisa cuántas difusiones hay en cola). El header muestra: la **identidad de Telegram que envía** (en userbot, el
+**teléfono** de la cuenta con ✓ si la sesión es válida o **«renovar»** clicable si caducó/se revocó → lleva a
+Ajustes → Cuenta de Telegram; en modo bot, `@usuario · ID`), el **canal fuente** al que está integrado
+(`📡 @canal`), el **número de WhatsApp conectado**, y un badge con el **rol** del usuario.
 
 Cuatro pestañas:
 
@@ -149,7 +151,8 @@ API (Basic Auth) bajo `/admin/api/`: `me`, `config`, `subscribers`, `image`, `qu
 `audit`, `users[/role|/delete]`, `metrics`, `broadcast` (envío manual), `broadcast/preview`, `broadcasts[/delete]`,
 `plans[/cancel|/delete]`, `schedules[/toggle|/delete]`, `auth/{forgot,reset,change-password}`,
 `telethon/{send-code,sign-in,logout}`, `whatsapp/{status,contacts,pair,reset,reconnect,sync,blocked}`,
-`telegram/{me,webhook}`. Endpoints **públicos** (sin auth, con anti-fuerza-bruta): `auth/forgot`, `auth/reset`.
+`telegram/{me,account,webhook}` (`account` = estado de la sesión userbot: válida o a renovar). Endpoints
+**públicos** (sin auth, con anti-fuerza-bruta): `auth/forgot`, `auth/reset`.
 
 **Roles** (`role` en el registro del usuario: `admin` | `user`): un **administrador** gestiona usuarios (crear,
 borrar, promover/degradar) y hace todo lo demás; un **usuario** normal hace **todo MENOS gestionar usuarios**.

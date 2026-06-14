@@ -21,7 +21,7 @@ from adapters.dynamodb import (
 from adapters.s3 import S3ImageStore
 from adapters.sqs import InlineBroadcastQueue, SqsBroadcastQueue, SqsQueueStats
 from adapters.telegram import TelegramSender
-from adapters.telethon_user import CachedContacts, ContactRecipients, TelethonContacts, TelethonUserSender
+from adapters.telethon_user import CachedContacts, ContactRecipients, TelethonAccount, TelethonContacts, TelethonUserSender
 from adapters.tme import TmePreviewChannelReader
 from adapters.whatsapp import HttpWhatsAppForwarder
 from application.broadcasting import BroadcastList
@@ -144,6 +144,18 @@ def build_contacts_source() -> TelethonContacts | None:
     store = build_config_store()
     cfg = store.get()
     return _telethon_contacts(cfg) if _es_userbot(cfg) else None
+
+
+def build_telethon_account() -> TelethonAccount | None:
+    """Verificador del estado de la sesión userbot (¿válida o hay que renovar?). None en modo bot."""
+    cfg = build_config_store().get()
+    if not _es_userbot(cfg):
+        return None
+    return TelethonAccount(
+        api_id=cfg.get("telethon_api_id") or None,
+        api_hash=cfg.get("telethon_api_hash") or None,
+        session=cfg.get("telethon_session") or None,
+    )
 
 
 def build_handle_command() -> HandleCommand:
