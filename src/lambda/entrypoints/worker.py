@@ -104,6 +104,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             stats = deliver(body["text"], body.get("chat_ids", []), _resolver_imagen(body))
             logger.info("Lote %s procesado: %s", body.get("batch_index"), stats.resumen())
             bid = body.get("broadcast_id")
+            # Auditoría: guarda la razón legible del fallo (idempotente: set + last_error, no infla
+            # contadores aunque el lote se reintente). Responde "¿por qué falló este envío?".
+            if bid and stats.errores:
+                try:
+                    broadcasts.registrar_error(bid, "Telegram — " + stats.errores[0])
+                except Exception:
+                    logger.exception("No se pudo registrar la razón de fallo del envío %s", bid)
             fallo_total = stats.total > 0 and stats.failed == stats.total
             # Solo contamos si el lote NO se va a reencolar: si reencola (fallo total), un ADD
             # aquí se reaplicaría en cada reintento SQS e inflaría los contadores.

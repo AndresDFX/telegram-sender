@@ -159,6 +159,10 @@ class BroadcastList:
         if not aceptado and self._broadcasts:
             try:
                 self._broadcasts.marcar_whatsapp_fallido(broadcast_id)
+                try:
+                    self._broadcasts.registrar_error(broadcast_id, "WhatsApp — el servicio no aceptó el envío (¿conectado/URL/token?)")
+                except Exception:
+                    pass
             except Exception:
                 logger.exception("No se pudo marcar WhatsApp fallido en el job %s", broadcast_id)
 

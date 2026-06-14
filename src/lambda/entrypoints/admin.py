@@ -1525,6 +1525,7 @@ img.preview{box-shadow:var(--sh-sm)}
 tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .tbl-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
 .tbl-toolbar .grow{flex:1}
+.bc-err{color:var(--bad);font-size:11px;margin-top:4px;line-height:1.35;max-width:240px;cursor:help}
 th.selcol,td.selcol{width:34px;text-align:center}
 </style></head><body>
 
@@ -2573,7 +2574,7 @@ function bcRow(b){
     `<td class="selcol"><input type="checkbox" class="bcsel" data-id="${b.id}" onchange="bcSelChanged()"></td>`+
     `<td class="bc-msg"><b title="${bcEsc(txt)}">${bcEsc(txt)}</b>`+
       `<div class="bc-meta"><span class="bc-src">${bcEsc(b.source||'manual')}</span><span>${bcFmtTime(b.created_at)}</span></div></td>`+
-    `<td><span class="pill ${st}">${bcEsc(label)}</span></td>`+
+    `<td><span class="pill ${st}">${bcEsc(label)}</span>${b.last_error?`<div class="bc-err" title="${bcEsc((b.error_reasons||[]).join('  |  ')||b.last_error)}">⚠ ${bcEsc(String(b.last_error).slice(0,72))}</div>`:''}</td>`+
     `<td><div class="chprog">${bcChanCell(false,b.telegram)}${bcChanCell(true,b.whatsapp)}</div></td>`+
     `<td style="text-align:right;white-space:nowrap"><button class="danger" style="padding:4px 9px" title="Borrar definitivamente" onclick="bcDelete('${b.id}')">🗑</button></td>`;
   return tr;

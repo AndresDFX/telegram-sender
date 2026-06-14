@@ -580,6 +580,8 @@ class DynamoDbBroadcastStore:
                     "source": j.get("source", ""),
                     "channels": list(j.get("channels", [])),
                     "status": self._estado(j),
+                    "last_error": j.get("last_error", ""),
+                    "error_reasons": sorted(j.get("error_reasons")) if j.get("error_reasons") else [],
                     "telegram": {
                         "total": int(j.get("tg_total", 0)),
                         "sent": int(j.get("tg_sent", 0)),
@@ -593,6 +595,24 @@ class DynamoDbBroadcastStore:
                 }
             )
         return salida
+
+    def registrar_error(self, broadcast_id: str, reason: str) -> None:
+        """Guarda la razón legible de un fallo del envío (auditoría). Atómico y acotado:
+        `error_reasons` es un String Set (dedupe) y `last_error` la más reciente. Idempotente
+        ante reintentos del lote (no infla nada). Best-effort: nunca rompe el envío."""
+        reason = str(reason or "")[:200]
+        if not reason:
+            return
+        try:
+            self._t().update_item(
+                Key={"id": broadcast_id},
+                UpdateExpression="ADD error_reasons :r SET last_error = :le, last_error_at = :t",
+                ExpressionAttributeValues={":r": {reason}, ":le": reason, ":t": int(time.time())},
+                ConditionExpression="attribute_exists(id)",
+            )
+        except Exception:
+            logger = __import__("logging").getLogger(__name__)
+            logger.exception("No se pudo registrar la razón de fallo del envío %s", broadcast_id)
 
     def borrar(self, broadcast_id: str) -> None:
         """Borra DEFINITIVAMENTE un envío de la tabla (no solo a nivel visual)."""

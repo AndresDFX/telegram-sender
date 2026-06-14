@@ -33,6 +33,7 @@ class BroadcastStats:
     blocked: int = 0
     failed: int = 0
     failed_ids: list[str] = field(default_factory=list)
+    errores: list[str] = field(default_factory=list)  # razones legibles de fallo (auditoría)
 
     def resumen(self) -> dict[str, int]:
         return {"total": self.total, "sent": self.sent, "blocked": self.blocked, "failed": self.failed}

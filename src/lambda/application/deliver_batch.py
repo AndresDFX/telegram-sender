@@ -54,9 +54,13 @@ class DeliverBatch:
                     self._inactivar(chat_id)
                 else:
                     stats.sent += 1
-            except Exception:
+            except Exception as exc:
                 stats.failed += 1
                 stats.failed_ids.append(chat_id)
+                if len(stats.errores) < 5:  # acotado: razones distintas para la auditoría
+                    razon = f"{type(exc).__name__}: {exc}"[:200]
+                    if razon not in stats.errores:
+                        stats.errores.append(razon)
                 logger.exception("Error enviando mensaje al chat %s", chat_id)
 
             self._wait()
