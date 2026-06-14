@@ -270,7 +270,7 @@ class BroadcastList:
         > target configurado. WhatsApp manual EXIGE destinatarios concretos (no manda a todos)."""
         cfg = self._config.get()
         if not cfg.get("sending_enabled", True):
-            raise ValueError("Envíos pausados: actívalos en la pestaña Programación para poder enviar.")
+            raise ValueError("Envíos pausados: actívalos en la pestaña «Ajustes y estado» (interruptor de envíos) para poder enviar.")
         wa_on = bool(whatsapp and self._whatsapp)
         wa_mode, wa_ids = self._wa_destino(cfg, whatsapp_list, whatsapp_ids)
         if wa_on and (wa_mode != "only" or not wa_ids):

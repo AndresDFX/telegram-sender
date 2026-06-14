@@ -1989,7 +1989,9 @@ const $ = id => document.getElementById(id);
 let CRED = sessionStorage.getItem('cred') || '';
 function hdr(extra){ return Object.assign({Authorization:'Basic '+CRED}, extra||{}); }
 async function api(p, opt){ opt=opt||{}; opt.headers=hdr(opt.headers); const r=await fetch(BASE+p,opt);
-  if(r.status===401){ logout(); throw new Error('401'); } if(!r.ok) throw new Error(r.status); return r.json(); }
+  if(r.status===401){ logout(); throw new Error('401'); }
+  if(!r.ok){ let _m=''; try{ _m=(await r.json()).error||''; }catch(e){} throw new Error(_m||('error '+r.status)); }
+  return r.json(); }
 function toast(m,v){ const t=$('toast'); t.textContent=m;
   const cls = v===true ? 'err' : (typeof v==='string' && v ? v : '');  // true=err (compat); 'info'/'warn'/'err'
   t.className='toast show'+(cls?' '+cls:''); setTimeout(()=>t.className='toast',2200); }
@@ -2531,7 +2533,7 @@ async function sendBroadcast(){
     bcClear();
     showTab('envios');
     loadBroadcasts();
-  }catch(e){ $('bc_status').textContent=''; toast('Error al programar',true); }
+  }catch(e){ const _m=e.message||'Error al programar'; $('bc_status').textContent=_m; toast(_m,true); }
   finally{ btn.disabled=false; btn.classList.remove('btn-loading'); }
 }
 // Al abrir la pestaña Enviar: rellenar listas + previsualizar (hook aditivo sobre showTab).
