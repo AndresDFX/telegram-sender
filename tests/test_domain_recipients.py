@@ -6,7 +6,11 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "lambda"))
 
-from domain.recipients import filtrar_destinatarios, ids_de_listas_activas  # noqa: E402
+from domain.recipients import (  # noqa: E402
+    filtrar_destinatarios,
+    ids_de_listas_activas,
+    ids_excluidos_por_patron,
+)
 
 LISTS = [
     {"name": "VIP", "ids": ["1", "2"]},
@@ -14,6 +18,30 @@ LISTS = [
     {"name": "vacia", "ids": []},
 ]
 TODOS = ["1", "2", "3", "4", "5"]
+
+
+class ExcluirPorPatronTests(unittest.TestCase):
+    CONTACTOS = [
+        {"chatId": "1", "name": "FAM Juan"},
+        {"chatId": "2", "name": "María (familia)"},
+        {"chatId": "3", "name": "Proveedor Norte"},
+        {"chatId": "4", "name": "cliente #vip"},
+        {"id": "5", "name": ""},
+    ]
+
+    def test_substring_case_insensitive(self):
+        # "fam" coincide con "FAM Juan" y "familia" (sin distinguir mayúsculas)
+        self.assertEqual(ids_excluidos_por_patron(self.CONTACTOS, ["fam"]), {"1", "2"})
+
+    def test_simbolo_y_varios_patrones(self):
+        self.assertEqual(ids_excluidos_por_patron(self.CONTACTOS, ["#", "norte"]), {"3", "4"})
+
+    def test_acepta_id_o_chatId_y_ignora_sin_nombre(self):
+        self.assertEqual(ids_excluidos_por_patron(self.CONTACTOS, ["cliente"]), {"4"})
+
+    def test_patrones_vacios_no_excluye(self):
+        self.assertEqual(ids_excluidos_por_patron(self.CONTACTOS, []), set())
+        self.assertEqual(ids_excluidos_por_patron(self.CONTACTOS, ["", "  "]), set())
 
 
 class RecipientsTests(unittest.TestCase):

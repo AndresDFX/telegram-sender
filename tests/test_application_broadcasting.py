@@ -115,7 +115,7 @@ class BroadcastListTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None):
+            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None, exclude_patterns=None, **kwargs):
                 self.calls.append((text, image_url, list(exclude), mode, list(list_ids or [])))
                 return {"accepted": True}
 
@@ -149,7 +149,7 @@ class BroadcastListTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None):
+            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None, exclude_patterns=None, **kwargs):
                 self.calls.append((mode, list(list_ids or [])))
                 return {}
 
@@ -169,7 +169,7 @@ class BroadcastListTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None):
+            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None, exclude_patterns=None, **kwargs):
                 self.calls.append((text, broadcast_id))
                 return {}
 
@@ -205,7 +205,7 @@ class BroadcastListTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
 
-            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None):
+            def forward(self, text, image_url, exclude, *, mode="all", list_ids=None, broadcast_id=None, broadcasts_table=None, exclude_patterns=None, **kwargs):
                 self.calls.append((mode, list(list_ids or [])))
                 return {"accepted": True}
 
@@ -269,7 +269,7 @@ class SchedulerPathTests(unittest.TestCase):
 
     def test_manual_wa_resuelve_total_via_contar(self):
         class FakeWa:
-            def contar(self, *, mode="all", list_ids=None, exclude=None):
+            def contar(self, *, mode="all", list_ids=None, exclude=None, exclude_patterns=None):
                 return 7
 
             def forward(self, *a, **k):

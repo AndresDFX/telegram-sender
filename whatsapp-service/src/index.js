@@ -439,10 +439,17 @@ app.post('/blocked/clear', auth, (req, res) => {
 // Resuelve a quién enviar según el modo de targeting y las listas de distribución.
 // mode: "all" | "only" (whitelist sobre list_ids) | "except" (blacklist sobre list_ids).
 // Compara contra el jid completo y contra el número (id sin @dominio).
-function resolverTargets(mode, list_ids, exclude) {
+function resolverTargets(mode, list_ids, exclude, exclude_patterns) {
   const ex = new Set((exclude || []).map(String))
   const sel = new Set((list_ids || []).map(String))
+  // Patrones de auto-exclusión por NOMBRE (p. ej. "FAM"): substring sin distinguir mayúsculas.
+  const pats = (exclude_patterns || []).map((p) => String(p).trim().toLowerCase()).filter(Boolean)
   const enSeleccion = (id) => sel.has(id) || sel.has(id.split('@')[0])
+  const coincidePatron = (id) => {
+    if (!pats.length) return false
+    const nombre = String(contacts[id] || '').toLowerCase()
+    return pats.some((p) => nombre.includes(p))
+  }
   // .sort() -> orden ESTABLE: el conteo y los slices [offset,limit) del envío fraccionado
   // se mantienen coherentes entre llamadas aunque cambie el orden de inserción.
   return Object.keys(contacts)
@@ -450,6 +457,7 @@ function resolverTargets(mode, list_ids, exclude) {
       if (!id.endsWith('@s.whatsapp.net')) return false
       if (ex.has(id) || ex.has(id.split('@')[0])) return false
       if ((failures[id] || 0) >= BLOQUEO_UMBRAL) return false // opt-out: auto-excluido por fallos
+      if (coincidePatron(id)) return false // auto-excluido por patrón de nombre
       if (mode === 'only') return enSeleccion(id)
       if (mode === 'except') return !enSeleccion(id)
       return true
@@ -540,9 +548,9 @@ app.post('/send', auth, (req, res) => {
     text = '', image_url = null, exclude = [], mode = 'all', list_ids = [],
     broadcast_id = null, broadcasts_table = null,
     count_only = false, offset = null, limit = null, bc_total = null,
-    delay_min_ms = null, delay_max_ms = null,
+    delay_min_ms = null, delay_max_ms = null, exclude_patterns = [],
   } = req.body || {}
-  const all = resolverTargets(mode, list_ids, exclude) // orden estable
+  const all = resolverTargets(mode, list_ids, exclude, exclude_patterns) // orden estable
   if (count_only) return res.json({ count: all.length, mode })
   if (!connected || !sock) return res.status(409).json({ error: 'whatsapp_no_conectado' })
   const off = Number(offset) || 0

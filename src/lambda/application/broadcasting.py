@@ -17,7 +17,7 @@ import uuid
 
 from application.ports import BroadcastQueue, ConfigStore, ImageStore, SubscriberRepository, WhatsAppForwarder
 from domain.message import componer_mensaje
-from domain.recipients import filtrar_destinatarios, ids_de_listas_activas
+from domain.recipients import filtrar_destinatarios, ids_de_listas_activas, ids_excluidos_por_patron
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +57,12 @@ class BroadcastList:
         Si falta el store (p.ej. tests) cae al envío inmediato (compatibilidad)."""
         return bool(cfg.get("scheduling_enabled")) and self._plans is not None
 
-    def _resolver_wa_total(self, wa_on: bool, mode: str, list_ids, exclude) -> tuple[int, bool]:
+    def _resolver_wa_total(self, wa_on: bool, mode: str, list_ids, exclude, exclude_patterns=()) -> tuple[int, bool]:
         """(total, resuelto). Si el servicio no responde, el dispatcher lo resolverá luego."""
         if not (wa_on and self._whatsapp):
             return 0, True
         try:
-            return int(self._whatsapp.contar(mode=mode, list_ids=list(list_ids or []), exclude=list(exclude or []))), True
+            return int(self._whatsapp.contar(mode=mode, list_ids=list(list_ids or []), exclude=list(exclude or []), exclude_patterns=list(exclude_patterns or []))), True
         except Exception:
             logger.exception("No se pudo contar WhatsApp al crear el plan; el dispatcher lo resolverá")
             return 0, False
@@ -87,7 +87,9 @@ class BroadcastList:
         bs = int(cfg.get("batch_size", 150))
         tg_lotes = self._chunk(clientes, bs) if tg_on else []
         wa_exclude = cfg.get("whatsapp_excluded", []) if wa_on else []
-        wa_total, wa_resolved = self._resolver_wa_total(wa_on, wa_mode, wa_list_ids, wa_exclude)
+        wa_total, wa_resolved = self._resolver_wa_total(
+            wa_on, wa_mode, wa_list_ids, wa_exclude, cfg.get("whatsapp_exclude_patterns", [])
+        )
         self._plans.crear(
             bid,
             broadcast_id=bid,
@@ -129,12 +131,25 @@ class BroadcastList:
                 logger.exception("No se pudo firmar la imagen para WhatsApp")
         return None
 
+    def _excluidos_patron_tg(self, cfg: dict) -> set[str]:
+        """IDs a auto-excluir porque su nombre coincide con algún patrón configurado
+        (p. ej. 'FAM'). En modo bot no hay nombres -> conjunto vacío."""
+        patrones = cfg.get("telegram_exclude_patterns", []) or []
+        if not patrones:
+            return set()
+        try:
+            return ids_excluidos_por_patron(self._subscribers.listar_todos(), patrones)
+        except Exception:
+            logger.exception("No se pudieron aplicar patrones de exclusión de Telegram")
+            return set()
+
     def _destinatarios_telegram(self, cfg: dict, target: dict | None = None) -> list:
+        excluidos = list(cfg.get("excluded_ids", [])) + list(self._excluidos_patron_tg(cfg))
         return filtrar_destinatarios(
             self._subscribers.listar_activos(),
             cfg.get("telegram_lists", []),
             target if target is not None else cfg.get("telegram_target", {}),
-            excluidos=cfg.get("excluded_ids", []),
+            excluidos=excluidos,
         )
 
     def _forward_whatsapp(
@@ -150,6 +165,7 @@ class BroadcastList:
                 list_ids=sorted(list_ids),
                 broadcast_id=broadcast_id,
                 broadcasts_table=self._broadcasts_table(),
+                exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
             )
             logger.info("WhatsApp forward: %s", resultado)
             aceptado = isinstance(resultado, dict) and bool(resultado.get("accepted"))

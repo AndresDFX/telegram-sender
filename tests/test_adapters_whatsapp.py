@@ -40,6 +40,7 @@ class WhatsAppForwarderTests(unittest.TestCase):
                 "text": "hola",
                 "image_url": "http://img",
                 "exclude": ["1", "2"],
+                "exclude_patterns": [],
                 "mode": "all",
                 "list_ids": [],
                 "broadcast_id": None,

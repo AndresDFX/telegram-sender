@@ -36,6 +36,7 @@ class HttpWhatsAppForwarder(WhatsAppForwarder):
         bc_total: int | None = None,
         delay_min_ms: int | None = None,
         delay_max_ms: int | None = None,
+        exclude_patterns: list[str] | None = None,
     ) -> dict:
         if not self._url or not self._token:
             return {"skipped": "whatsapp no configurado"}
@@ -43,6 +44,7 @@ class HttpWhatsAppForwarder(WhatsAppForwarder):
             "text": text,
             "image_url": image_url,
             "exclude": list(exclude or []),
+            "exclude_patterns": list(exclude_patterns or []),  # auto-excluir por patrón de nombre
             "mode": mode or "all",
             "list_ids": list(list_ids or []),
             "broadcast_id": broadcast_id,
@@ -61,14 +63,16 @@ class HttpWhatsAppForwarder(WhatsAppForwarder):
             payload["delay_max_ms"] = int(delay_max_ms)
         return self._post("/send", payload)
 
-    def contar(self, *, mode: str = "all", list_ids: list[str] | None = None, exclude: list[str] | None = None) -> int:
+    def contar(self, *, mode: str = "all", list_ids: list[str] | None = None, exclude: list[str] | None = None,
+               exclude_patterns: list[str] | None = None) -> int:
         """Cuántos contactos resolvería el servicio para (mode, list_ids, exclude). Lo usa el
         plan para saber en cuántos lotes fraccionar WhatsApp. Lanza si el servicio no responde."""
         if not self._url or not self._token:
             return 0
         resp = self._post(
             "/send",
-            {"mode": mode or "all", "list_ids": list(list_ids or []), "exclude": list(exclude or []), "count_only": True},
+            {"mode": mode or "all", "list_ids": list(list_ids or []), "exclude": list(exclude or []),
+             "exclude_patterns": list(exclude_patterns or []), "count_only": True},
         )
         return int(resp.get("count", 0))
 
@@ -112,8 +116,10 @@ class NullWhatsAppForwarder(WhatsAppForwarder):
         bc_total: int | None = None,
         delay_min_ms: int | None = None,
         delay_max_ms: int | None = None,
+        exclude_patterns: list[str] | None = None,
     ) -> dict:
         return {"skipped": "disabled"}
 
-    def contar(self, *, mode: str = "all", list_ids: list[str] | None = None, exclude: list[str] | None = None) -> int:
+    def contar(self, *, mode: str = "all", list_ids: list[str] | None = None, exclude: list[str] | None = None,
+               exclude_patterns: list[str] | None = None) -> int:
         return 0

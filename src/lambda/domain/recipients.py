@@ -28,6 +28,27 @@ def ids_de_listas_activas(lists: Iterable[dict], target: dict) -> set[str]:
     return seleccion
 
 
+def ids_excluidos_por_patron(contactos: Iterable[dict], patrones: Iterable[str]) -> set[str]:
+    """IDs de contactos cuyo NOMBRE contiene (sin distinguir mayúsculas) alguno de los
+    patrones dados. Sirve para AUTO-EXCLUIR, p. ej., 'FAM' (familia) o '#' que aparezcan en
+    cualquier lugar del nombre. `contactos` = iterable de dicts con 'name' y 'chatId'|'id'.
+    Patrones vacíos -> conjunto vacío (no excluye nada)."""
+    pats = [str(p).strip().lower() for p in (patrones or []) if str(p).strip()]
+    if not pats:
+        return set()
+    fuera: set[str] = set()
+    for c in contactos or []:
+        c = c or {}
+        nombre = str(c.get("name", "") or "").lower()
+        if not nombre:
+            continue
+        if any(p in nombre for p in pats):
+            cid = str(c.get("chatId") or c.get("id") or "")
+            if cid:
+                fuera.add(cid)
+    return fuera
+
+
 def filtrar_destinatarios(
     todos: Iterable,
     lists: Iterable[dict],

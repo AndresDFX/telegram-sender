@@ -113,6 +113,7 @@ class WhatsAppForwarder(ABC):
         bc_total: int | None = None,
         delay_min_ms: int | None = None,
         delay_max_ms: int | None = None,
+        exclude_patterns: list[str] | None = None,
     ) -> dict:
         """Reenvía la lista al servicio de WhatsApp (fire-and-forget). No-op si no está configurado.
 
@@ -124,7 +125,8 @@ class WhatsAppForwarder(ABC):
         delay_min_ms/delay_max_ms: rango de delay ALEATORIO entre mensajes (anti-patrón).
         """
 
-    def contar(self, *, mode: str = "all", list_ids: list[str] | None = None, exclude: list[str] | None = None) -> int:
+    def contar(self, *, mode: str = "all", list_ids: list[str] | None = None, exclude: list[str] | None = None,
+               exclude_patterns: list[str] | None = None) -> int:
         """Cuántos contactos resolvería el servicio (para fraccionar). Default 0 (no-op)."""
         return 0
 

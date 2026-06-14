@@ -186,6 +186,9 @@ class DynamoDbConfigStore(ConfigStore):
         # Correo transaccional (recuperación de contraseña).
         "resend_api_key",
         "mail_from",
+        # Auto-exclusión por patrón de nombre (por canal).
+        "telegram_exclude_patterns",
+        "whatsapp_exclude_patterns",
     )
     _CONTACTS_ID = "__contacts__"
     _LOGIN_ID = "__telethon_login__"  # sesión temporal del login userbot (entre código y confirmación)
@@ -240,6 +243,9 @@ class DynamoDbConfigStore(ConfigStore):
             # Correo transaccional (Resend) para recuperar contraseña.
             "resend_api_key": os.environ.get("RESEND_API_KEY", ""),
             "mail_from": os.environ.get("MAIL_FROM", ""),
+            # Patrones de auto-exclusión por nombre (por canal). Listas de strings.
+            "telegram_exclude_patterns": [],
+            "whatsapp_exclude_patterns": [],
         }
 
     def get(self) -> dict:
@@ -271,6 +277,8 @@ class DynamoDbConfigStore(ConfigStore):
         cfg["window_start"] = str(cfg["window_start"])
         cfg["window_end"] = str(cfg["window_end"])
         cfg["window_tz"] = int(float(cfg["window_tz"]))
+        cfg["telegram_exclude_patterns"] = [str(x) for x in (cfg.get("telegram_exclude_patterns") or [])]
+        cfg["whatsapp_exclude_patterns"] = [str(x) for x in (cfg.get("whatsapp_exclude_patterns") or [])]
         return cfg
 
     @staticmethod

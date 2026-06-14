@@ -80,8 +80,12 @@ _CAMPOS_EDITABLES = (
     # Correo transaccional (recuperación de contraseña vía Resend).
     "resend_api_key",
     "mail_from",
+    # Auto-exclusión por patrón de nombre (p. ej. "FAM"), por canal.
+    "telegram_exclude_patterns",
+    "whatsapp_exclude_patterns",
 )
-_LISTAS = ("strip_patterns", "excluded_ids", "whatsapp_excluded")
+_LISTAS = ("strip_patterns", "excluded_ids", "whatsapp_excluded",
+           "telegram_exclude_patterns", "whatsapp_exclude_patterns")
 _LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
 _TARGETS = ("telegram_target", "whatsapp_target")
 _FLOATS = ("tg_delay_min", "tg_delay_max")
@@ -1628,6 +1632,8 @@ tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .segf button:hover{color:var(--tx2);background:rgba(255,255,255,.05);filter:none;box-shadow:none}
 .segf button.on{background:rgba(253,83,30,.16);color:#FFE0D3}
 .segf button.on.exc{background:rgba(251,191,36,.16);color:#FCE7B0}
+.excl-pat{margin:12px 0;padding:12px 14px;background:var(--bg);border:1px solid var(--bd);border-radius:10px}
+.pill.pat{background:rgba(251,146,60,.14);color:#FFC79A;border-color:rgba(251,146,60,.32)}
 .bc-err{color:var(--bad);font-size:11px;margin-top:4px;line-height:1.35;max-width:240px;cursor:pointer;border-bottom:1px dotted rgba(255,107,90,.5);display:inline-block}
 .bc-err:hover{color:#ff8f7d}
 .bc-err:focus-visible{outline:2px solid var(--ac2);outline-offset:2px;border-radius:3px}
@@ -1855,6 +1861,12 @@ th.selcol,td.selcol{width:34px;text-align:center}
        <button data-v="exc" onclick="setStateFilter('exc')">⛔ Excluidos</button>
      </div>
    </div>
+   <div class="excl-pat">
+     <label style="margin:0 0 6px">⛔ Auto-excluir por patrón de nombre</label>
+     <div class="hint" style="margin:0 0 8px">Un patrón por línea. Cualquier contacto cuyo nombre <b>contenga</b> un patrón (sin distinguir mayúsculas) queda excluido solo de los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>.</div>
+     <textarea id="tg_excl_pat" style="min-height:62px" placeholder="FAM&#10;#"></textarea>
+     <button style="margin-top:8px" onclick="saveExclPatterns('telegram')">Guardar patrones</button>
+   </div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
      <button class="sec" onclick="toggleAll(true)">Marcar visibles</button>
      <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
@@ -1894,6 +1906,12 @@ th.selcol,td.selcol{width:34px;text-align:center}
        <button data-v="inc" onclick="setWaStateFilter('inc')">✅ Incluidos</button>
        <button data-v="exc" onclick="setWaStateFilter('exc')">⛔ Excluidos</button>
      </div>
+   </div>
+   <div class="excl-pat">
+     <label style="margin:0 0 6px">⛔ Auto-excluir por patrón de nombre</label>
+     <div class="hint" style="margin:0 0 8px">Un patrón por línea. Cualquier contacto cuyo nombre <b>contenga</b> un patrón (sin distinguir mayúsculas) queda excluido solo de los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>.</div>
+     <textarea id="wa_excl_pat" style="min-height:62px" placeholder="FAM&#10;#"></textarea>
+     <button style="margin-top:8px" onclick="saveExclPatterns('whatsapp')">Guardar patrones</button>
    </div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
      <button class="sec" onclick="waToggleAll(true)">Marcar visibles</button>
@@ -2227,7 +2245,17 @@ async function loadCfg(){ const c=await api('/api/config');
   if($('window_enabled')) $('window_enabled').checked = !!c.window_enabled;
   if($('mail_from')) $('mail_from').value=c.mail_from||'';
   if($('mail_status')) $('mail_status').textContent = c.resend_api_key_set ? '· API key configurada ✓' : '· sin API key (usa SNS)';
+  EXCL_PAT_TG=c.telegram_exclude_patterns||[]; WA_EXCL_PAT=c.whatsapp_exclude_patterns||[];
+  if($('tg_excl_pat')) $('tg_excl_pat').value=EXCL_PAT_TG.join('\n');
+  if($('wa_excl_pat')) $('wa_excl_pat').value=WA_EXCL_PAT.join('\n');
   renderSendingState(c.sending_enabled!==false); }
+async function saveExclPatterns(canal){
+  const id = canal==='telegram' ? 'tg_excl_pat' : 'wa_excl_pat';
+  const lines = ($(id).value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({[canal+'_exclude_patterns']:lines})});
+    toast('✓ Patrones guardados');
+    if(canal==='telegram'){ EXCL_PAT_TG=lines; try{render();}catch(e){} } else { WA_EXCL_PAT=lines; try{renderWa();}catch(e){} } }
+  catch(e){ toast('Error al guardar',true); } }
 async function saveEmail(){ const b={ mail_from:($('mail_from').value||'').trim() };
   const k=$('resend_api_key').value; if(k) b.resend_api_key=k.trim();
   $('mail_save_status').textContent='guardando...';
@@ -2487,13 +2515,16 @@ async function loadDashboard(){
   }catch(e){ if($('dash_estado')) $('dash_estado').textContent='no se pudo cargar el resumen';
     ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e2=$(id); if(e2) e2.classList.remove('kpi-load');}); }
 }
-let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0, STATEF='';
+let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0, STATEF='', EXCL_PAT_TG=[];
 const PAGE_SIZE=50;
+function nameMatchesPatterns(name, pats){ const n=String(name||'').toLowerCase();
+  return (pats||[]).some(p=>{ p=String(p).trim().toLowerCase(); return p && n.includes(p); }); }
+function isExcludedTg(s){ return EXCLUDED.has(String(s.chatId)) || nameMatchesPatterns(s.name, EXCL_PAT_TG); }
 function filtered(){ let arr=DEST;
   if(FILTER){ const q=FILTER.toLowerCase();
     arr=arr.filter(s=> (s.name||'').toLowerCase().includes(q) || String(s.chatId||'').toLowerCase().includes(q) || String(s.phone||'').toLowerCase().includes(q)); }
-  if(STATEF==='inc') arr=arr.filter(s=>!EXCLUDED.has(String(s.chatId)));
-  else if(STATEF==='exc') arr=arr.filter(s=>EXCLUDED.has(String(s.chatId)));
+  if(STATEF==='inc') arr=arr.filter(s=>!isExcludedTg(s));
+  else if(STATEF==='exc') arr=arr.filter(s=>isExcludedTg(s));
   return arr; }
 function setStateFilter(v){ STATEF=v; PAGE=0;
   document.querySelectorAll('#seg_tg button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.classList.toggle('exc',on&&v==='exc'); });
@@ -2503,16 +2534,19 @@ function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length
   const slice=f.slice(PAGE*PAGE_SIZE,(PAGE+1)*PAGE_SIZE);
   const t=$('subs'); t.innerHTML=''; $('selall').checked=false;
   $('subsempty').style.display=DEST.length?'none':'block';
-  const inc=DEST.length-EXCLUDED.size;
-  $('subcount').textContent = DEST.length ? `· ${f.length} en vista · ${inc} incluidos · ${EXCLUDED.size} excluidos` : '';
+  const exCount=DEST.filter(isExcludedTg).length; const inc=DEST.length-exCount;
+  $('subcount').textContent = DEST.length ? `· ${f.length} en vista · ${inc} incluidos · ${exCount} excluidos` : '';
   $('pageinfo').textContent = f.length ? `página ${PAGE+1} de ${pages}` : 'sin resultados';
-  slice.forEach(s=>{ const ex=EXCLUDED.has(String(s.chatId)); const label=s.name||'(sin nombre)'; const tr=document.createElement('tr');
+  slice.forEach(s=>{ const exM=EXCLUDED.has(String(s.chatId)); const exP=!exM && nameMatchesPatterns(s.name, EXCL_PAT_TG); const label=s.name||'(sin nombre)'; const tr=document.createElement('tr');
+    const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido · patrón</span>':'<span class="pill active">Incluido</span>');
     tr.innerHTML=`<td><input type="checkbox" class="selrow" data-id="${s.chatId}"></td>`+
       `<td><b>${bcEsc(label)}</b><div class="hint" style="margin-top:2px;font-size:11px">${bcEsc(s.phone||s.chatId||'')}</div></td>`+
-      `<td><span class="pill ${ex?'inactive':'active'}">${ex?'Excluido':'Incluido'}</span></td>`;
+      `<td>${pill}</td>`;
     t.appendChild(tr); }); }
 async function loadSubs(){ const [d,c]=await Promise.all([api('/api/subscribers'),api('/api/config')]);
-  DEST=d.subscribers||[]; EXCLUDED=new Set((c.excluded_ids||[]).map(String)); render(); }
+  DEST=d.subscribers||[]; EXCLUDED=new Set((c.excluded_ids||[]).map(String));
+  EXCL_PAT_TG=c.telegram_exclude_patterns||[]; if($('tg_excl_pat')) $('tg_excl_pat').value=EXCL_PAT_TG.join('\n');
+  render(); }
 function onSearch(){ FILTER=$('subsearch').value.trim(); PAGE=0; render(); }
 function prevPage(){ PAGE--; render(); }
 function nextPage(){ PAGE++; render(); }
@@ -2568,15 +2602,16 @@ async function createListFromGrid(ch){
   toast('✓ Lista "'+n+'" creada con '+ids.length+' contactos');
 }
 // --- contactos de WhatsApp (para armar listas de WhatsApp) ---
-let WA_DEST=[], WA_PAGE=0, WA_EXCLUDED=new Set(), WA_STATEF='';
+let WA_DEST=[], WA_PAGE=0, WA_EXCLUDED=new Set(), WA_STATEF='', WA_EXCL_PAT=[];
+function isExcludedWa(c){ return WA_EXCLUDED.has(String(c.id||'')) || nameMatchesPatterns(waName(c), WA_EXCL_PAT); }
 function waName(c){ return c.name || '(sin nombre)'; }
 async function loadWaContacts(){ $('wa_c_count').textContent='· cargando...';
   try{ const r=await api('/api/whatsapp/contacts'); WA_DEST=r.contacts||[]; WA_PAGE=0; renderWa(); }
   catch(e){ $('wa_c_count').textContent='· servicio inaccesible (¿conectado?)'; } }
 function waFiltered(){ let arr=WA_DEST; const q=($('wa_search').value||'').trim().toLowerCase();
   if(q) arr=arr.filter(c=> waName(c).toLowerCase().includes(q) || String(c.id||'').toLowerCase().includes(q));
-  if(WA_STATEF==='inc') arr=arr.filter(c=>!WA_EXCLUDED.has(String(c.id||'')));
-  else if(WA_STATEF==='exc') arr=arr.filter(c=>WA_EXCLUDED.has(String(c.id||'')));
+  if(WA_STATEF==='inc') arr=arr.filter(c=>!isExcludedWa(c));
+  else if(WA_STATEF==='exc') arr=arr.filter(c=>isExcludedWa(c));
   return arr; }
 function setWaStateFilter(v){ WA_STATEF=v; WA_PAGE=0;
   document.querySelectorAll('#seg_wa button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.classList.toggle('exc',on&&v==='exc'); });
@@ -2584,11 +2619,12 @@ function setWaStateFilter(v){ WA_STATEF=v; WA_PAGE=0;
 function renderWa(){ const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
   if(WA_PAGE>=pages)WA_PAGE=pages-1; if(WA_PAGE<0)WA_PAGE=0; const slice=f.slice(WA_PAGE*PAGE_SIZE,(WA_PAGE+1)*PAGE_SIZE);
   const t=$('wa_subs'); t.innerHTML='';
-  const inc=WA_DEST.length-WA_EXCLUDED.size;
-  $('wa_c_count').textContent = WA_DEST.length ? `· ${f.length} en vista · ${inc} incluidos · ${WA_EXCLUDED.size} excluidos` : '';
-  slice.forEach(c=>{ const id=String(c.id||''); const ex=WA_EXCLUDED.has(id); const tr=document.createElement('tr');
+  const exCount=WA_DEST.filter(isExcludedWa).length; const inc=WA_DEST.length-exCount;
+  $('wa_c_count').textContent = WA_DEST.length ? `· ${f.length} en vista · ${inc} incluidos · ${exCount} excluidos` : '';
+  slice.forEach(c=>{ const id=String(c.id||''); const exM=WA_EXCLUDED.has(id); const exP=!exM && nameMatchesPatterns(waName(c), WA_EXCL_PAT); const tr=document.createElement('tr');
+    const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido · patrón</span>':'<span class="pill active">Incluido</span>');
     tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${bcEsc(waName(c))}</b><div class="hint" style="margin-top:2px;font-size:11px">${bcEsc(id)}</div></td>`+
-      `<td><span class="pill ${ex?'inactive':'active'}">${ex?'Excluido':'Incluido'}</span></td>`; t.appendChild(tr); });
+      `<td>${pill}</td>`; t.appendChild(tr); });
   $('wa_pageinfo').textContent=f.length?`página ${WA_PAGE+1} de ${pages}`:'sin resultados'; }
 function waSelectedIds(){ return [...document.querySelectorAll('.wsel:checked')].map(c=>String(c.dataset.id)); }
 function waToggleAll(v){ document.querySelectorAll('.wsel').forEach(c=>c.checked=v); }
