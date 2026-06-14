@@ -13,7 +13,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 ONCE, DAILY, WEEKLY = "once", "daily", "weekly"
-TIPOS = (ONCE, DAILY, WEEKLY)
 
 
 def hhmm(at: str) -> tuple[int, int] | None:

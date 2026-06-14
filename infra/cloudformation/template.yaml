@@ -521,6 +521,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:Query
+                  - dynamodb:Scan # listar_todos (modo bot) para auto-exclusión por patrón de nombre
                   - dynamodb:UpdateItem # registrar_suscriptor (/start, /stop)
                 Resource:
                   - !GetAtt SubscribersTable.Arn
@@ -722,6 +723,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:Query # suscriptores activos (GSI)
+                  - dynamodb:Scan # listar_todos (modo bot) para auto-exclusión por patrón de nombre
                 Resource:
                   - !GetAtt SubscribersTable.Arn
                   - !Sub "${SubscribersTable.Arn}/index/*"

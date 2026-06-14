@@ -516,11 +516,14 @@ async function enviarLote(text, image_url, targets, track) {
   let sent = 0, failed = 0, sentDelta = 0, failedDelta = 0
   for (const jid of targets) {
     try {
+      const hasText = !!(text && String(text).trim())
       if (image_url) {
         await sock.sendMessage(jid, { image: { url: image_url } })
-        if (text) await sock.sendMessage(jid, { text })
-      } else {
+        if (hasText) await sock.sendMessage(jid, { text })
+      } else if (hasText) {
         await sock.sendMessage(jid, { text })
+      } else {
+        continue // nada que enviar (sin texto ni imagen): no cuenta como enviado ni fallido
       }
       sent++; sentDelta++
       if (failures[jid]) { delete failures[jid]; scheduleSaveFailures() } // envío OK -> limpia fallos

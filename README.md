@@ -48,16 +48,18 @@ WhatsApp: Lambda(broadcasting) ─HTTP─► whatsapp-service (Baileys, Render) 
 
 ```
 src/lambda/
-├── domain/         markup.py, message.py, recipients.py (listas: all/only/except), models.py
-├── application/    broadcasting.py (canal + envío manual), deliver_batch.py, onboarding.py,
-│                   poll_channel.py, ports.py (interfaces)
-├── adapters/       dynamodb.py (subs, dedup, HWM, config, BroadcastStore), sqs.py, telegram.py,
-│                   telethon_user.py (userbot), tme.py (scrape), whatsapp.py (forwarder), s3.py, config.py
-├── entrypoints/    receiver.py, poller.py, worker.py, admin.py (panel + API)
+├── domain/         markup.py, message.py, recipients.py (listas all/only/except + exclusión por patrón),
+│                   models.py, auth.py, scheduling.py, schedules.py
+├── application/    broadcasting.py (canal + envío manual), deliver_batch.py, dispatch.py (fraccionado),
+│                   materialize_schedules.py, onboarding.py, poll_channel.py, ports.py (interfaces)
+├── adapters/       dynamodb.py (subs, dedup, HWM, config, Broadcast/Plan/Schedule/Audit stores), sqs.py,
+│                   telegram.py, telethon_user.py + telethon_login.py (userbot), tme.py (scrape),
+│                   whatsapp.py (forwarder), email_sender.py (Resend), s3.py, config.py
+├── entrypoints/    receiver.py, poller.py, worker.py, dispatcher.py, admin.py (panel + API)
 └── wiring.py
 whatsapp-service/   servicio Node/Baileys (Docker) — ver su README
 infra/cloudformation/template.yaml   stack AWS completo
-scripts/            package-lambda.ps1, deploy.ps1, vincular-whatsapp-local.ps1, generar_sesion.py
+scripts/            package-lambda.ps1, _build_lambda_pkg.py, deploy.ps1, vincular-whatsapp-local.ps1, generar_sesion.py
 specs/              especificaciones por fase
 ```
 
@@ -117,30 +119,59 @@ y endpoints (`/status`, `/qr`, `/pair`, `/reset`, `/reconnect`, `/sync`, `/send`
 
 ## 4. Panel de administración
 
-`AdminUrl` (HTTP Basic Auth: `AdminUser`/`AdminPassword`). Pestañas:
+`AdminUrl` (HTTP Basic Auth: `AdminUser`/`AdminPassword`). El panel es un único HTML/CSS/JS embebido
+(`_PAGE` en `entrypoints/admin.py`). Sobre todas las pestañas, una **barra global de estado de envíos**
+siempre visible muestra si los envíos están **ACTIVOS** (verde) o **EN PAUSA** (rojo) con acción directa
+para activar/pausar (al activar avisa cuántas difusiones hay en cola).
 
-- **📝 Mensaje**: markup %, canal fuente, símbolos, footer, patrones de ubicación, imagen.
-- **✈️ Telegram**: cuenta (bot/userbot), destinatarios (buscador+paginación), **listas de distribución**
-  (whitelist/blacklist), exclusiones.
-- **🟢 WhatsApp**: conectar (URL/token, QR/código, estado), destinatarios, listas, exclusiones.
-- **📨 Enviar**: **Componer y enviar** (texto + imagen + canales + **selector de lista "Enviar a"** +
-  **previsualización** de destinatarios) y **Envíos** (estado + barras de progreso por canal, "en vivo").
-- **📊 Estado**: profundidad de cola/DLQ.
+Cuatro pestañas:
 
-API (Basic Auth): `GET|POST /admin/api/config`, `/api/subscribers`, `/api/queue`, `/api/image`,
-`/api/whatsapp/{status,contacts,pair,reset,reconnect,sync}`, `/api/broadcast` (envío manual),
-`/api/broadcast/preview`, `/api/broadcasts` (estados).
+- **🏠 Inicio**: resumen, KPIs de 30 días (enviados, tasa, lotes pendientes, DLQ), mini-gráfico de
+  actividad, primeros pasos y accesos rápidos.
+- **📋 Fuentes y listas** (sub-nav **Fuente del canal / ✈️ Telegram / 🟢 WhatsApp**):
+  - *Fuente del canal*: canal fuente, markup %, símbolos, footer, patrones de limpieza, imagen, **probar procesamiento**.
+  - *Telegram / WhatsApp*: **Destinatarios** con **filtro Todos / ✅ Incluidos / ⛔ Excluidos** y contador
+    "incluidos · excluidos"; **listas de distribución** (whitelist/blacklist); **auto-exclusión por patrón
+    de nombre** (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`); en WhatsApp además
+    auto-excluidos por fallos.
+- **📨 Envíos**: **Componer y enviar** (texto + imagen + canales + selector "Enviar a" + previsualización +
+  contador con aviso de límite 4096); **Envíos** (tabla con estado + barras de progreso, "en vivo",
+  borrado individual/masivo, error de envío clickeable con el detalle); **Programar un mensaje** y
+  **Mensajes programados** (once/daily/weekly); **Envíos fraccionados** (monitor de planes con borrado
+  individual/masivo).
+- **⚙️ Ajustes y estado**: Cuenta de Telegram (bot/userbot), WhatsApp (reenvío), **Correo de recuperación**
+  (Resend), cambio de contraseña, **interruptor maestro de envíos**, anti-baneo (lote/delays), ventana
+  horaria, cola/DLQ, auditoría y usuarios del panel.
+
+API (Basic Auth) bajo `/admin/api/`: `config`, `subscribers`, `image`, `queue`, `dlq[/redrive|/purge]`,
+`audit`, `users`, `metrics`, `broadcast` (envío manual), `broadcast/preview`, `broadcasts[/delete]`,
+`plans[/cancel|/delete]`, `schedules[/toggle|/delete]`, `auth/{forgot,reset,change-password}`,
+`telethon/{send-code,sign-in,logout}`, `whatsapp/{status,contacts,pair,reset,reconnect,sync,blocked}`,
+`telegram/{me,webhook}`. Endpoints **públicos** (sin auth, con anti-fuerza-bruta): `auth/forgot`, `auth/reset`.
 
 ---
 
-## 5. Listas de distribución y estados
+## 5. Listas, exclusiones, programación y estados
 
 - **Listas con nombre** por canal (`telegram_lists`/`whatsapp_lists`) + **modo** (`telegram_target`/
   `whatsapp_target`): `all` (todos), `only` (solo listas activas = whitelist), `except` (excluir = blacklist).
   Regla pura en `domain/recipients.py`. El envío manual a WhatsApp **exige** una lista (no manda a todos por error).
+- **Auto-exclusión por patrón de nombre** (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`, listas
+  de strings por canal): cualquier contacto cuyo **nombre contenga** un patrón (substring, sin distinguir
+  mayúsculas) se excluye solo de los envíos — p. ej. `FAM` para no enviar a la familia. Aplica también a la
+  selección ad-hoc (guardrail). Telegram: `domain/recipients.ids_excluidos_por_patron` (en modo bot no hay
+  nombres → no-op). WhatsApp: el servicio Node lo aplica en `resolverTargets` (recibe `exclude_patterns`).
+- **Interruptor maestro** (`sending_enabled`): pausa/activa TODOS los envíos. La **captura del canal nunca se
+  detiene** — mientras está en pausa se crean planes EN ESPERA que salen al reactivar (la info no se pierde).
+  Auto-pausa anti-baneo tras 2 lotes totalmente fallidos.
+- **Programación y fraccionado**: **schedules** (once/daily/weekly; `application/materialize_schedules.py` los
+  materializa en envíos) y **plans** (envío fraccionado y secuencial: un lote a la vez con jitter y ventana
+  horaria; `application/dispatch.py` los gotea). Un EventBridge cron dispara el dispatcher cada minuto.
 - **Estados** (`adapters/dynamodb.py:DynamoDbBroadcastStore`): contadores atómicos por canal; estado
   **derivado** (`queued/sending/done/partial/failed`, con cierre por antigüedad). El worker (Telegram) y el
   servicio (WhatsApp) reportan progreso vía `broadcast_id`.
+- **Recuperación de contraseña por correo**: vía **Resend** (`RESEND_API_KEY`/`MAIL_FROM`, capa gratis
+  100/día) con fallback a SNS; ver `adapters/email_sender.py`.
 
 ---
 
@@ -148,12 +179,13 @@ API (Basic Auth): `GET|POST /admin/api/config`, `/api/subscribers`, `/api/queue`
 
 ```powershell
 docker compose -f docker/docker-compose.yml up --build     # stack local (DynamoDB + webhook inline)
-python -m unittest discover -s tests                        # 113 tests (sin AWS; boto3 perezoso + fakes)
+python -m unittest discover -s tests                        # 207 tests (sin AWS; boto3 perezoso + fakes)
 ```
 
-Los tests cubren markup, composición, recipients/listas, cliente Telegram (403/429/5xx), envío por lote,
-SQS, receptor, worker (parcial + estados), onboarding, WhatsApp forwarder, BroadcastStore (estados) y
-envío manual. Validación JS del servicio: `node --check whatsapp-service/src/index.js`.
+Los tests cubren markup, composición, recipients/listas + exclusión por patrón, cliente Telegram
+(403/429/5xx), envío por lote, SQS, receptor, worker (parcial + estados), dispatcher/planes, schedules,
+onboarding, WhatsApp forwarder, email_sender (Resend), BroadcastStore (estados) y envío manual.
+Validación JS del servicio y del panel: `node --check whatsapp-service/src/index.js`.
 
 ---
 
@@ -162,17 +194,22 @@ envío manual. Validación JS del servicio: `node --check whatsapp-service/src/i
 `TELEGRAM_BOT_TOKEN`, `WEBHOOK_SECRET_TOKEN`, `SOURCE_CHANNEL_USERNAME`, `MARKUP_PERCENTAGE`,
 `SEND_DELAY_SECONDS`, `SEND_MODE`(bot|userbot), `TELETHON_API_ID|HASH|SESSION`, `BROADCAST_QUEUE_URL`,
 `BROADCAST_BATCH_SIZE`, `SUBSCRIBERS_TABLE`, `CONFIG_TABLE`, `PROCESSED_UPDATES_TABLE`, `BROADCASTS_TABLE`,
-`IMAGES_BUCKET`, `ADMIN_USER`, `ADMIN_PASSWORD`. Servicio WhatsApp: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`,
-`BROADCASTS_TABLE`, `AWS_*`, `SEND_DELAY_MS`.
+`PLANS_TABLE`, `SCHEDULES_TABLE`, `AUDIT_TABLE`, `IMAGES_BUCKET`, `ADMIN_USER`, `ADMIN_PASSWORD`,
+`RESEND_API_KEY`, `MAIL_FROM` (correo de recuperación; opcionales, sin ellos usa SNS), `ALERTS_TOPIC_ARN`.
+Muchos valores son **editables en runtime** desde el panel (tabla `config` de DynamoDB) y tienen prioridad
+sobre el entorno; los `*_exclude_patterns`, listas y ventanas viven solo en esa config, no en el entorno.
+Servicio WhatsApp: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`, `BROADCASTS_TABLE`, `AWS_*`, `SEND_DELAY_MS`.
 
 ---
 
 ## 8. Estado actual y pendientes
 
-- ✅ Telegram (bot+userbot), WhatsApp (Baileys), listas, estados, envío manual, panel moderno — desplegado y verificado.
-- ✅ Despliegue reproducible (`deploy.ps1`); 113 tests.
-- ⏳ CI/CD auto-deploy en push a `main` (diferido).
-- ⏳ Secretos en SSM/Secrets Manager; alarmas CloudWatch (DLQ, errores).
+- ✅ Telegram (bot+userbot), WhatsApp (Baileys), listas, **exclusión por patrón de nombre**, estados,
+  envío manual, **programado y fraccionado**, interruptor maestro, **correo Resend**, panel moderno
+  (filtros, borrado individual/masivo, barra de estado) — desplegado y verificado.
+- ✅ Despliegue reproducible (`package-lambda.ps1` + `deploy.ps1`); **CI en GitHub Actions** (tests en cada
+  push; deploy gated por `DEPLOY_ENABLED`); **207 tests**.
+- ⏳ Secretos en SSM/Secrets Manager; encriptación KMS de la tabla config; rate-limit distribuido del login.
 - ⚠️ WhatsApp/userbot: riesgo de baneo por envío masivo — usar listas pequeñas y delays altos.
 
 Ver también `ROADMAP.md`, `specs/` y la guía del servicio en `whatsapp-service/README.md`.

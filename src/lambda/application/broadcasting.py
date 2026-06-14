@@ -254,7 +254,10 @@ class BroadcastList:
             return []
         if telegram_ids:
             sel = {str(x) for x in telegram_ids}
-            return [c for c in self._subscribers.listar_activos() if str(c) in sel]
+            # El guardrail por patrón de nombre (p. ej. "FAM") también aplica a la selección
+            # ad-hoc — igual que en WhatsApp, donde el servicio filtra patrones aun en mode=only.
+            fuera = self._excluidos_patron_tg(cfg)
+            return [c for c in self._subscribers.listar_activos() if str(c) in sel and str(c) not in fuera]
         return self._destinatarios_telegram(cfg, self._target_para(cfg, "telegram", telegram_list))
 
     def previsualizar(

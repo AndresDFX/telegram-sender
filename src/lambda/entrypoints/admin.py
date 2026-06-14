@@ -92,7 +92,7 @@ _FLOATS = ("tg_delay_min", "tg_delay_max")
 _ENTEROS = ("batch_size", "wa_delay_min", "wa_delay_max", "window_tz")
 _BOOLS = ("whatsapp_enabled", "scheduling_enabled", "window_enabled", "sending_enabled")
 # Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
-_NO_VACIAR = ("telethon_session", "telethon_api_hash", "whatsapp_token", "bot_token", "resend_api_key")
+_NO_VACIAR = ("telethon_session", "telethon_api_id", "telethon_api_hash", "whatsapp_token", "bot_token", "resend_api_key")
 
 
 def _ensure() -> None:
@@ -1153,7 +1153,6 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
 .brand svg{border-radius:11px;filter:drop-shadow(0 6px 18px rgba(253,83,30,.45))}
 .brand-lg{justify-content:center;margin-bottom:6px}
 .brand-lg .wordmark{font-size:30px}
-.logo{font-size:32px;margin-bottom:10px}
 
 /* ---------- login ---------- */
 #login{display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}
@@ -1489,7 +1488,6 @@ main>.card.show{display:block}
 }
 .empty-state h3{margin:0;font-size:15px;color:var(--tx)}
 .empty-state p{margin:0;max-width:340px;font-size:12.5px;line-height:1.6}
-.empty-state .cta{margin-top:6px}
 /* refuerzo visual de los empties existentes */
 .bc-empty, #subsempty{
   border:1px dashed var(--bd2);border-radius:var(--r);
@@ -1499,11 +1497,9 @@ main>.card.show{display:block}
 .skeleton{pointer-events:none}
 .sk-line{
   height:12px;border-radius:6px;margin:9px 0;
-  background:linear-gradient(90deg,var(--elev) 25%,#0F2440 37%,var(--elev) 63%);
+  background:linear-gradient(90deg,var(--elev) 25%,var(--bd2) 37%,var(--elev) 63%);
   background-size:400% 100%;animation:sk 1.3s ease infinite;
 }
-.sk-line.lg{height:26px;width:60%}
-.sk-line.sm{width:40%}
 @keyframes sk{0%{background-position:100% 0}100%{background-position:-100% 0}}
 
 /* ------------------------------------------------------------

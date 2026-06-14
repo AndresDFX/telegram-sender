@@ -10,11 +10,15 @@ from application.broadcasting import BroadcastList  # noqa: E402
 
 
 class FakeSubs:
-    def __init__(self, ids):
+    def __init__(self, ids, names=None):
         self._ids = ids
+        self._names = names or {}
 
     def listar_activos(self):
         return list(self._ids)
+
+    def listar_todos(self):
+        return [{"chatId": str(i), "name": self._names.get(str(i), "")} for i in self._ids]
 
     def registrar(self, *a):
         pass
@@ -58,6 +62,30 @@ class FakePlansEspera:
 
     def crear(self, bid, **kw):
         self.created.append((bid, kw))
+
+
+class ExclusionPatronTelegramTests(unittest.TestCase):
+    def test_canal_excluye_por_patron_de_nombre(self):
+        queue = FakeQueue()
+        subs = FakeSubs(["1", "2", "3"], names={"1": "FAM Juan", "2": "Cliente", "3": "María"})
+        cfg = FakeConfig(currency_symbols="$💸💲", telegram_exclude_patterns=["fam"])
+        BroadcastList(subs, queue, cfg)("Hola $100.000")
+        self.assertEqual(set(queue.calls[0][1]), {"2", "3"})  # "FAM Juan" auto-excluido
+
+    def test_ids_ad_hoc_tambien_respetan_el_patron(self):
+        queue = FakeQueue()
+        subs = FakeSubs(["1", "2", "3"], names={"1": "FAM Juan", "2": "Cliente", "3": "María"})
+        cfg = FakeConfig(telegram_exclude_patterns=["FAM"])
+        bl = BroadcastList(subs, queue, cfg)
+        clientes = bl._tg_clientes(cfg.get(), True, None, ["1", "2"])
+        self.assertEqual(set(clientes), {"2"})  # "1" excluido por patrón pese a elegirse a mano
+
+    def test_sin_patron_no_excluye(self):
+        queue = FakeQueue()
+        subs = FakeSubs(["1", "2"], names={"1": "FAM Juan", "2": "Cliente"})
+        cfg = FakeConfig(currency_symbols="$💸💲")
+        BroadcastList(subs, queue, cfg)("Hola $100.000")
+        self.assertEqual(set(queue.calls[0][1]), {"1", "2"})
 
 
 class BroadcastListTests(unittest.TestCase):

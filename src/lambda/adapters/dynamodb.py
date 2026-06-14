@@ -279,6 +279,8 @@ class DynamoDbConfigStore(ConfigStore):
         cfg["window_tz"] = int(float(cfg["window_tz"]))
         cfg["telegram_exclude_patterns"] = [str(x) for x in (cfg.get("telegram_exclude_patterns") or [])]
         cfg["whatsapp_exclude_patterns"] = [str(x) for x in (cfg.get("whatsapp_exclude_patterns") or [])]
+        for k in ("resend_api_key", "mail_from", "telethon_api_id", "telethon_api_hash"):
+            cfg[k] = str(cfg.get(k) or "").strip()
         return cfg
 
     @staticmethod
@@ -485,9 +487,6 @@ class DynamoDbBroadcastStore:
         """El reenvío a WhatsApp no llegó al servicio: cierra el canal para que el job no
         quede 'enviando' eterno. Marca wa_started=True con total 0 (no había progreso real)."""
         self.set_whatsapp_total(broadcast_id, 0)
-
-    def incr_whatsapp(self, broadcast_id: str, sent: int = 0, failed: int = 0) -> None:
-        self._add(broadcast_id, "ADD wa_sent :s, wa_failed :f", {":s": int(sent), ":f": int(failed)})
 
     def progreso(self, broadcast_id: str) -> dict:
         """Procesados acumulados por canal (sent+failed). Lo usa el dispatcher para saber

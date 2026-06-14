@@ -21,30 +21,8 @@ def admin_user() -> str:
     return os.environ.get("ADMIN_USER", "admin")
 
 
-def send_mode() -> str:
-    """'bot' (envía como bot a suscriptores) o 'userbot' (envía como tu cuenta a tus contactos)."""
-    return os.environ.get("SEND_MODE", "bot").strip().lower()
-
-
-def markup_percentage() -> float:
-    return float(os.environ.get("MARKUP_PERCENTAGE", "15"))
-
-
 def send_delay_seconds() -> float:
     return float(os.environ.get("SEND_DELAY_SECONDS", "0.05"))
-
-
-def batch_size_default() -> int:
-    """Tamaño de lote por defecto (contactos por lote). Tope anti-baneo: 150."""
-    return int(os.environ.get("BROADCAST_BATCH_SIZE", "150"))
-
-
-def plans_table() -> str | None:
-    return os.environ.get("PLANS_TABLE")
-
-
-def source_channel_username() -> str:
-    return os.environ.get("SOURCE_CHANNEL_USERNAME", "iproparts")
 
 
 def broadcast_queue_url() -> str | None:
