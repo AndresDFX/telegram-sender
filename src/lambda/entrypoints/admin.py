@@ -1547,6 +1547,26 @@ tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visible,#fuentes_subnav button:focus-visible,.nav button:focus-visible,.chan:focus-within{outline:2px solid var(--ac);outline-offset:2px;border-radius:8px}
 @keyframes kpipulse{0%,100%{opacity:.35}50%{opacity:.7}}
 .stat b.kpi-load{animation:kpipulse 1s ease-in-out infinite}
+/* === Revisión móvil: ajustes UI/UX integrales para pantallas pequeñas === */
+@media (max-width:620px){
+  header{position:static;flex-wrap:wrap;gap:8px;padding:10px 14px}
+  header>div{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+  header .brand .wordmark{font-size:17px}
+  header .brand svg{width:26px;height:26px}
+  .nav{top:0}
+  main{padding:16px 12px 84px}
+  main table{display:block;overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch}
+  .tbl-toolbar,.compose-actions{flex-direction:column;align-items:stretch}
+  .tbl-toolbar .grow,.compose-actions .grow{display:none}
+  input[type=datetime-local],input[type=time]{width:100%;max-width:100%}
+  .pickbox{max-height:200px}
+  .ds-modal{padding:18px}
+  .ds-modal-actions{flex-direction:column-reverse}
+  .ds-modal-actions button{width:100%}
+  .stat b{font-size:26px}
+  .markup input{font-size:26px}
+  h1{font-size:18px}
+}
 th.selcol,td.selcol{width:34px;text-align:center}
 </style></head><body>
 
