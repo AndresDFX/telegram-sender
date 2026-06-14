@@ -1272,6 +1272,23 @@ button.danger:hover{background:#C02B24;filter:none;box-shadow:0 6px 22px -8px rg
 /* ---------- misc text ---------- */
 .hint{color:var(--mut);font-size:12px;margin-top:6px;line-height:1.55}
 .hint code{background:var(--elev);border:1px solid var(--bd);padding:1px 6px;border-radius:6px;font-size:11.5px}
+/* ---------- help hint (ⓘ con tooltip; reutilizable en toda la app) ---------- */
+.help{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;
+  border:1px solid var(--bd2);color:var(--mut);font-size:10px;font-weight:700;line-height:1;cursor:help;
+  margin-left:6px;position:relative;vertical-align:middle;user-select:none;flex:none;transition:color .15s,border-color .15s}
+.help:hover,.help:focus{color:var(--tx2);border-color:var(--ac);outline:none}
+/* tooltip ABAJO del ícono (evita recorte en encabezados cerca del tope) */
+.help::after{content:attr(data-tip);position:absolute;top:calc(100% + 9px);left:50%;
+  transform:translateX(-50%) translateY(-4px);background:var(--elev);color:var(--tx2);border:1px solid var(--bd2);
+  border-radius:9px;padding:9px 11px;width:250px;max-width:62vw;font-size:12px;font-weight:400;line-height:1.5;
+  letter-spacing:normal;text-transform:none;text-align:left;white-space:normal;box-shadow:var(--sh);
+  opacity:0;visibility:hidden;transition:opacity .15s,transform .15s;z-index:40;pointer-events:none}
+.help::before{content:"";position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%);
+  border:5px solid transparent;border-bottom-color:var(--bd2);opacity:0;visibility:hidden;transition:opacity .15s;z-index:40}
+.help:hover::after,.help:focus::after{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
+.help:hover::before,.help:focus::before{opacity:1;visibility:visible}
+/* en headings (uppercase) el tooltip mantiene tipografía normal (ya forzado arriba) */
+h2 .help{width:16px;height:16px}
 .err{color:var(--bad);font-size:13px;min-height:18px;margin-top:8px}
 img.preview{max-width:170px;border-radius:var(--r-sm);margin-top:12px;border:1px solid var(--bd)}
 
@@ -1732,12 +1749,12 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div id="dash_steps" style="margin-top:10px">cargando…</div>
   </div>
   <div class="card" data-tab="fuentes" style="padding:14px 18px"><div id="fuentes_subnav"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="fuente" onclick="showSub('fuente')">📡 Fuente del canal</button><button data-sub="tg" onclick="showSub('tg')">✈️ Telegram</button><button data-sub="wa" onclick="showSub('wa')">🟢 WhatsApp</button></div></div>
-  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Aumento (markup)</h2>
+  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Aumento (markup)<span class="help" tabindex="0" data-tip="Sube un % los precios detectados antes de difundir. Solo afecta números con símbolo de moneda ($, 💸, COP); no toca modelos ni especificaciones. Redondea al mil hacia arriba.">ⓘ</span></h2>
    <div class="markup"><input id="markup_percentage" type="number" step="0.1"><div>
      <div style="font-size:13px">% que se suma a cada precio</div>
      <div class="hint">Ej: $325.000 + 15% → $374.000 (redondeo al mil ↑)</div></div></div>
   </div>
-  <div class="card accent" data-tab="ajustes"><h2>Cuenta de Telegram</h2>
+  <div class="card accent" data-tab="ajustes"><h2>Cuenta de Telegram<span class="help" tabindex="0" data-tip="Dos modos: Bot (envía a quienes te dan /start) o Userbot (envía desde TU cuenta a tus contactos, vía Telethon). El userbot llega a más gente pero tiene más riesgo de baneo.">ⓘ</span></h2>
    <label>Modo de envío</label>
    <select id="send_mode"><option value="bot">Bot — a suscriptores que dan /start</option><option value="userbot">Userbot — desde mi cuenta a mis contactos</option></select>
 
@@ -1779,7 +1796,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span id="tl_logout_out" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="ajustes"><h2>WhatsApp (reenvío)</h2>
+  <div class="card" data-tab="ajustes"><h2>WhatsApp (reenvío)<span class="help" tabindex="0" data-tip="Conecta el servicio de WhatsApp (URL + token, QR o código) y decide si cada lista capturada también se reenvía por WhatsApp. Vincula desde tu IP residencial.">ⓘ</span></h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="whatsapp_enabled" style="width:auto"> Reenviar también cada lista por WhatsApp</label>
    <label>URL del servicio WhatsApp</label><input id="whatsapp_service_url" placeholder="https://...onrender.com">
    <label>Token del servicio <span id="wa_tok_status" class="hint"></span></label>
@@ -1808,7 +1825,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <div class="callout warn">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza con listas pequeñas. Las <b>exclusiones</b> se gestionan por nombre abajo, en <b>Destinatarios WhatsApp</b>.</div>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Canal y mensaje</h2>
+  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Canal y mensaje<span class="help" tabindex="0" data-tip="Canal público de Telegram que se sondea (t.me/s/canal) y la limpieza del mensaje: líneas a quitar (ubicación/teléfono), símbolos de moneda y footer de WhatsApp.">ⓘ</span></h2>
    <div class="hint" style="margin-top:-4px">La <b>captura del canal está siempre activa</b> (se guarda cada lista publicada). El <b>envío</b> a tus contactos se controla con el <b>interruptor</b> en «Ajustes y estado»: si está apagado, lo capturado queda en espera.</div>
    <label>Canal fuente (username sin @)</label><input id="source_channel">
    <label>Símbolos de moneda</label><input id="currency_symbols">
@@ -1816,7 +1833,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>Patrones a quitar (ubicación), uno por línea</label><textarea id="strip_patterns"></textarea>
    <button onclick="saveCfg()">Guardar cambios</button>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Probar procesamiento del mensaje</h2>
+  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Probar procesamiento del mensaje<span class="help" tabindex="0" data-tip="Pega un texto de ejemplo del canal y mira cómo quedaría YA procesado (markup, limpieza y footer) sin enviar nada.">ⓘ</span></h2>
    <div class="hint">Pega un mensaje tal como lo publica el canal y mira cómo quedará <b>ya procesado</b> (markup aplicado, sin ubicación/marca/teléfonos, con footer). Así verificas las reglas antes de enviar.</div>
    <textarea id="pp_in" style="min-height:90px;margin-top:10px" placeholder="Pega aquí el texto original del canal..."></textarea>
    <button class="sec" style="margin-top:8px" onclick="probarProcesado()">Procesar</button>
@@ -1837,7 +1854,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>⏱️ Programación</b>.</div>
    <button class="sec" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
   </div>
-  <div class="card" data-tab="ajustes"><h2>Cola de fallidos (DLQ) <span id="dlq_n" class="hint"></span></h2>
+  <div class="card" data-tab="ajustes"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
    <div class="hint">Lotes que agotaron reintentos. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
    <div id="dlq_list" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
@@ -1851,7 +1868,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>cuándo</th><th>usuario</th><th>acción</th><th>detalle</th></tr></thead><tbody id="audit_rows"></tbody></table></div>
    <button class="sec" style="margin-top:12px" onclick="loadAudit()">Refrescar</button>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="tg"><h2>Destinatarios <span id="subcount" class="hint"></span></h2>
+  <div class="card" data-tab="fuentes" data-sub="tg"><h2>Destinatarios<span class="help" tabindex="0" data-tip="Contactos a los que envías por Telegram. Filtra por estado (Todos/Incluidos/Excluidos). Marca y usa Excluir/Incluir; incluir un contacto que coincide con un patrón crea una EXCEPCIÓN (se envía pese al patrón).">ⓘ</span> <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
    <input id="subsearch" placeholder="🔎 Buscar por nombre o número..." oninput="onSearch()" style="margin-top:10px">
    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
@@ -1885,7 +1902,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="sec" onclick="nextPage()">▶</button>
    </div>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="tg"><h2>Listas de distribución · Telegram</h2>
+  <div class="card" data-tab="fuentes" data-sub="tg"><h2>Listas de distribución · Telegram<span class="help" tabindex="0" data-tip="Agrupa contactos en listas con nombre y elige el modo: Todos, Solo estas listas (whitelist) o Excepto estas listas (blacklist).">ⓘ</span></h2>
    <div class="hint">Agrupa contactos en listas con nombre y elige a quién enviar. "+ marcados" usa los contactos marcados arriba en <b>Destinatarios</b>.</div>
    <div id="tg_lists" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;margin-top:10px"><input id="tg_newlist" placeholder="Nombre de nueva lista"><button class="sec" onclick="addList('telegram')">Crear lista</button></div>
@@ -1896,7 +1913,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <button onclick="saveLists('telegram')">Guardar listas Telegram</button>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="wa"><h2>Destinatarios WhatsApp <span id="wa_c_count" class="hint"></span></h2>
+  <div class="card" data-tab="fuentes" data-sub="wa"><h2>Destinatarios WhatsApp<span class="help" tabindex="0" data-tip="Contactos de WhatsApp (cárgalos del servicio conectado). Filtra por estado y marca para Excluir/Incluir; incluir un contacto que coincide con un patrón crea una EXCEPCIÓN.">ⓘ</span> <span id="wa_c_count" class="hint"></span></h2>
    <div class="hint">Carga tus contactos (servicio conectado), busca por nombre, y marca para <b>excluir/incluir</b>. Los excluidos NO reciben las difusiones por WhatsApp.</div>
    <button class="sec" style="margin-top:10px" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button>
    <input id="wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="renderWa()" style="margin-top:10px">
@@ -1924,7 +1941,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <table><thead><tr><th></th><th>nombre</th><th>estado</th></tr></thead><tbody id="wa_subs"></tbody></table>
    <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button class="sec" onclick="waPrev()">◀</button><span id="wa_pageinfo" class="hint"></span><button class="sec" onclick="waNext()">▶</button></div>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="wa"><h2>Auto-excluidos por fallos <span id="wa_blk_n" class="hint"></span></h2>
+  <div class="card" data-tab="fuentes" data-sub="wa"><h2>Auto-excluidos por fallos<span class="help" tabindex="0" data-tip="El servicio excluye solo a quien falla al recibir varias veces seguidas (protege tu número de baneos). Limpia el conteo para reincluirlos.">ⓘ</span> <span id="wa_blk_n" class="hint"></span></h2>
    <div class="hint">Los contactos que fallan al enviar de forma repetida (≥ umbral) se excluyen <b>solos</b> de los próximos envíos para proteger tu número. Limpia el conteo para reincluirlos.</div>
    <div id="wa_blk_list" class="hint" style="margin-top:10px">—</div>
    <div style="display:flex;gap:8px;margin-top:12px">
@@ -1932,7 +1949,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="ghost" onclick="clearBlocked()">Reincluir a todos</button>
    </div>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="wa"><h2>Listas de distribución · WhatsApp</h2>
+  <div class="card" data-tab="fuentes" data-sub="wa"><h2>Listas de distribución · WhatsApp<span class="help" tabindex="0" data-tip="Agrupa contactos de WhatsApp en listas y elige el modo: Todos, Solo estas listas (whitelist) o Excepto estas listas (blacklist).">ⓘ</span></h2>
    <div class="hint">"+ marcados" usa los contactos marcados arriba en <b>Destinatarios WhatsApp</b>.</div>
    <div id="wa_lists" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;margin-top:10px"><input id="wa_newlist" placeholder="Nombre de nueva lista"><button class="sec" onclick="addList('whatsapp')">Crear lista</button></div>
@@ -1943,7 +1960,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <button onclick="saveLists('whatsapp')">Guardar listas WhatsApp</button>
   </div>
-  <div class="card" data-tab="envios"><h2>✍️ Componer y enviar</h2>
+  <div class="card" data-tab="envios"><h2>✍️ Componer y enviar<span class="help" tabindex="0" data-tip="Redacta un mensaje propio y envíalo ya (o prográmalo). Respeta listas y exclusiones de cada canal. WhatsApp exige elegir una lista; el texto de Telegram no puede pasar de 4096 caracteres.">ⓘ</span></h2>
    <div class="hint">Escribe un mensaje y envíalo de inmediato a los canales seleccionados. Respeta las listas y exclusiones configuradas en cada canal.</div>
    <label>Mensaje <span id="bc_count" class="charcount">0 caracteres</span></label>
    <textarea id="bc_text" style="min-height:120px" placeholder="Escribe aquí el mensaje a difundir..." oninput="bcCount()"></textarea>
@@ -2004,7 +2021,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="sec" onclick="loadBroadcasts()">Refrescar</button>
    </div>
   </div>
-  <div class="card accent" data-tab="envios"><h2>⏰ Programar un mensaje</h2>
+  <div class="card accent" data-tab="envios"><h2>⏰ Programar un mensaje<span class="help" tabindex="0" data-tip="Crea un envío que sale a una fecha/hora exacta (una vez) o de forma recurrente (diario/semanal). Requiere que los envíos estén activos a esa hora.">ⓘ</span></h2>
    <div class="hint">Crea mensajes que se envían solos a la hora indicada, por las conexiones existentes de Telegram y WhatsApp. Una vez, a diario o semanal. Respetan el ritmo anti-baneo, la ventana horaria y el interruptor maestro.</div>
    <label>Nombre (opcional)</label>
    <input id="sg_name" placeholder="p. ej. Lista de la mañana" maxlength="80">
@@ -2070,7 +2087,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>Contraseña (mínimo 8)</label><input id="usr_new_pw" type="password">
    <button style="margin-top:10px" onclick="createUser()">Crear usuario</button>
   </div>
-  <div class="card" data-tab="ajustes"><h2>✉️ Correo de recuperación <span id="mail_status" class="hint"></span></h2>
+  <div class="card" data-tab="ajustes"><h2>✉️ Correo de recuperación<span class="help" tabindex="0" data-tip="Servicio gratis (Resend, 100/día) para enviar el código de «¿Olvidaste tu contraseña?». Sin API key, el código se intenta enviar por el correo de alertas de AWS (SNS).">ⓘ</span> <span id="mail_status" class="hint"></span></h2>
    <div class="hint">Servicio gratis para entregar el código cuando alguien usa «¿Olvidaste tu contraseña?». Crea una cuenta en <b>resend.com</b> (100 correos/día gratis), genera una API key y pégala aquí. Sin esto, el código se intenta enviar por el correo de alertas de AWS (SNS).</div>
    <label>Remitente (From)</label>
    <input id="mail_from" placeholder="Replica &lt;onboarding@resend.dev&gt;">
@@ -2084,7 +2101,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>Nueva contraseña (mínimo 8)</label><input id="cp_new" type="password">
    <div style="margin-top:10px"><button onclick="changePassword()">Cambiar contraseña</button> <span id="cp_status" class="hint" style="margin-left:10px"></span></div>
   </div>
-  <div class="card accent" data-tab="ajustes"><h2>Interruptor de envíos</h2>
+  <div class="card accent" data-tab="ajustes"><h2>Interruptor de envíos<span class="help" tabindex="0" data-tip="Pausa o activa TODOS los envíos (Telegram y WhatsApp). La captura del canal NUNCA se detiene: lo capturado en pausa queda en espera y sale al reactivar.">ⓘ</span></h2>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
      <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos activos</b></label>
      <span id="sys_badge" class="pill">—</span>
@@ -2095,7 +2112,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="danger" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>
    </div>
   </div>
-  <div class="card accent" data-tab="ajustes"><h2>Anti-baneo · lotes y ritmo</h2>
+  <div class="card accent" data-tab="ajustes"><h2>Anti-baneo · lotes y ritmo<span class="help" tabindex="0" data-tip="Tamaño de lote (máx 150) y delays ALEATORIOS entre mensajes para no parecer spam y reducir el riesgo de baneo. Envío fraccionado = un lote a la vez.">ⓘ</span></h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="scheduling_enabled" style="width:auto"> Envío fraccionado y secuencial (procesa un lote a la vez)</label>
    <div class="row">
      <div><label>Tamaño de lote (máx 150)</label><input id="batch_size" type="number" min="1" max="150"></div>
@@ -2112,7 +2129,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="callout">El delay entre mensajes es <b>aleatorio</b> dentro del rango (evita patrones predecibles). El dispatcher libera <b>un lote por minuto</b> y espera a que termine el anterior antes de soltar el siguiente.</div>
    <button onclick="saveSched()">Guardar anti-baneo</button>
   </div>
-  <div class="card" data-tab="ajustes"><h2>Ventana de envío (horario permitido)</h2>
+  <div class="card" data-tab="ajustes"><h2>Ventana de envío (horario permitido)<span class="help" tabindex="0" data-tip="Restringe los envíos a un horario (p. ej. 08:00–20:00, en tu zona). Fuera de la ventana, los lotes se difieren hasta que reabra. Apagado = 24 h.">ⓘ</span></h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="window_enabled" style="width:auto"> Enviar solo dentro del horario permitido</label>
    <div class="row">
      <div><label>Desde (HH:MM)</label><input id="window_start" placeholder="08:00"></div>
@@ -2121,7 +2138,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="hint">Fuera del horario, los lotes quedan <b>encolados</b> y se procesan de forma diferida al reabrir la ventana. Soporta cruzar medianoche (p.ej. 22:00 → 06:00).</div>
    <button onclick="saveSched()">Guardar ventana</button>
   </div>
-  <div class="card" data-tab="envios"><h2>📦 Envíos fraccionados <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
+  <div class="card" data-tab="envios"><h2>📦 Envíos fraccionados<span class="help" tabindex="0" data-tip="Las difusiones grandes se dividen en lotes que salen de a uno, con pausas (anti-baneo). Aquí ves el progreso por canal; puedes cancelar o borrar planes.">ⓘ</span> <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
    <div class="hint">De cada lote programado se muestra <b>cuántos mensajes se han enviado</b>. El sistema procesa un lote a la vez, en orden.</div>
    <div id="pl_list" style="margin-top:12px"></div>
    <div class="bc-empty" id="pl_empty" style="display:none">No hay envíos programados todavía. Crea uno en <b>Enviar</b> o espera al próximo del canal.</div>
