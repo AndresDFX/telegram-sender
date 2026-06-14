@@ -1439,8 +1439,8 @@ main>.card.show{display:block}
   .ds-modal-actions button{flex:1}
   .markup{flex-wrap:wrap}
   .markup input{width:100%}
-  #fuentes_subnav{width:100%}
-  #fuentes_subnav button{flex:1 1 auto}
+  .subnav{width:100%}
+  .subnav button{flex:1 1 auto}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
@@ -1654,11 +1654,16 @@ img.preview{box-shadow:var(--sh-sm)}
   .btn-loading::after,.pill.sending::after,.sk-line,.toast.show::after{animation:none!important}
 }
 /* sub-navegación de Fuentes y listas (divide la vista por Fuente / Telegram / WhatsApp) */
-#fuentes_subnav{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-#fuentes_subnav button{background:transparent;border:1px solid var(--bd2);color:var(--mut);padding:8px 16px;border-radius:999px;font-weight:600;font-size:13px;cursor:pointer;transition:color .15s,background .15s,border-color .15s}
-#fuentes_subnav button:hover{color:var(--tx2);filter:none;box-shadow:none}
-#fuentes_subnav button.on{background:rgba(253,83,30,.14);color:#FFE0D3;border-color:rgba(253,83,30,.4)}
+.subnav{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.subnav button{background:transparent;border:1px solid var(--bd2);color:var(--mut);padding:8px 16px;border-radius:999px;font-weight:600;font-size:13px;cursor:pointer;transition:color .15s,background .15s,border-color .15s}
+.subnav button:hover{color:var(--tx2);filter:none;box-shadow:none}
+.subnav button.on{background:rgba(253,83,30,.14);color:#FFE0D3;border-color:rgba(253,83,30,.4)}
 .card.subhide{display:none !important}
+/* contenedor scrolleable para listas largas (muchos contactos) — la página no crece */
+.tbl-scroll{max-height:340px;overflow:auto;margin-top:8px;border:1px solid var(--bd);border-radius:10px}
+.tbl-scroll table{margin:0}
+.tbl-scroll thead th{position:sticky;top:0;background:var(--card2);z-index:1}
+.tbl-scroll td,.tbl-scroll th{padding-left:11px;padding-right:11px}
 /* Tablas con selección masiva (patrón reutilizable: checkbox + barra de acciones) */
 tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .tbl-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
@@ -1690,7 +1695,7 @@ tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .ds-modal input{width:100%;margin-top:14px}
 .ds-modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
 /* Accesibilidad: foco visible consistente por teclado en elementos interactivos */
-a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visible,#fuentes_subnav button:focus-visible,.nav button:focus-visible,.chan:focus-within{outline:2px solid var(--ac);outline-offset:2px;border-radius:8px}
+a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visible,.subnav button:focus-visible,.nav button:focus-visible,.chan:focus-within{outline:2px solid var(--ac);outline-offset:2px;border-radius:8px}
 @keyframes kpipulse{0%,100%{opacity:.35}50%{opacity:.7}}
 .stat b.kpi-load{animation:kpipulse 1s ease-in-out infinite}
 /* === Revisión móvil: ajustes UI/UX integrales para pantallas pequeñas === */
@@ -1773,13 +1778,14 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="hint">Configuración guiada. Cada paso te lleva a su pestaña.</div>
    <div id="dash_steps" style="margin-top:10px">cargando…</div>
   </div>
-  <div class="card" data-tab="fuentes" style="padding:14px 18px"><div id="fuentes_subnav"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="fuente" onclick="showSub('fuente')">📡 Fuente del canal</button><button data-sub="tg" onclick="showSub('tg')">✈️ Telegram</button><button data-sub="wa" onclick="showSub('wa')">🟢 WhatsApp</button></div></div>
+  <div class="card" data-tab="fuentes" style="padding:14px 18px"><div class="subnav" data-subnav="fuentes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="fuente" onclick="showSub('fuentes','fuente')">📡 Fuente del canal</button><button data-sub="tg" onclick="showSub('fuentes','tg')">✈️ Telegram</button><button data-sub="wa" onclick="showSub('fuentes','wa')">🟢 WhatsApp</button></div></div>
   <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Aumento (markup)<span class="help" tabindex="0" data-tip="Sube un % los precios detectados antes de difundir. Solo afecta números con símbolo de moneda ($, 💸, COP); no toca modelos ni especificaciones. Redondea al mil hacia arriba.">ⓘ</span></h2>
    <div class="markup"><input id="markup_percentage" type="number" step="0.1"><div>
      <div style="font-size:13px">% que se suma a cada precio</div>
      <div class="hint">Ej: $325.000 + 15% → $374.000 (redondeo al mil ↑)</div></div></div>
   </div>
-  <div class="card accent" data-tab="ajustes"><h2>Cuenta de Telegram<span class="help" tabindex="0" data-tip="Dos modos: Bot (envía a quienes te dan /start) o Userbot (envía desde TU cuenta a tus contactos, vía Telethon). El userbot llega a más gente pero tiene más riesgo de baneo.">ⓘ</span></h2>
+  <div class="card" data-tab="ajustes" style="padding:14px 18px"><div class="subnav" data-subnav="ajustes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="cuenta" onclick="showSub('ajustes','cuenta')">🔌 Cuentas y acceso</button><button data-sub="envio" onclick="showSub('ajustes','envio')">📤 Envío</button><button data-sub="sistema" onclick="showSub('ajustes','sistema')">🛠️ Sistema</button></div></div>
+  <div class="card accent" data-tab="ajustes" data-sub="cuenta"><h2>Cuenta de Telegram<span class="help" tabindex="0" data-tip="Dos modos: Bot (envía a quienes te dan /start) o Userbot (envía desde TU cuenta a tus contactos, vía Telethon). El userbot llega a más gente pero tiene más riesgo de baneo.">ⓘ</span></h2>
    <label>Modo de envío</label>
    <select id="send_mode"><option value="bot">Bot — a suscriptores que dan /start</option><option value="userbot">Userbot — desde mi cuenta a mis contactos</option></select>
 
@@ -1821,7 +1827,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span id="tl_logout_out" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="ajustes"><h2>WhatsApp (reenvío)<span class="help" tabindex="0" data-tip="Conecta el servicio de WhatsApp (URL + token, QR o código) y decide si cada lista capturada también se reenvía por WhatsApp. Vincula desde tu IP residencial.">ⓘ</span></h2>
+  <div class="card" data-tab="ajustes" data-sub="cuenta"><h2>WhatsApp (reenvío)<span class="help" tabindex="0" data-tip="Conecta el servicio de WhatsApp (URL + token, QR o código) y decide si cada lista capturada también se reenvía por WhatsApp. Vincula desde tu IP residencial.">ⓘ</span></h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="whatsapp_enabled" style="width:auto"> Reenviar también cada lista por WhatsApp</label>
    <label>URL del servicio WhatsApp</label><input id="whatsapp_service_url" placeholder="https://...onrender.com">
    <label>Token del servicio <span id="wa_tok_status" class="hint"></span></label>
@@ -1872,14 +1878,14 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>…o URL externa</label><input id="image_url" placeholder="https://...">
    <button class="sec" onclick="saveCfg()">Guardar URL</button>
   </div>
-  <div class="card" data-tab="ajustes"><h2>Cola de mensajes</h2>
+  <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Cola de mensajes</h2>
    <div class="stats"><div class="stat"><b id="q_p">–</b><span>lotes programados pendientes</span></div>
      <div class="stat"><b id="q_b">–</b><span>en cola SQS (en vuelo)</span></div>
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
    <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>⏱️ Programación</b>.</div>
    <button class="sec" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
   </div>
-  <div class="card" data-tab="ajustes"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
+  <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
    <div class="hint">Lotes que agotaron reintentos. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
    <div id="dlq_list" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
@@ -1888,7 +1894,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="danger" onclick="dlqPurge()">🗑 Descartar todo</button>
    </div>
   </div>
-  <div class="card" data-tab="ajustes"><h2>Auditoría <span id="audit_n" class="hint"></span></h2>
+  <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Auditoría <span id="audit_n" class="hint"></span></h2>
    <div class="hint">Últimas acciones realizadas en el panel (config, envíos, cancelaciones, DLQ).</div>
    <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>cuándo</th><th>usuario</th><th>acción</th><th>detalle</th></tr></thead><tbody id="audit_rows"></tbody></table></div>
    <button class="sec" style="margin-top:12px" onclick="loadAudit()">Refrescar</button>
@@ -1919,7 +1925,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="ghost" onclick="bulkFiltered('excluir')">Excluir filtrados</button>
      <button class="ghost" onclick="bulkFiltered('incluir')">Incluir filtrados</button>
    </div>
-   <table><thead><tr><th><input type="checkbox" id="selall" onchange="toggleAll(this.checked)"></th><th>nombre</th><th>estado</th></tr></thead><tbody id="subs"></tbody></table>
+   <div class="tbl-scroll"><table><thead><tr><th><input type="checkbox" id="selall" onchange="toggleAll(this.checked)"></th><th>nombre</th><th>estado</th></tr></thead><tbody id="subs"></tbody></table></div>
    <div class="hint" id="subsempty" style="display:none;margin-top:12px">Sin destinatarios (modo bot: nadie dio /start; modo userbot: la cuenta no tiene contactos).</div>
    <div style="display:flex;align-items:center;gap:12px;margin-top:14px">
      <button class="sec" onclick="prevPage()">◀</button>
@@ -1963,7 +1969,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button onclick="waBulk('incluir')">Incluir marcados</button>
      <button class="sec" onclick="createListFromGrid('whatsapp')">➕ Crear lista con marcados</button>
    </div>
-   <table><thead><tr><th></th><th>nombre</th><th>estado</th></tr></thead><tbody id="wa_subs"></tbody></table>
+   <div class="tbl-scroll"><table><thead><tr><th></th><th>nombre</th><th>estado</th></tr></thead><tbody id="wa_subs"></tbody></table></div>
    <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button class="sec" onclick="waPrev()">◀</button><span id="wa_pageinfo" class="hint"></span><button class="sec" onclick="waNext()">▶</button></div>
   </div>
   <div class="card" data-tab="fuentes" data-sub="wa"><h2>Auto-excluidos por fallos<span class="help" tabindex="0" data-tip="El servicio excluye solo a quien falla al recibir varias veces seguidas (protege tu número de baneos). Limpia el conteo para reincluirlos.">ⓘ</span> <span id="wa_blk_n" class="hint"></span></h2>
@@ -1985,7 +1991,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <button onclick="saveLists('whatsapp')">Guardar listas WhatsApp</button>
   </div>
-  <div class="card" data-tab="envios"><h2>✍️ Componer y enviar<span class="help" tabindex="0" data-tip="Redacta un mensaje propio y envíalo ya (o prográmalo). Respeta listas y exclusiones de cada canal. WhatsApp exige elegir una lista; el texto de Telegram no puede pasar de 4096 caracteres.">ⓘ</span></h2>
+  <div class="card" data-tab="envios" style="padding:14px 18px"><div class="subnav" data-subnav="envios"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="componer" onclick="showSub('envios','componer')">✍️ Componer</button><button data-sub="programados" onclick="showSub('envios','programados')">⏰ Programados</button><button data-sub="historial" onclick="showSub('envios','historial')">📡 Historial</button></div></div>
+  <div class="card" data-tab="envios" data-sub="componer"><h2>✍️ Componer y enviar<span class="help" tabindex="0" data-tip="Redacta un mensaje propio y envíalo ya (o prográmalo). Respeta listas y exclusiones de cada canal. WhatsApp exige elegir una lista; el texto de Telegram no puede pasar de 4096 caracteres.">ⓘ</span></h2>
    <div class="hint">Escribe un mensaje y envíalo de inmediato a los canales seleccionados. Respeta las listas y exclusiones configuradas en cada canal.</div>
    <label>Mensaje <span id="bc_count" class="charcount">0 caracteres</span></label>
    <textarea id="bc_text" style="min-height:120px" placeholder="Escribe aquí el mensaje a difundir..." oninput="bcCount()"></textarea>
@@ -2032,7 +2039,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span id="bc_status" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="envios"><h2>📡 Envíos <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
+  <div class="card" data-tab="envios" data-sub="historial"><h2>📡 Envíos <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
    <div class="hint">Estado y progreso de cada difusión. Se actualiza automáticamente mientras hay envíos en curso.</div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="bc_table"><thead><tr><th class="selcol"><input type="checkbox" id="bc_selall" onchange="bcSelAll(this.checked)"></th><th>Mensaje</th><th>Estado</th><th>Progreso</th><th></th></tr></thead>
@@ -2046,7 +2053,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="sec" onclick="loadBroadcasts()">Refrescar</button>
    </div>
   </div>
-  <div class="card accent" data-tab="envios"><h2>⏰ Programar un mensaje<span class="help" tabindex="0" data-tip="Crea un envío que sale a una fecha/hora exacta (una vez) o de forma recurrente (diario/semanal). Requiere que los envíos estén activos a esa hora.">ⓘ</span></h2>
+  <div class="card accent" data-tab="envios" data-sub="programados"><h2>⏰ Programar un mensaje<span class="help" tabindex="0" data-tip="Crea un envío que sale a una fecha/hora exacta (una vez) o de forma recurrente (diario/semanal). Requiere que los envíos estén activos a esa hora.">ⓘ</span></h2>
    <div class="hint">Crea mensajes que se envían solos a la hora indicada, por las conexiones existentes de Telegram y WhatsApp. Una vez, a diario o semanal. Respetan el ritmo anti-baneo, la ventana horaria y el interruptor maestro.</div>
    <label>Nombre (opcional)</label>
    <input id="sg_name" placeholder="p. ej. Lista de la mañana" maxlength="80">
@@ -2092,7 +2099,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span id="sg_status" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="envios"><h2>📅 Mensajes programados <span id="sg_n" class="hint"></span></h2>
+  <div class="card" data-tab="envios" data-sub="programados"><h2>📅 Mensajes programados <span id="sg_n" class="hint"></span></h2>
    <div class="hint">Próximos envíos automáticos. Puedes pausarlos/activarlos o eliminarlos.</div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="sg_table"><thead><tr><th>Mensaje</th><th>Canales</th><th>Cuándo</th><th>Próximo</th><th></th></tr></thead>
@@ -2101,7 +2108,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Crea uno arriba para enviarlo automáticamente.</p></div>
    <div style="margin-top:14px"><button class="sec" onclick="loadSchedules()">Refrescar</button></div>
   </div>
-  <div class="card accent" data-tab="ajustes"><h2>👥 Usuarios del panel <span id="usr_n" class="hint"></span></h2>
+  <div class="card accent" data-tab="ajustes" data-sub="cuenta"><h2>👥 Usuarios del panel <span id="usr_n" class="hint"></span></h2>
    <div class="hint">Cada usuario entra con sus propias credenciales (independientes). El correo se usa para recuperar la contraseña.</div>
    <div style="overflow-x:auto;margin-top:12px"><table id="usr_table"><thead><tr><th>Usuario</th><th>Correo</th><th></th></tr></thead><tbody id="usr_rows"></tbody></table></div>
    <div class="section-label" style="margin-top:14px">Crear usuario</div>
@@ -2112,7 +2119,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>Contraseña (mínimo 8)</label><input id="usr_new_pw" type="password">
    <button style="margin-top:10px" onclick="createUser()">Crear usuario</button>
   </div>
-  <div class="card" data-tab="ajustes"><h2>✉️ Correo de recuperación<span class="help" tabindex="0" data-tip="Servicio gratis (Resend, 100/día) para enviar el código de «¿Olvidaste tu contraseña?». Sin API key, el código se intenta enviar por el correo de alertas de AWS (SNS).">ⓘ</span> <span id="mail_status" class="hint"></span></h2>
+  <div class="card" data-tab="ajustes" data-sub="cuenta"><h2>✉️ Correo de recuperación<span class="help" tabindex="0" data-tip="Servicio gratis (Resend, 100/día) para enviar el código de «¿Olvidaste tu contraseña?». Sin API key, el código se intenta enviar por el correo de alertas de AWS (SNS).">ⓘ</span> <span id="mail_status" class="hint"></span></h2>
    <div class="hint">Servicio gratis para entregar el código cuando alguien usa «¿Olvidaste tu contraseña?». Crea una cuenta en <b>resend.com</b> (100 correos/día gratis), genera una API key y pégala aquí. Sin esto, el código se intenta enviar por el correo de alertas de AWS (SNS).</div>
    <label>Remitente (From)</label>
    <input id="mail_from" placeholder="Replica &lt;onboarding@resend.dev&gt;">
@@ -2121,12 +2128,12 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <input id="resend_api_key" type="password" placeholder="(pegar solo si quieres cambiarla)">
    <div style="margin-top:10px"><button onclick="saveEmail()">Guardar correo</button> <span id="mail_save_status" class="hint" style="margin-left:10px"></span></div>
   </div>
-  <div class="card" data-tab="ajustes"><h2>🔑 Cambiar mi contraseña</h2>
+  <div class="card" data-tab="ajustes" data-sub="cuenta"><h2>🔑 Cambiar mi contraseña</h2>
    <label>Contraseña actual</label><input id="cp_cur" type="password">
    <label>Nueva contraseña (mínimo 8)</label><input id="cp_new" type="password">
    <div style="margin-top:10px"><button onclick="changePassword()">Cambiar contraseña</button> <span id="cp_status" class="hint" style="margin-left:10px"></span></div>
   </div>
-  <div class="card accent" data-tab="ajustes"><h2>Interruptor de envíos<span class="help" tabindex="0" data-tip="Pausa o activa TODOS los envíos (Telegram y WhatsApp). La captura del canal NUNCA se detiene: lo capturado en pausa queda en espera y sale al reactivar.">ⓘ</span></h2>
+  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Interruptor de envíos<span class="help" tabindex="0" data-tip="Pausa o activa TODOS los envíos (Telegram y WhatsApp). La captura del canal NUNCA se detiene: lo capturado en pausa queda en espera y sale al reactivar.">ⓘ</span></h2>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
      <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos activos</b></label>
      <span id="sys_badge" class="pill">—</span>
@@ -2137,7 +2144,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="danger" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>
    </div>
   </div>
-  <div class="card accent" data-tab="ajustes"><h2>Anti-baneo · lotes y ritmo<span class="help" tabindex="0" data-tip="Tamaño de lote (máx 150) y delays ALEATORIOS entre mensajes para no parecer spam y reducir el riesgo de baneo. Envío fraccionado = un lote a la vez.">ⓘ</span></h2>
+  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Anti-baneo · lotes y ritmo<span class="help" tabindex="0" data-tip="Tamaño de lote (máx 150) y delays ALEATORIOS entre mensajes para no parecer spam y reducir el riesgo de baneo. Envío fraccionado = un lote a la vez.">ⓘ</span></h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="scheduling_enabled" style="width:auto"> Envío fraccionado y secuencial (procesa un lote a la vez)</label>
    <div class="row">
      <div><label>Tamaño de lote (máx 150)</label><input id="batch_size" type="number" min="1" max="150"></div>
@@ -2154,7 +2161,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="callout">El delay entre mensajes es <b>aleatorio</b> dentro del rango (evita patrones predecibles). El dispatcher libera <b>un lote por minuto</b> y espera a que termine el anterior antes de soltar el siguiente.</div>
    <button onclick="saveSched()">Guardar anti-baneo</button>
   </div>
-  <div class="card" data-tab="ajustes"><h2>Ventana de envío (horario permitido)<span class="help" tabindex="0" data-tip="Restringe los envíos a un horario (p. ej. 08:00–20:00, en tu zona). Fuera de la ventana, los lotes se difieren hasta que reabra. Apagado = 24 h.">ⓘ</span></h2>
+  <div class="card" data-tab="ajustes" data-sub="envio"><h2>Ventana de envío (horario permitido)<span class="help" tabindex="0" data-tip="Restringe los envíos a un horario (p. ej. 08:00–20:00, en tu zona). Fuera de la ventana, los lotes se difieren hasta que reabra. Apagado = 24 h.">ⓘ</span></h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="window_enabled" style="width:auto"> Enviar solo dentro del horario permitido</label>
    <div class="row">
      <div><label>Desde (HH:MM)</label><input id="window_start" placeholder="08:00"></div>
@@ -2163,7 +2170,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="hint">Fuera del horario, los lotes quedan <b>encolados</b> y se procesan de forma diferida al reabrir la ventana. Soporta cruzar medianoche (p.ej. 22:00 → 06:00).</div>
    <button onclick="saveSched()">Guardar ventana</button>
   </div>
-  <div class="card" data-tab="envios"><h2>📦 Envíos fraccionados<span class="help" tabindex="0" data-tip="Las difusiones grandes se dividen en lotes que salen de a uno, con pausas (anti-baneo). Aquí ves el progreso por canal; puedes cancelar o borrar planes.">ⓘ</span> <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
+  <div class="card" data-tab="envios" data-sub="historial"><h2>📦 Envíos fraccionados<span class="help" tabindex="0" data-tip="Las difusiones grandes se dividen en lotes que salen de a uno, con pausas (anti-baneo). Aquí ves el progreso por canal; puedes cancelar o borrar planes.">ⓘ</span> <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
    <div class="hint">De cada lote programado se muestra <b>cuántos mensajes se han enviado</b>. El sistema procesa un lote a la vez, en orden.</div>
    <div id="pl_list" style="margin-top:12px"></div>
    <div class="bc-empty" id="pl_empty" style="display:none">No hay envíos programados todavía. Crea uno en <b>Enviar</b> o espera al próximo del canal.</div>
@@ -2705,17 +2712,19 @@ async function waBulk(accion){ const ids=waSelectedIds(); if(!ids.length){ toast
   await persistWaExcluded(); toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); }
 function waPrev(){ WA_PAGE--; renderWa(); }
 function waNext(){ WA_PAGE++; renderWa(); }
-function showSub(s){
-  document.querySelectorAll('main>.card[data-tab="fuentes"][data-sub]').forEach(c=>c.classList.toggle('subhide', c.dataset.sub!==s));
-  document.querySelectorAll('#fuentes_subnav button').forEach(b=>b.classList.toggle('on', b.dataset.sub===s));
-  try{ localStorage.setItem('fsub',s); }catch(e){}
+// Sub-navegación genérica (por pestaña): muestra solo las tarjetas con el data-sub elegido.
+const SUB_DEFAULT={fuentes:'tg', envios:'componer', ajustes:'cuenta'};
+function showSub(tab,s){
+  document.querySelectorAll('main>.card[data-tab="'+tab+'"][data-sub]').forEach(c=>c.classList.toggle('subhide', c.dataset.sub!==s));
+  document.querySelectorAll('.subnav[data-subnav="'+tab+'"] button').forEach(b=>b.classList.toggle('on', b.dataset.sub===s));
+  try{ localStorage.setItem('sub_'+tab,s); }catch(e){}
 }
 function showTab(t){
   document.querySelectorAll('main>.card').forEach(c=>c.classList.toggle('show', c.dataset.tab===t));
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===t));
   try{ localStorage.setItem('tab',t); }catch(e){}
   if(t==='envios'){ sgFillLists(); sgChan(); sgType(); loadSchedules(); }
-  if(t==='fuentes'){ showSub((function(){try{return localStorage.getItem('fsub')}catch(e){return null}})()||'tg'); }
+  if(SUB_DEFAULT[t]){ showSub(t, (function(){try{return localStorage.getItem('sub_'+t)}catch(e){return null}})()||SUB_DEFAULT[t]); }
   window.scrollTo(0,0); }
 function boot(){ showTab((()=>{try{const s=localStorage.getItem('tab');return ['inicio','fuentes','envios','ajustes'].includes(s)?s:'inicio'}catch(e){return 'inicio'}})()); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
 if(CRED && !sessionFresca()){ logout(); }
