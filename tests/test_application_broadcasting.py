@@ -52,6 +52,14 @@ class FakeConfig:
         return dict(self.cfg)
 
 
+class FakePlans:
+    def __init__(self):
+        self.created = []
+
+    def crear(self, bid, **kw):
+        self.created.append((bid, kw))
+
+
 class BroadcastListTests(unittest.TestCase):
     def test_compone_quita_ubicacion_markup_y_footer(self):
         queue = FakeQueue()
@@ -72,6 +80,25 @@ class BroadcastListTests(unittest.TestCase):
         queue = FakeQueue()
         BroadcastList(FakeSubs(["1"]), queue, FakeConfig(image_url="http://img/p.jpg"))("A $100.000")
         self.assertEqual(queue.calls[0][2], "http://img/p.jpg")
+
+    def test_pausado_captura_y_crea_plan_en_espera(self):
+        # Captura SIEMPRE: con envíos pausados se crea el plan (en espera), no se pierde el post.
+        plans, queue = FakePlans(), FakeQueue()
+        bl = BroadcastList(
+            FakeSubs(["1", "2"]), queue,
+            FakeConfig(scheduling_enabled=True, sending_enabled=False), plans=plans,
+        )
+        res = bl("A06 $100.000")
+        self.assertTrue(res.get("scheduled"))
+        self.assertTrue(res.get("held"))          # marcado EN ESPERA
+        self.assertEqual(len(plans.created), 1)    # plan creado = info guardada
+        self.assertEqual(queue.calls, [])          # nada enviado por la cola
+
+    def test_pausado_inline_no_envia(self):
+        queue = FakeQueue()
+        res = BroadcastList(FakeSubs(["1"]), queue, FakeConfig(sending_enabled=False))("A $100.000")
+        self.assertTrue(res.get("paused"))
+        self.assertEqual(queue.calls, [])          # modo inline: no envía mientras esté pausado
 
     def test_excluye_ids(self):
         queue = FakeQueue()

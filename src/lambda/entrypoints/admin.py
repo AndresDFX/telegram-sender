@@ -1704,6 +1704,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="callout warn">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza con listas pequeñas. Las <b>exclusiones</b> se gestionan por nombre abajo, en <b>Destinatarios WhatsApp</b>.</div>
   </div>
   <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Canal y mensaje</h2>
+   <div class="hint" style="margin-top:-4px">La <b>captura del canal está siempre activa</b> (se guarda cada lista publicada). El <b>envío</b> a tus contactos se controla con el <b>interruptor</b> en «Ajustes y estado»: si está apagado, lo capturado queda en espera.</div>
    <label>Canal fuente (username sin @)</label><input id="source_channel">
    <label>Símbolos de moneda</label><input id="currency_symbols">
    <label>Footer WhatsApp (se añade al final de cada lista)</label><textarea id="whatsapp_footer"></textarea>
@@ -1946,7 +1947,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos activos</b></label>
      <span id="sys_badge" class="pill">—</span>
    </div>
-   <div class="hint" style="margin-top:10px">Apágalo para <b>PAUSAR al instante todos los envíos</b> (Telegram y WhatsApp). Las difusiones quedan en espera; nada sale hasta reactivar. Útil como freno de emergencia.</div>
+   <div class="hint" style="margin-top:10px">Controla <b>solo el ENVÍO</b>. La <b>captura de @iproparts siempre está activa</b> (la información nunca se pierde): mientras esto esté apagado, lo capturado queda <b>EN ESPERA</b> y se envía en cuanto lo reactivas. Apágalo como freno: pausa al instante Telegram y WhatsApp.</div>
    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bd)">
      <div class="hint" style="margin-top:0">¿Hay difusiones en cola que NO quieres enviar? Cancélalas (no se enviarán, ni al reactivar).</div>
      <button class="danger" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>

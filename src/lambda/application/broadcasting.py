@@ -170,9 +170,10 @@ class BroadcastList:
 
     def __call__(self, text: str) -> dict[str, int]:
         cfg = self._config.get()
-        if not cfg.get("sending_enabled", True):
-            logger.info("Envíos PAUSADOS (sending_enabled=False); difusión de canal omitida")
-            return {"paused": True, "subscribers": 0}
+        # CAPTURA SIEMPRE: la info del canal (iproparts) se guarda aunque los envíos estén
+        # pausados — se crea el plan EN ESPERA y el dispatcher lo enviará al activar el interruptor.
+        # Nunca se pierde un post; lo opcional es el envío, no la captura.
+        habilitado = bool(cfg.get("sending_enabled", True))
         mensaje = componer_mensaje(
             text,
             markup_percentage=cfg["markup_percentage"],
@@ -198,9 +199,14 @@ class BroadcastList:
                 clientes=clientes, tg_on=True, wa_on=wa_on, wa_mode=wa_mode, wa_list_ids=wa_list_ids,
                 wa_text=mensaje, wa_image_url=self._image_url_para_whatsapp(cfg),
             )
-            logger.info("Difusión %s PROGRAMADA (fraccionada) para %d clientes", bid, len(clientes))
-            return {"scheduled": True, "subscribers": len(clientes), "broadcast_id": bid}
+            estado = "PROGRAMADA" if habilitado else "EN ESPERA (envíos pausados)"
+            logger.info("Difusión %s %s (fraccionada) para %d clientes", bid, estado, len(clientes))
+            return {"scheduled": True, "subscribers": len(clientes), "broadcast_id": bid, "held": not habilitado}
 
+        if not habilitado:
+            # Modo inline (sin scheduler, p.ej. dev): no hay plan que retener; no se envía mientras esté pausado.
+            logger.info("Difusión %s registrada pero NO enviada (envíos pausados, modo inline)", bid)
+            return {"paused": True, "subscribers": len(clientes), "broadcast_id": bid}
         lotes = self._queue.encolar(
             mensaje,
             clientes,
