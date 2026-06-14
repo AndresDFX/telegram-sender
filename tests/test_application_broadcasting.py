@@ -52,7 +52,7 @@ class FakeConfig:
         return dict(self.cfg)
 
 
-class FakePlans:
+class FakePlansEspera:
     def __init__(self):
         self.created = []
 
@@ -83,7 +83,7 @@ class BroadcastListTests(unittest.TestCase):
 
     def test_pausado_captura_y_crea_plan_en_espera(self):
         # Captura SIEMPRE: con envíos pausados se crea el plan (en espera), no se pierde el post.
-        plans, queue = FakePlans(), FakeQueue()
+        plans, queue = FakePlansEspera(), FakeQueue()
         bl = BroadcastList(
             FakeSubs(["1", "2"]), queue,
             FakeConfig(scheduling_enabled=True, sending_enabled=False), plans=plans,
