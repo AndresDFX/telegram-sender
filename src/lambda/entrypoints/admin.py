@@ -1545,6 +1545,8 @@ tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .ds-modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
 /* Accesibilidad: foco visible consistente por teclado en elementos interactivos */
 a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visible,#fuentes_subnav button:focus-visible,.nav button:focus-visible,.chan:focus-within{outline:2px solid var(--ac);outline-offset:2px;border-radius:8px}
+@keyframes kpipulse{0%,100%{opacity:.35}50%{opacity:.7}}
+.stat b.kpi-load{animation:kpipulse 1s ease-in-out infinite}
 th.selcol,td.selcol{width:34px;text-align:center}
 </style></head><body>
 
@@ -1978,20 +1980,21 @@ function dsModal(o){ o=o||{}; return new Promise(resolve=>{
   d.innerHTML='<h3>'+bcEsc(o.title||'Confirmar')+'</h3>'+
     (o.message?'<div class="ds-modal-body">'+bcEsc(o.message)+'</div>':'')+
     (o.input?'<input id="ds_modal_input" placeholder="'+bcEsc(o.placeholder||'')+'">':'')+
-    '<div class="ds-modal-actions"><button class="ghost" data-a="c">'+bcEsc(o.cancelText||'Cancelar')+'</button>'+
+    '<div class="ds-modal-actions">'+(o.noCancel?'':'<button class="ghost" data-a="c">'+bcEsc(o.cancelText||'Cancelar')+'</button>')+
     '<button class="'+(o.danger?'danger':'')+'" data-a="k">'+bcEsc(o.okText||'Aceptar')+'</button></div>';
   ov.appendChild(d); document.body.appendChild(ov);
   const inp=d.querySelector('#ds_modal_input'); if(inp) setTimeout(()=>{inp.focus();},40);
-  const no=o.input?null:false;
+  const no=o.input?null:(o.noCancel?true:false);
   function close(v){ document.removeEventListener('keydown',onKey); ov.remove(); resolve(v); }
   function onKey(e){ if(e.key==='Escape') close(no); else if(e.key==='Enter') close(o.input?(inp?inp.value:''):true); }
   ov.addEventListener('mousedown',e=>{ if(e.target===ov) close(no); });
-  d.querySelector('[data-a=c]').onclick=()=>close(no);
+  const _cb=d.querySelector('[data-a=c]'); if(_cb) _cb.onclick=()=>close(no);
   d.querySelector('[data-a=k]').onclick=()=>close(o.input?(inp?inp.value:''):true);
   document.addEventListener('keydown',onKey);
 }); }
 function confirmModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'¿Confirmas?',message:message,okText:opts.okText||'Aceptar',cancelText:opts.cancelText,danger:!!opts.danger}); }
 function promptModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'Escribe un valor',message:message,input:true,placeholder:opts.placeholder,okText:opts.okText||'Aceptar'}); }
+function alertModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'Aviso',message:message,okText:opts.okText||'Entendido',noCancel:true,danger:opts.danger}); }
 // Skeleton de carga reutilizable: filas placeholder con shimmer mientras llegan los datos (solo 1ª carga).
 function skelTable(id,cols,rows){ const t=$(id); if(!t) return; const r=rows||4, c=cols||3;
   t.innerHTML=Array.from({length:r},()=>'<tr class="skeleton">'+Array.from({length:c},()=>'<td><div class="sk-line"></div></td>').join('')+'</tr>').join(''); }
@@ -2264,6 +2267,7 @@ function renderSteps(c){
 }
 // --- Dashboard / Inicio (KPIs + estado de un vistazo) ---
 async function loadDashboard(){
+  ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e=$(id); if(e) e.classList.add('kpi-load');});
   try{
     const [m,c,pl,q]=await Promise.all([api('/api/metrics'),api('/api/config'),api('/api/plans'),api('/api/queue')]);
     if($('k_sent')) $('k_sent').textContent=m.enviados;
@@ -2271,6 +2275,7 @@ async function loadDashboard(){
     let pend=0; (pl.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running') pend+=Math.max(0,(p.tg.batches|0)-(p.tg.next|0))+Math.max(0,((p.wa&&p.wa.batches)|0)-((p.wa&&p.wa.next)|0)); });
     if($('k_pend')) $('k_pend').textContent=pend;
     if($('k_dlq')) $('k_dlq').textContent=q.dlq;
+    ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e=$(id); if(e) e.classList.remove('kpi-load');});
     renderSteps(c);
     const on=c.sending_enabled!==false; const de=$('dash_estado');
     if(de){ de.className='callout '+(on?'ok':'warn');
@@ -2281,7 +2286,8 @@ async function loadDashboard(){
       (s.length? s.map(d=>`<div title="${d.dia}: ${d.sent} enviados, ${d.failed} fallidos" style="flex:1;background:linear-gradient(180deg,var(--ac),var(--ac2));height:${Math.round(((d.sent|0)+(d.failed|0))/max*100)}%;min-height:2px;border-radius:3px 3px 0 0"></div>`).join('') : '<div class="hint">sin actividad aún</div>')+'</div>';
     try{ const last=((await api('/api/broadcasts')).broadcasts||[])[0];
       if($('dash_last')) $('dash_last').innerHTML = last? ('Último envío: <b>'+bcEsc((last.text||'(imagen)').slice(0,48))+'</b> — '+(BC_STATUS[last.status]||last.status)+' · '+bcFmtTime(last.created_at)) : 'Aún no hay envíos.'; }catch(e){}
-  }catch(e){ if($('dash_estado')) $('dash_estado').textContent='no se pudo cargar el resumen'; }
+  }catch(e){ if($('dash_estado')) $('dash_estado').textContent='no se pudo cargar el resumen';
+    ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e2=$(id); if(e2) e2.classList.remove('kpi-load');}); }
 }
 let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0;
 const PAGE_SIZE=50;
