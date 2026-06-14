@@ -611,6 +611,28 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             n = plan_store.cancelar_pendientes()
             _audit("cancelar_pendientes", f"{n} difusiones")
             return _json({"ok": True, "canceled": n})
+        if sub == "/api/plans/delete" and method == "POST":
+            cuerpo = _body(event)
+            if cuerpo.get("finished"):
+                n = plan_store.borrar_terminados()
+                _audit("plans:borrar", f"terminados {n}")
+                return _json({"ok": True, "deleted": n})
+            pids = cuerpo.get("pids")
+            if isinstance(pids, list) and pids:
+                n = 0
+                for x in pids:
+                    try:
+                        plan_store.borrar(str(x)); n += 1
+                    except Exception:
+                        pass
+                _audit("plans:borrar", f"masivo {n}")
+                return _json({"ok": True, "deleted": n})
+            pid = str(cuerpo.get("pid", "")).strip()
+            if not pid:
+                return _json({"error": "pid requerido"}, 400)
+            plan_store.borrar(pid)
+            _audit("plans:borrar", pid)
+            return _json({"ok": True})
         if sub == "/api/telegram/me" and method == "GET":
             return _telegram_api("getMe", {})  # verifica el token + muestra el bot
         if sub == "/api/telegram/webhook" and method == "GET":
@@ -1595,6 +1617,10 @@ img.preview{box-shadow:var(--sh-sm)}
 tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .tbl-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
 .tbl-toolbar .grow{flex:1}
+.tbl-toolbar .sel-all{display:inline-flex;align-items:center;gap:8px;margin:0;font-size:13px;color:var(--mut);font-weight:600;cursor:pointer}
+.tbl-toolbar .sel-all input{width:auto;margin:0}
+.pl-card{transition:border-color .15s,box-shadow .15s}
+.pl-card.sel-card{border-color:rgba(253,83,30,.55);box-shadow:0 0 0 1px rgba(253,83,30,.35)}
 .bc-err{color:var(--bad);font-size:11px;margin-top:4px;line-height:1.35;max-width:240px;cursor:pointer;border-bottom:1px dotted rgba(255,107,90,.5);display:inline-block}
 .bc-err:hover{color:#ff8f7d}
 .bc-err:focus-visible{outline:2px solid var(--ac2);outline-offset:2px;border-radius:3px}
@@ -1604,7 +1630,7 @@ tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .ds-modal{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--bd2);border-radius:16px;box-shadow:0 24px 60px -16px rgba(0,0,0,.7);padding:22px;max-width:440px;width:100%;animation:dsPop .16s ease}
 @keyframes dsPop{from{transform:translateY(10px) scale(.98);opacity:0}to{transform:none;opacity:1}}
 .ds-modal h3{margin:0 0 10px;font-size:17px}
-.ds-modal-body{color:var(--tx2);font-size:14px;line-height:1.55;white-space:pre-line}
+.ds-modal-body{color:var(--tx2);font-size:14px;line-height:1.55;white-space:pre-line;max-height:48vh;overflow:auto}
 .ds-modal input{width:100%;margin-top:14px}
 .ds-modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
 /* Accesibilidad: foco visible consistente por teclado en elementos interactivos */
@@ -2057,7 +2083,13 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="hint">De cada lote programado se muestra <b>cuántos mensajes se han enviado</b>. El sistema procesa un lote a la vez, en orden.</div>
    <div id="pl_list" style="margin-top:12px"></div>
    <div class="bc-empty" id="pl_empty" style="display:none">No hay envíos programados todavía. Crea uno en <b>Enviar</b> o espera al próximo del canal.</div>
-   <div style="margin-top:14px"><button class="sec" onclick="loadPlans()">Refrescar</button></div>
+   <div class="tbl-toolbar">
+     <label class="sel-all"><input type="checkbox" id="pl_selall" onchange="plSelAll(this.checked)"> Seleccionar todos</label>
+     <button class="danger" id="pl_delsel" onclick="plDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
+     <button class="ghost" onclick="plClearFinished()">🧹 Borrar terminados</button>
+     <span class="grow"></span>
+     <button class="sec" onclick="loadPlans()">Refrescar</button>
+   </div>
   </div>
  </main>
 </div>
@@ -2193,19 +2225,26 @@ function renderSendingState(on){
   }
 }
 async function pendingSummary(){
-  try{ const r=await api('/api/plans'); let planes=0,envios=0;
-    (r.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running'){ planes++; envios+=((p.tg&&p.tg.total)|0)+((p.wa&&p.wa.total)|0); } });
-    return {planes,envios};
-  }catch(e){ return {planes:0,envios:0}; }
+  try{ const r=await api('/api/plans'); let planes=0,envios=0; const items=[];
+    (r.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running'){
+      const tg=(p.tg&&p.tg.total)|0, wa=(p.wa&&p.wa.total)|0, n=tg+wa; planes++; envios+=n;
+      const ch=((tg?'✈️':'')+(wa?'🟢':''))||'·';
+      items.push({ch,n,text:((p.text||'').trim()||'(solo imagen)').replace(/\s+/g,' ').slice(0,60)});
+    }});
+    return {planes,envios,items};
+  }catch(e){ return {planes:0,envios:0,items:[]}; }
 }
 async function setSending(on){
   if(!on){ if(!(await confirmModal('¿Pausar TODOS los envíos (Telegram y WhatsApp)? Nada saldrá hasta que los reactives.',{okText:'Pausar envíos',danger:true}))){ renderSendingState(true); return; } }
   else {
     const ps=await pendingSummary();
-    let msg='¿Activar los envíos? A partir de ahora los mensajes se entregarán a tus contactos, de forma gradual (anti-baneo).';
+    let msg='¿Activar los envíos? No hay nada en cola: los próximos mensajes se entregarán a tus contactos de forma gradual (anti-baneo).';
     if(ps.planes>0){
       const ne = ps.envios>0 ? (' (~'+ps.envios.toLocaleString('es')+' envíos en total)') : '';
-      msg='⚠️ Hay '+ps.planes+' difusión(es) en cola'+ne+'. Al activar empezarán a salir de forma gradual a tus contactos. Si no quieres enviarlas, pausa y cancélalas primero (Ajustes → Interruptor de envíos). ¿Activar los envíos?';
+      const MAX=15;
+      const lista = ps.items.slice(0,MAX).map((it,i)=>(i+1)+'. '+it.ch+' '+it.n+' → '+it.text).join('\n');
+      const mas = ps.items.length>MAX ? ('\n…y '+(ps.items.length-MAX)+' más.') : '';
+      msg='⚠️ Al ACTIVAR se enviará esto AHORA — '+ps.planes+' difusión(es)'+ne+':\n\n'+lista+mas+'\n\nEmpezarán a salir de forma gradual a tus contactos. Si no quieres enviar alguna, pausa y bórrala primero abajo en «Envíos fraccionados». ¿Activar los envíos?';
     }
     if(!(await confirmModal(msg,{okText:'Activar envíos',danger:ps.planes>0}))){ renderSendingState(false); return; }
   }
@@ -2855,9 +2894,10 @@ function plCard(p){
   const activo=(st==='pending'||st==='running');
   const cancelBtn=activo?`<button class="danger" style="padding:6px 12px" onclick="cancelPlan('${p.pid}')">🛑 Cancelar este envío</button>`:'';
   // Mensaje EXACTO que se envía (ya procesado: markup, sin IPRO PARTS, footer). Scrollable para revisar.
-  return `<div class="card" style="margin-bottom:12px;background:var(--elev);padding:16px">`+
+  return `<div class="card pl-card" data-pid="${p.pid}" style="margin-bottom:12px;background:var(--elev);padding:16px">`+
     `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center">`+
-      `<span class="pill ${pill}">${lab}</span>${cancelBtn}</div>`+
+      `<label style="display:flex;align-items:center;gap:9px;margin:0"><input type="checkbox" class="plsel" data-pid="${p.pid}" onchange="plSelChanged()" style="width:auto"><span class="pill ${pill}">${lab}</span></label>`+
+      `<span style="display:flex;gap:8px;align-items:center">${cancelBtn}<button class="danger" style="padding:6px 10px" title="Borrar definitivamente" onclick="plDelete('${p.pid}')">🗑</button></span></div>`+
     `<div class="bc-meta" style="margin:6px 0">${bcFmtTime(p.created_at)} · lote ${p.batch_size|0} ${tgI?'· '+tgI:''} ${waI?'· '+waI:''}</div>`+
     `<div style="margin:6px 0;padding:10px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;max-height:170px;overflow:auto;white-space:pre-wrap;font-size:12px;color:var(--tx2);line-height:1.5">${bcEsc(txt)}</div>`+
     `<div class="hint" style="margin:8px 0 2px">Progreso por lote:</div>`+
@@ -2869,11 +2909,36 @@ async function cancelPlan(pid){
     toast('✓ Envío cancelado'); loadPlans(); loadQueue(); }
   catch(e){ toast('Error al cancelar',true); }
 }
+// Borrado de envíos fraccionados (individual + masivo), mismo patrón que la tabla de Envíos.
+function plSelAll(v){ document.querySelectorAll('.plsel').forEach(c=>c.checked=v); plSelChanged(); }
+function plSelectedIds(){ return [...document.querySelectorAll('.plsel:checked')].map(c=>c.dataset.pid); }
+function plSelChanged(){
+  document.querySelectorAll('.plsel').forEach(c=>{ const card=c.closest('.pl-card'); if(card) card.classList.toggle('sel-card', c.checked); });
+  const n=plSelectedIds().length, b=$('pl_delsel');
+  if(b){ b.disabled=n===0; b.textContent='🗑 Borrar seleccionados'+(n?' ('+n+')':''); }
+}
+async function plDelete(pid){
+  if(!await confirmModal('¿Borrar DEFINITIVAMENTE este envío fraccionado (y sus lotes)? No se puede deshacer (no afecta lo ya entregado).',{danger:true,okText:'Borrar'})) return;
+  try{ await api('/api/plans/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pid})}); toast('✓ Borrado'); loadPlans(); }
+  catch(e){ toast('Error al borrar',true); }
+}
+async function plDeleteSelected(){
+  const ids=plSelectedIds(); if(!ids.length) return;
+  if(!await confirmModal('¿Borrar DEFINITIVAMENTE '+ids.length+' envío(s) seleccionados? No se puede deshacer.',{danger:true,okText:'Borrar'})) return;
+  try{ const r=await api('/api/plans/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pids:ids})}); toast('✓ '+(r.deleted||0)+' borrados'); loadPlans(); }
+  catch(e){ toast('Error al borrar',true); }
+}
+async function plClearFinished(){
+  if(!await confirmModal('¿Borrar DEFINITIVAMENTE todos los envíos fraccionados TERMINADOS (completados o cancelados)? Se conservan los pendientes/en curso.',{danger:true,okText:'Borrar terminados'})) return;
+  try{ const r=await api('/api/plans/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({finished:true})}); toast('✓ '+(r.deleted||0)+' borrados'); loadPlans(); }
+  catch(e){ toast('Error al borrar',true); }
+}
 async function loadPlans(){
   try{
     const r=await api('/api/plans'); const list=r.plans||[];
     $('pl_empty').style.display=list.length?'none':'block';
     $('pl_list').innerHTML=list.map(plCard).join('');
+    if($('pl_selall')) $('pl_selall').checked=false; plSelChanged();
     const active=list.some(p=>p.status==='pending'||p.status==='running');
     $('pl_live').classList.toggle('on',active); $('pl_live_t').textContent=active?'en vivo':'al día';
   }catch(e){ /* silencioso */ }

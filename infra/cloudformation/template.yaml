@@ -975,10 +975,12 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:PutItem # crear plan fraccionado (envío manual)
-                  - dynamodb:BatchWriteItem # lotes del plan
+                  - dynamodb:BatchWriteItem # lotes del plan (crear y borrar definitivo)
                   - dynamodb:Scan # vista de programación / monitoreo
+                  - dynamodb:Query # listar items (pid) de un plan para borrarlo
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem # cancelar difusiones pendientes
+                  - dynamodb:DeleteItem # borrar definitivamente un plan y sus lotes
                 Resource:
                   - !GetAtt PlansTable.Arn
               - Effect: Allow

@@ -873,6 +873,37 @@ class DynamoDbPlanStore:
             n += 1
         return n
 
+    def borrar(self, plan_id: str) -> None:
+        """Borra DEFINITIVAMENTE un plan y TODOS sus lotes (todos los items con pid=plan_id)."""
+        from boto3.dynamodb.conditions import Key
+
+        t = self._t()
+        claves, start = [], None
+        while True:
+            kwargs = {"KeyConditionExpression": Key("pid").eq(plan_id), "ProjectionExpression": "pid, sk"}
+            if start:
+                kwargs["ExclusiveStartKey"] = start
+            resp = t.query(**kwargs)
+            claves.extend(resp.get("Items", []))
+            start = resp.get("LastEvaluatedKey")
+            if not start:
+                break
+        with t.batch_writer() as bw:
+            for it in claves:
+                bw.delete_item(Key={"pid": it["pid"], "sk": it["sk"]})
+
+    def borrar_terminados(self) -> int:
+        """Borra los planes ya terminados (estado != pending/running). Devuelve cuántos."""
+        n = 0
+        for p in self.listar(limit=10000):
+            if str(p.get("status")) not in ("pending", "running"):
+                try:
+                    self.borrar(p["pid"])
+                    n += 1
+                except Exception:
+                    pass
+        return n
+
     def listar(self, limit: int = 20) -> list[dict]:
         """Planes (PLAN) más recientes, con su bitácora, para la vista de programación."""
         from boto3.dynamodb.conditions import Attr
