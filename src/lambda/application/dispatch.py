@@ -108,6 +108,7 @@ class DispatchCampaigns:
                     list_ids=plan.get("wa_list_ids", []),
                     exclude=plan.get("wa_exclude", []),
                     exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
+                    pattern_exceptions=cfg.get("whatsapp_pattern_exceptions", []),
                 )
             except Exception:
                 logger.exception("No se pudo resolver el total de WhatsApp del plan %s; reintento luego", pid)
@@ -162,6 +163,7 @@ class DispatchCampaigns:
                 delay_min_ms=int(cfg.get("wa_delay_min", 3000)),
                 delay_max_ms=int(cfg.get("wa_delay_max", 9000)),
                 exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
+                pattern_exceptions=cfg.get("whatsapp_pattern_exceptions", []),
             )
             logger.info("Plan %s: despachado WA#%d (offset %d, %d destinatarios)", pid, wa_next, offset, limit)
             return {"plan": pid, "despachado": f"WA#{wa_next}", "n": limit}

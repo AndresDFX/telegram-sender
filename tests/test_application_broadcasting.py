@@ -87,6 +87,15 @@ class ExclusionPatronTelegramTests(unittest.TestCase):
         BroadcastList(subs, queue, cfg)("Hola $100.000")
         self.assertEqual(set(queue.calls[0][1]), {"1", "2"})
 
+    def test_excepcion_incluye_pese_al_patron(self):
+        # "1" (FAM Juan) coincide con el patrón pero está exento -> se incluye
+        queue = FakeQueue()
+        subs = FakeSubs(["1", "2", "3"], names={"1": "FAM Juan", "2": "Cliente", "3": "FAM Ana"})
+        cfg = FakeConfig(currency_symbols="$💸💲", telegram_exclude_patterns=["fam"],
+                         telegram_pattern_exceptions=["1"])
+        BroadcastList(subs, queue, cfg)("Hola $100.000")
+        self.assertEqual(set(queue.calls[0][1]), {"1", "2"})  # "3" (FAM Ana) sigue excluido
+
 
 class BroadcastListTests(unittest.TestCase):
     def test_compone_quita_ubicacion_markup_y_footer(self):
@@ -297,7 +306,7 @@ class SchedulerPathTests(unittest.TestCase):
 
     def test_manual_wa_resuelve_total_via_contar(self):
         class FakeWa:
-            def contar(self, *, mode="all", list_ids=None, exclude=None, exclude_patterns=None):
+            def contar(self, *, mode="all", list_ids=None, exclude=None, exclude_patterns=None, pattern_exceptions=None):
                 return 7
 
             def forward(self, *a, **k):

@@ -439,14 +439,17 @@ app.post('/blocked/clear', auth, (req, res) => {
 // Resuelve a quién enviar según el modo de targeting y las listas de distribución.
 // mode: "all" | "only" (whitelist sobre list_ids) | "except" (blacklist sobre list_ids).
 // Compara contra el jid completo y contra el número (id sin @dominio).
-function resolverTargets(mode, list_ids, exclude, exclude_patterns) {
+function resolverTargets(mode, list_ids, exclude, exclude_patterns, pattern_exceptions) {
   const ex = new Set((exclude || []).map(String))
   const sel = new Set((list_ids || []).map(String))
   // Patrones de auto-exclusión por NOMBRE (p. ej. "FAM"): substring sin distinguir mayúsculas.
   const pats = (exclude_patterns || []).map((p) => String(p).trim().toLowerCase()).filter(Boolean)
+  // Excepciones: ids incluidos AUNQUE su nombre coincida con un patrón (override manual).
+  const excepto = new Set((pattern_exceptions || []).map(String))
   const enSeleccion = (id) => sel.has(id) || sel.has(id.split('@')[0])
   const coincidePatron = (id) => {
     if (!pats.length) return false
+    if (excepto.has(id) || excepto.has(id.split('@')[0])) return false // excepción al patrón
     const nombre = String(contacts[id] || '').toLowerCase()
     return pats.some((p) => nombre.includes(p))
   }
@@ -551,9 +554,9 @@ app.post('/send', auth, (req, res) => {
     text = '', image_url = null, exclude = [], mode = 'all', list_ids = [],
     broadcast_id = null, broadcasts_table = null,
     count_only = false, offset = null, limit = null, bc_total = null,
-    delay_min_ms = null, delay_max_ms = null, exclude_patterns = [],
+    delay_min_ms = null, delay_max_ms = null, exclude_patterns = [], pattern_exceptions = [],
   } = req.body || {}
-  const all = resolverTargets(mode, list_ids, exclude, exclude_patterns) // orden estable
+  const all = resolverTargets(mode, list_ids, exclude, exclude_patterns, pattern_exceptions) // orden estable
   if (count_only) return res.json({ count: all.length, mode })
   if (!connected || !sock) return res.status(409).json({ error: 'whatsapp_no_conectado' })
   const off = Number(offset) || 0

@@ -41,6 +41,7 @@ class WhatsAppForwarderTests(unittest.TestCase):
                 "image_url": "http://img",
                 "exclude": ["1", "2"],
                 "exclude_patterns": [],
+                "pattern_exceptions": [],
                 "mode": "all",
                 "list_ids": [],
                 "broadcast_id": None,

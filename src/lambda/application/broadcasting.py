@@ -57,12 +57,12 @@ class BroadcastList:
         Si falta el store (p.ej. tests) cae al envío inmediato (compatibilidad)."""
         return bool(cfg.get("scheduling_enabled")) and self._plans is not None
 
-    def _resolver_wa_total(self, wa_on: bool, mode: str, list_ids, exclude, exclude_patterns=()) -> tuple[int, bool]:
+    def _resolver_wa_total(self, wa_on: bool, mode: str, list_ids, exclude, exclude_patterns=(), pattern_exceptions=()) -> tuple[int, bool]:
         """(total, resuelto). Si el servicio no responde, el dispatcher lo resolverá luego."""
         if not (wa_on and self._whatsapp):
             return 0, True
         try:
-            return int(self._whatsapp.contar(mode=mode, list_ids=list(list_ids or []), exclude=list(exclude or []), exclude_patterns=list(exclude_patterns or []))), True
+            return int(self._whatsapp.contar(mode=mode, list_ids=list(list_ids or []), exclude=list(exclude or []), exclude_patterns=list(exclude_patterns or []), pattern_exceptions=list(pattern_exceptions or []))), True
         except Exception:
             logger.exception("No se pudo contar WhatsApp al crear el plan; el dispatcher lo resolverá")
             return 0, False
@@ -88,7 +88,8 @@ class BroadcastList:
         tg_lotes = self._chunk(clientes, bs) if tg_on else []
         wa_exclude = cfg.get("whatsapp_excluded", []) if wa_on else []
         wa_total, wa_resolved = self._resolver_wa_total(
-            wa_on, wa_mode, wa_list_ids, wa_exclude, cfg.get("whatsapp_exclude_patterns", [])
+            wa_on, wa_mode, wa_list_ids, wa_exclude,
+            cfg.get("whatsapp_exclude_patterns", []), cfg.get("whatsapp_pattern_exceptions", [])
         )
         self._plans.crear(
             bid,
@@ -138,7 +139,8 @@ class BroadcastList:
         if not patrones:
             return set()
         try:
-            return ids_excluidos_por_patron(self._subscribers.listar_todos(), patrones)
+            excepciones = {str(x) for x in (cfg.get("telegram_pattern_exceptions") or [])}
+            return ids_excluidos_por_patron(self._subscribers.listar_todos(), patrones) - excepciones
         except Exception:
             logger.exception("No se pudieron aplicar patrones de exclusión de Telegram")
             return set()
@@ -166,6 +168,7 @@ class BroadcastList:
                 broadcast_id=broadcast_id,
                 broadcasts_table=self._broadcasts_table(),
                 exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
+                pattern_exceptions=cfg.get("whatsapp_pattern_exceptions", []),
             )
             logger.info("WhatsApp forward: %s", resultado)
             aceptado = isinstance(resultado, dict) and bool(resultado.get("accepted"))

@@ -83,9 +83,13 @@ _CAMPOS_EDITABLES = (
     # Auto-exclusión por patrón de nombre (p. ej. "FAM"), por canal.
     "telegram_exclude_patterns",
     "whatsapp_exclude_patterns",
+    # Excepciones al patrón: ids que se incluyen aunque su nombre coincida (override manual).
+    "telegram_pattern_exceptions",
+    "whatsapp_pattern_exceptions",
 )
 _LISTAS = ("strip_patterns", "excluded_ids", "whatsapp_excluded",
-           "telegram_exclude_patterns", "whatsapp_exclude_patterns")
+           "telegram_exclude_patterns", "whatsapp_exclude_patterns",
+           "telegram_pattern_exceptions", "whatsapp_pattern_exceptions")
 _LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
 _TARGETS = ("telegram_target", "whatsapp_target")
 _FLOATS = ("tg_delay_min", "tg_delay_max")
@@ -1630,6 +1634,7 @@ tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .segf button.on.exc{background:rgba(251,191,36,.16);color:#FCE7B0}
 .excl-pat{margin:12px 0;padding:12px 14px;background:var(--bg);border:1px solid var(--bd);border-radius:10px}
 .pill.pat{background:rgba(251,146,60,.14);color:#FFC79A;border-color:rgba(251,146,60,.32)}
+.pill.exc-ok{background:rgba(52,211,153,.13);color:var(--ok);border-color:rgba(52,211,153,.45);border-style:dashed}
 .bc-err{color:var(--bad);font-size:11px;margin-top:4px;line-height:1.35;max-width:240px;cursor:pointer;border-bottom:1px dotted rgba(255,107,90,.5);display:inline-block}
 .bc-err:hover{color:#ff8f7d}
 .bc-err:focus-visible{outline:2px solid var(--ac2);outline-offset:2px;border-radius:3px}
@@ -2242,6 +2247,7 @@ async function loadCfg(){ const c=await api('/api/config');
   if($('mail_from')) $('mail_from').value=c.mail_from||'';
   if($('mail_status')) $('mail_status').textContent = c.resend_api_key_set ? '· API key configurada ✓' : '· sin API key (usa SNS)';
   EXCL_PAT_TG=c.telegram_exclude_patterns||[]; WA_EXCL_PAT=c.whatsapp_exclude_patterns||[];
+  EXCEPT_TG=new Set((c.telegram_pattern_exceptions||[]).map(String)); WA_EXCEPT=new Set((c.whatsapp_pattern_exceptions||[]).map(String));
   if($('tg_excl_pat')) $('tg_excl_pat').value=EXCL_PAT_TG.join('\n');
   if($('wa_excl_pat')) $('wa_excl_pat').value=WA_EXCL_PAT.join('\n');
   renderSendingState(c.sending_enabled!==false); }
@@ -2511,11 +2517,13 @@ async function loadDashboard(){
   }catch(e){ if($('dash_estado')) $('dash_estado').textContent='no se pudo cargar el resumen';
     ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e2=$(id); if(e2) e2.classList.remove('kpi-load');}); }
 }
-let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0, STATEF='', EXCL_PAT_TG=[];
+let EXCLUDED=new Set(), DEST=[], FILTER='', PAGE=0, STATEF='', EXCL_PAT_TG=[], EXCEPT_TG=new Set();
 const PAGE_SIZE=50;
 function nameMatchesPatterns(name, pats){ const n=String(name||'').toLowerCase();
   return (pats||[]).some(p=>{ p=String(p).trim().toLowerCase(); return p && n.includes(p); }); }
-function isExcludedTg(s){ return EXCLUDED.has(String(s.chatId)) || nameMatchesPatterns(s.name, EXCL_PAT_TG); }
+// Excluido = manual (excluded_ids) O (coincide patrón Y NO tiene excepción manual).
+function isExcludedTg(s){ const id=String(s.chatId);
+  return EXCLUDED.has(id) || (nameMatchesPatterns(s.name, EXCL_PAT_TG) && !EXCEPT_TG.has(id)); }
 function filtered(){ let arr=DEST;
   if(FILTER){ const q=FILTER.toLowerCase();
     arr=arr.filter(s=> (s.name||'').toLowerCase().includes(q) || String(s.chatId||'').toLowerCase().includes(q) || String(s.phone||'').toLowerCase().includes(q)); }
@@ -2533,14 +2541,17 @@ function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length
   const exCount=DEST.filter(isExcludedTg).length; const inc=DEST.length-exCount;
   $('subcount').textContent = DEST.length ? `· ${f.length} en vista · ${inc} incluidos · ${exCount} excluidos` : '';
   $('pageinfo').textContent = f.length ? `página ${PAGE+1} de ${pages}` : 'sin resultados';
-  slice.forEach(s=>{ const exM=EXCLUDED.has(String(s.chatId)); const exP=!exM && nameMatchesPatterns(s.name, EXCL_PAT_TG); const label=s.name||'(sin nombre)'; const tr=document.createElement('tr');
-    const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido · patrón</span>':'<span class="pill active">Incluido</span>');
+  slice.forEach(s=>{ const id=String(s.chatId); const exM=EXCLUDED.has(id); const matchP=nameMatchesPatterns(s.name, EXCL_PAT_TG);
+    const exP=!exM && matchP && !EXCEPT_TG.has(id); const exc=!exM && matchP && EXCEPT_TG.has(id);
+    const label=s.name||'(sin nombre)'; const tr=document.createElement('tr');
+    const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido · patrón</span>':(exc?'<span class="pill exc-ok">Incluido · excepción</span>':'<span class="pill active">Incluido</span>'));
     tr.innerHTML=`<td><input type="checkbox" class="selrow" data-id="${s.chatId}"></td>`+
       `<td><b>${bcEsc(label)}</b><div class="hint" style="margin-top:2px;font-size:11px">${bcEsc(s.phone||s.chatId||'')}</div></td>`+
       `<td>${pill}</td>`;
     t.appendChild(tr); }); }
 async function loadSubs(){ const [d,c]=await Promise.all([api('/api/subscribers'),api('/api/config')]);
   DEST=d.subscribers||[]; EXCLUDED=new Set((c.excluded_ids||[]).map(String));
+  EXCEPT_TG=new Set((c.telegram_pattern_exceptions||[]).map(String));
   EXCL_PAT_TG=c.telegram_exclude_patterns||[]; if($('tg_excl_pat')) $('tg_excl_pat').value=EXCL_PAT_TG.join('\n');
   render(); }
 function onSearch(){ FILTER=$('subsearch').value.trim(); PAGE=0; render(); }
@@ -2548,13 +2559,20 @@ function prevPage(){ PAGE--; render(); }
 function nextPage(){ PAGE++; render(); }
 function toggleAll(v){ document.querySelectorAll('.selrow').forEach(c=>c.checked=v); $('selall').checked=v; }
 function selectedIds(){ return [...document.querySelectorAll('.selrow:checked')].map(c=>String(c.dataset.id)); }
-async function persistExcluded(){ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({excluded_ids:[...EXCLUDED]})}); render(); loadCfg(); }
+async function persistExcluded(){ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({excluded_ids:[...EXCLUDED],telegram_pattern_exceptions:[...EXCEPT_TG]})}); render(); loadCfg(); }
+// Incluir un id que coincide con un patrón crea una EXCEPCIÓN (se envía pese al patrón).
+function tgInclExcl(id,accion){
+  if(accion==='excluir'){ EXCLUDED.add(id); EXCEPT_TG.delete(id); }
+  else { EXCLUDED.delete(id);
+    const s=DEST.find(x=>String(x.chatId)===id);
+    if(s && nameMatchesPatterns(s.name, EXCL_PAT_TG)) EXCEPT_TG.add(id); else EXCEPT_TG.delete(id); }
+}
 async function bulk(accion){ const ids=selectedIds(); if(!ids.length){ toast('Marca al menos un contacto (visible)',true); return; }
-  ids.forEach(id=> accion==='excluir'?EXCLUDED.add(id):EXCLUDED.delete(id));
+  ids.forEach(id=>tgInclExcl(id,accion));
   await persistExcluded(); toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); }
 async function bulkFiltered(accion){ const ids=filtered().map(s=>String(s.chatId)); if(!ids.length){ toast('Sin contactos que coincidan',true); return; }
-  ids.forEach(id=> accion==='excluir'?EXCLUDED.add(id):EXCLUDED.delete(id));
-  await persistExcluded(); toast('✓ '+ids.length+(FILTER?' filtrados ':' ')+(accion==='excluir'?'excluidos':'incluidos')); }
+  ids.forEach(id=>tgInclExcl(id,accion));
+  await persistExcluded(); toast('✓ '+ids.length+((FILTER||STATEF)?' filtrados ':' ')+(accion==='excluir'?'excluidos':'incluidos')); }
 // --- listas de distribución (genérico para ambos canales) ---
 let LISTS={telegram:[],whatsapp:[]}, TGT={telegram:{mode:'all',lists:[]},whatsapp:{mode:'all',lists:[]}};
 function listsBox(ch){ return ch==='telegram'?'tg_lists':'wa_lists'; }
@@ -2598,8 +2616,9 @@ async function createListFromGrid(ch){
   toast('✓ Lista "'+n+'" creada con '+ids.length+' contactos');
 }
 // --- contactos de WhatsApp (para armar listas de WhatsApp) ---
-let WA_DEST=[], WA_PAGE=0, WA_EXCLUDED=new Set(), WA_STATEF='', WA_EXCL_PAT=[];
-function isExcludedWa(c){ return WA_EXCLUDED.has(String(c.id||'')) || nameMatchesPatterns(waName(c), WA_EXCL_PAT); }
+let WA_DEST=[], WA_PAGE=0, WA_EXCLUDED=new Set(), WA_STATEF='', WA_EXCL_PAT=[], WA_EXCEPT=new Set();
+function isExcludedWa(c){ const id=String(c.id||'');
+  return WA_EXCLUDED.has(id) || (nameMatchesPatterns(waName(c), WA_EXCL_PAT) && !WA_EXCEPT.has(id)); }
 function waName(c){ return c.name || '(sin nombre)'; }
 async function loadWaContacts(){ $('wa_c_count').textContent='· cargando...';
   try{ const r=await api('/api/whatsapp/contacts'); WA_DEST=r.contacts||[]; WA_PAGE=0; renderWa(); }
@@ -2617,16 +2636,22 @@ function renderWa(){ const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.le
   const t=$('wa_subs'); t.innerHTML='';
   const exCount=WA_DEST.filter(isExcludedWa).length; const inc=WA_DEST.length-exCount;
   $('wa_c_count').textContent = WA_DEST.length ? `· ${f.length} en vista · ${inc} incluidos · ${exCount} excluidos` : '';
-  slice.forEach(c=>{ const id=String(c.id||''); const exM=WA_EXCLUDED.has(id); const exP=!exM && nameMatchesPatterns(waName(c), WA_EXCL_PAT); const tr=document.createElement('tr');
-    const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido · patrón</span>':'<span class="pill active">Incluido</span>');
+  slice.forEach(c=>{ const id=String(c.id||''); const exM=WA_EXCLUDED.has(id); const matchP=nameMatchesPatterns(waName(c), WA_EXCL_PAT);
+    const exP=!exM && matchP && !WA_EXCEPT.has(id); const exc=!exM && matchP && WA_EXCEPT.has(id); const tr=document.createElement('tr');
+    const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido · patrón</span>':(exc?'<span class="pill exc-ok">Incluido · excepción</span>':'<span class="pill active">Incluido</span>'));
     tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${bcEsc(waName(c))}</b><div class="hint" style="margin-top:2px;font-size:11px">${bcEsc(id)}</div></td>`+
       `<td>${pill}</td>`; t.appendChild(tr); });
   $('wa_pageinfo').textContent=f.length?`página ${WA_PAGE+1} de ${pages}`:'sin resultados'; }
 function waSelectedIds(){ return [...document.querySelectorAll('.wsel:checked')].map(c=>String(c.dataset.id)); }
 function waToggleAll(v){ document.querySelectorAll('.wsel').forEach(c=>c.checked=v); }
-async function persistWaExcluded(){ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({whatsapp_excluded:[...WA_EXCLUDED]})}); renderWa(); }
+async function persistWaExcluded(){ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({whatsapp_excluded:[...WA_EXCLUDED],whatsapp_pattern_exceptions:[...WA_EXCEPT]})}); renderWa(); loadCfg(); }
 async function waBulk(accion){ const ids=waSelectedIds(); if(!ids.length){ toast('Marca al menos un contacto',true); return; }
-  ids.forEach(id=> accion==='excluir'?WA_EXCLUDED.add(id):WA_EXCLUDED.delete(id));
+  ids.forEach(id=>{
+    if(accion==='excluir'){ WA_EXCLUDED.add(id); WA_EXCEPT.delete(id); }
+    else { WA_EXCLUDED.delete(id);
+      const c=WA_DEST.find(x=>String(x.id||'')===id);
+      if(c && nameMatchesPatterns(waName(c), WA_EXCL_PAT)) WA_EXCEPT.add(id); else WA_EXCEPT.delete(id); } // excepción al patrón
+  });
   await persistWaExcluded(); toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); }
 function waPrev(){ WA_PAGE--; renderWa(); }
 function waNext(){ WA_PAGE++; renderWa(); }

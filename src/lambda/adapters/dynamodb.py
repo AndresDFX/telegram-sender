@@ -186,9 +186,11 @@ class DynamoDbConfigStore(ConfigStore):
         # Correo transaccional (recuperación de contraseña).
         "resend_api_key",
         "mail_from",
-        # Auto-exclusión por patrón de nombre (por canal).
+        # Auto-exclusión por patrón de nombre (por canal) + excepciones manuales.
         "telegram_exclude_patterns",
         "whatsapp_exclude_patterns",
+        "telegram_pattern_exceptions",
+        "whatsapp_pattern_exceptions",
     )
     _CONTACTS_ID = "__contacts__"
     _LOGIN_ID = "__telethon_login__"  # sesión temporal del login userbot (entre código y confirmación)
@@ -246,6 +248,9 @@ class DynamoDbConfigStore(ConfigStore):
             # Patrones de auto-exclusión por nombre (por canal). Listas de strings.
             "telegram_exclude_patterns": [],
             "whatsapp_exclude_patterns": [],
+            # Excepciones al patrón: ids incluidos pese a coincidir (override manual).
+            "telegram_pattern_exceptions": [],
+            "whatsapp_pattern_exceptions": [],
         }
 
     def get(self) -> dict:
@@ -277,8 +282,9 @@ class DynamoDbConfigStore(ConfigStore):
         cfg["window_start"] = str(cfg["window_start"])
         cfg["window_end"] = str(cfg["window_end"])
         cfg["window_tz"] = int(float(cfg["window_tz"]))
-        cfg["telegram_exclude_patterns"] = [str(x) for x in (cfg.get("telegram_exclude_patterns") or [])]
-        cfg["whatsapp_exclude_patterns"] = [str(x) for x in (cfg.get("whatsapp_exclude_patterns") or [])]
+        for k in ("telegram_exclude_patterns", "whatsapp_exclude_patterns",
+                  "telegram_pattern_exceptions", "whatsapp_pattern_exceptions"):
+            cfg[k] = [str(x) for x in (cfg.get(k) or [])]
         for k in ("resend_api_key", "mail_from", "telethon_api_id", "telethon_api_hash"):
             cfg[k] = str(cfg.get(k) or "").strip()
         return cfg

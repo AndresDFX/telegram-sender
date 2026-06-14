@@ -80,7 +80,7 @@ class FakeWa:
         self.calls = []
         self.count = count
 
-    def contar(self, *, mode="all", list_ids=None, exclude=None, exclude_patterns=None):
+    def contar(self, *, mode="all", list_ids=None, exclude=None, exclude_patterns=None, pattern_exceptions=None):
         return self.count
 
     def forward(self, text, image_url, exclude, **kw):
