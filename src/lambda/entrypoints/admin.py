@@ -1543,6 +1543,8 @@ tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .ds-modal-body{color:var(--tx2);font-size:14px;line-height:1.55;white-space:pre-line}
 .ds-modal input{width:100%;margin-top:14px}
 .ds-modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+/* Accesibilidad: foco visible consistente por teclado en elementos interactivos */
+a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visible,#fuentes_subnav button:focus-visible,.nav button:focus-visible,.chan:focus-within{outline:2px solid var(--ac);outline-offset:2px;border-radius:8px}
 th.selcol,td.selcol{width:34px;text-align:center}
 </style></head><body>
 
