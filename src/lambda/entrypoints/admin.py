@@ -1929,8 +1929,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <div style="font-size:13px">% que se suma a cada precio</div>
      <div class="hint">Ej: $325.000 + 15% → $374.000 (redondeo al mil ↑)</div></div></div>
   </div>
-  <div class="card" data-tab="ajustes" style="padding:14px 18px"><div class="subnav" data-subnav="ajustes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="cuenta" onclick="showSub('ajustes','cuenta')">🔌 Cuentas y acceso</button><button data-sub="envio" onclick="showSub('ajustes','envio')">📤 Envío</button><button data-sub="sistema" onclick="showSub('ajustes','sistema')">🛠️ Sistema</button></div></div>
-  <div class="card accent" data-tab="ajustes" data-sub="cuenta"><h2>Cuenta de Telegram<span class="help" tabindex="0" data-tip="Dos modos: Bot (envía a quienes te dan /start) o Userbot (envía desde TU cuenta a tus contactos, vía Telethon). El userbot llega a más gente pero tiene más riesgo de baneo.">ⓘ</span></h2>
+  <div class="card" data-tab="ajustes" style="padding:14px 18px"><div class="subnav" data-subnav="ajustes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="telegram" onclick="showSub('ajustes','telegram')"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</button><button data-sub="whatsapp" onclick="showSub('ajustes','whatsapp')"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</button><button data-sub="acceso" onclick="showSub('ajustes','acceso')">👤 Acceso</button><button data-sub="envio" onclick="showSub('ajustes','envio')">📤 Envío</button><button data-sub="sistema" onclick="showSub('ajustes','sistema')">🛠️ Sistema</button></div></div>
+  <div class="card accent" data-tab="ajustes" data-sub="telegram"><h2><svg class="ico"><use href="#i-tg"></use></svg> Cuenta de Telegram<span class="help" tabindex="0" data-tip="Dos modos: Bot (envía a quienes te dan /start) o Userbot (envía desde TU cuenta a tus contactos, vía Telethon). El userbot llega a más gente pero tiene más riesgo de baneo.">ⓘ</span></h2>
    <label>Modo de envío</label>
    <select id="send_mode"><option value="bot">Bot — a suscriptores que dan /start</option><option value="userbot">Userbot — desde mi cuenta a mis contactos</option></select>
 
@@ -1972,7 +1972,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span id="tl_logout_out" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="ajustes" data-sub="cuenta"><h2>WhatsApp (reenvío)<span class="help" tabindex="0" data-tip="Conecta el servicio de WhatsApp (URL + token, QR o código) y decide si cada lista capturada también se reenvía por WhatsApp. Vincula desde tu IP residencial.">ⓘ</span></h2>
+  <div class="card" data-tab="ajustes" data-sub="whatsapp"><h2><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp (reenvío)<span class="help" tabindex="0" data-tip="Conecta el servicio de WhatsApp (URL + token, QR o código) y decide si cada lista capturada también se reenvía por WhatsApp. Vincula desde tu IP residencial.">ⓘ</span></h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="whatsapp_enabled" style="width:auto"> Reenviar también cada lista por WhatsApp</label>
    <label>URL del servicio WhatsApp</label><input id="whatsapp_service_url" placeholder="https://...onrender.com">
    <label>Token del servicio <span id="wa_tok_status" class="hint"></span></label>
@@ -2260,7 +2260,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Crea uno arriba para enviarlo automáticamente.</p></div>
    <div style="margin-top:14px"><button class="sec" onclick="loadSchedules()">Refrescar</button></div>
   </div>
-  <div class="card accent" id="usr_card" data-tab="ajustes" data-sub="cuenta" style="display:none"><h2>👥 Usuarios del panel <span id="usr_n" class="hint"></span></h2>
+  <div class="card accent" id="usr_card" data-tab="ajustes" data-sub="acceso" style="display:none"><h2>👥 Usuarios del panel <span id="usr_n" class="hint"></span></h2>
    <div class="hint">Cada usuario entra con sus propias credenciales (independientes). El correo se usa para recuperar la contraseña. Solo un <b>administrador</b> ve esta sección y gestiona usuarios; los usuarios normales pueden hacer todo lo demás.</div>
    <div style="overflow-x:auto;margin-top:12px"><table id="usr_table"><thead><tr><th>Usuario</th><th>Correo</th><th>Rol</th><th></th></tr></thead><tbody id="usr_rows"></tbody></table></div>
    <div class="section-label" style="margin-top:14px">Crear usuario</div>
@@ -2275,7 +2275,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <button style="margin-top:10px" onclick="createUser()">Crear usuario</button>
   </div>
-  <div class="card" data-tab="ajustes" data-sub="cuenta"><h2>✉️ Correo de recuperación<span class="help" tabindex="0" data-tip="Servicio gratis (Resend, 100/día) para enviar el código de «¿Olvidaste tu contraseña?». Sin API key, el código se intenta enviar por el correo de alertas de AWS (SNS).">ⓘ</span> <span id="mail_status" class="hint"></span></h2>
+  <div class="card" data-tab="ajustes" data-sub="acceso"><h2>✉️ Correo de recuperación<span class="help" tabindex="0" data-tip="Servicio gratis (Resend, 100/día) para enviar el código de «¿Olvidaste tu contraseña?». Sin API key, el código se intenta enviar por el correo de alertas de AWS (SNS).">ⓘ</span> <span id="mail_status" class="hint"></span></h2>
    <div class="hint">Servicio gratis para entregar el código cuando alguien usa «¿Olvidaste tu contraseña?». Crea una cuenta en <b>resend.com</b> (100 correos/día gratis), genera una API key y pégala aquí. Sin esto, el código se intenta enviar por el correo de alertas de AWS (SNS).</div>
    <label>Remitente (From)</label>
    <input id="mail_from" placeholder="Replica &lt;onboarding@resend.dev&gt;">
@@ -2284,7 +2284,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <input id="resend_api_key" type="password" placeholder="(pegar solo si quieres cambiarla)">
    <div style="margin-top:10px"><button onclick="saveEmail()">Guardar correo</button> <span id="mail_save_status" class="hint" style="margin-left:10px"></span></div>
   </div>
-  <div class="card" data-tab="ajustes" data-sub="cuenta"><h2>🔑 Cambiar mi contraseña</h2>
+  <div class="card" data-tab="ajustes" data-sub="acceso"><h2>🔑 Cambiar mi contraseña</h2>
    <label>Contraseña actual</label><input id="cp_cur" type="password">
    <label>Nueva contraseña (mínimo 8)</label><input id="cp_new" type="password">
    <div style="margin-top:10px"><button onclick="changePassword()">Cambiar contraseña</button> <span id="cp_status" class="hint" style="margin-left:10px"></span></div>
@@ -2732,7 +2732,7 @@ async function refreshConn(){
   const tg=$('conn_tg'), wa=$('conn_wa');
   try{ const a=await api('/api/telegram/account');
     if(tg){ tg.onclick=null; tg.style.cursor='';
-      const irCuenta=()=>{ showTab('ajustes'); try{ showSub('ajustes','cuenta'); }catch(e){} };
+      const irCuenta=()=>{ showTab('ajustes'); try{ showSub('ajustes','telegram'); }catch(e){} };
       if(a.mode==='userbot'){
         const me=a.me||{}; const phone=me.phone?('+'+String(me.phone).replace(/^\+/,'')):''; const who=phone||me.name||'cuenta';
         if(a.connected===true){ tg.className='pill active'; tg.innerHTML=ICO_TG+' '+bcEsc(who)+' ✓';
@@ -2767,13 +2767,13 @@ function goStep(tab,sub){ showTab(tab); if(sub){ try{ showSub(tab,sub); }catch(e
 function renderSteps(c){
   const steps=[
     {ok: !!(c.bot_token_set||c.telethon_session_set), ic:ICO_TG, t:'Conectar Telegram',
-     d:'Bot (a suscriptores) o tu cuenta (userbot, a tus contactos) para poder enviar.', tab:'ajustes', sub:'cuenta'},
+     d:'Bot (a suscriptores) o tu cuenta (userbot, a tus contactos) para poder enviar.', tab:'ajustes', sub:'telegram'},
     {ok: !!(c.source_channel&&String(c.source_channel).trim()), ic:ICO_TG, t:'Definir el canal fuente',
      d:'El canal de Telegram del que se leen las listas a reenviar.', tab:'fuentes', sub:'fuente'},
     {ok: ((c.telegram_lists||[]).length>0 || (c.whatsapp_lists||[]).length>0), t:'Crear listas o elegir destinatarios',
      d:'Agrupa contactos en listas y define a quién se envía en cada canal.', tab:'fuentes', sub:'tg'},
     {ok: !!c.whatsapp_enabled, ic:ICO_WA, t:'Conectar WhatsApp',
-     d:'Opcional: reenvía también por WhatsApp (vincula desde tu IP residencial).', tab:'ajustes', sub:'cuenta', opt:true},
+     d:'Opcional: reenvía también por WhatsApp (vincula desde tu IP residencial).', tab:'ajustes', sub:'whatsapp', opt:true},
     {ok: c.sending_enabled!==false, t:'Activar los envíos',
      d:'Enciende el interruptor para que salgan los envíos automáticos.', tab:'ajustes', sub:'envio'},
   ];
@@ -2999,7 +2999,7 @@ async function waBulk(accion){ const ids=waSelectedIds(); if(!ids.length){ toast
 function waPrev(){ WA_PAGE--; renderWa(); }
 function waNext(){ WA_PAGE++; renderWa(); }
 // Sub-navegación genérica (por pestaña): muestra solo las tarjetas con el data-sub elegido.
-const SUB_DEFAULT={fuentes:'tg', envios:'componer', ajustes:'cuenta'};
+const SUB_DEFAULT={fuentes:'tg', envios:'componer', ajustes:'telegram'};
 function showSub(tab,s){
   document.querySelectorAll('main>.card[data-tab="'+tab+'"][data-sub]').forEach(c=>c.classList.toggle('subhide', c.dataset.sub!==s));
   document.querySelectorAll('.subnav[data-subnav="'+tab+'"] button').forEach(b=>b.classList.toggle('on', b.dataset.sub===s));
