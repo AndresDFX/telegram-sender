@@ -1171,6 +1171,21 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
   background:rgba(253,83,30,.14);color:#FFE0D3;border-color:rgba(253,83,30,.4);
 }
 
+/* ---------- barra global de estado de envíos (acción siempre visible) ---------- */
+#send_banner{margin:0 0 2px;border-radius:var(--r);padding:14px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+#send_banner[hidden]{display:none}
+#send_banner .sb-txt{flex:1;min-width:210px;font-size:13.5px;line-height:1.45}
+#send_banner .sb-dot{width:9px;height:9px;border-radius:50%;flex:none}
+#send_banner.paused{background:linear-gradient(180deg,rgba(251,113,133,.18),rgba(251,113,133,.07));border:1px solid rgba(251,113,133,.5);color:#FFE3E0;box-shadow:0 12px 32px -16px rgba(251,113,133,.55)}
+#send_banner.paused .sb-dot{background:var(--bad);box-shadow:0 0 0 4px rgba(251,113,133,.18);animation:pulseDot 1.4s ease-in-out infinite}
+#send_banner.active{background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.26);color:var(--tx2);padding:10px 16px}
+#send_banner.active .sb-dot{background:var(--ok);box-shadow:0 0 0 4px rgba(52,211,153,.16)}
+#send_banner button{flex:none}
+#send_banner .sb-go{background:linear-gradient(180deg,#34d399,#10b981);border-color:rgba(255,255,255,.12);font-size:14px;padding:11px 22px;font-weight:700}
+#send_banner .sb-go:hover{filter:brightness(1.06);box-shadow:0 8px 24px -8px rgba(16,185,129,.6)}
+#send_banner .sb-pause{background:transparent;border:1px solid rgba(255,255,255,.18);color:var(--mut);font-size:12.5px;padding:6px 13px}
+#send_banner .sb-pause:hover{background:rgba(255,255,255,.06);color:var(--tx2);filter:none;box-shadow:none}
+
 /* ---------- cards ---------- */
 .card{
   background:linear-gradient(180deg,var(--card),var(--card2));
@@ -1654,6 +1669,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <button data-tab="ajustes" onclick="showTab('ajustes')">⚙️ Ajustes y estado</button>
  </nav>
  <main>
+  <div id="send_banner" hidden></div>
   <div class="card accent" data-tab="inicio"><h2>Resumen</h2>
    <div class="hint" style="margin:-4px 0 12px">Replica captura la lista de un canal fuente (con markup) <b>y</b> envía tus propios mensajes a listas de contactos por Telegram y WhatsApp — al instante o programados. Gestiona fuentes y listas en <b>📋 Fuentes y listas</b> y los envíos en <b>📨 Envíos</b>.</div>
    <div id="dash_estado" class="callout">cargando…</div>
@@ -2166,15 +2182,26 @@ async function saveEmail(){ const b={ mail_from:($('mail_from').value||'').trim(
 function renderSendingState(on){
   if($('sending_enabled')) $('sending_enabled').checked = on;
   const badge=$('sys_badge'); if(badge){ badge.className='pill '+(on?'active':'failed'); badge.textContent = on?'ACTIVOS':'PAUSADOS'; }
-  const hb=$('hdr_badge'); if(hb){ if(on){ hb.style.display='none'; } else { hb.style.display='inline-block'; hb.className='pill failed'; hb.textContent='⏸ Envíos pausados'; } }
+  const hb=$('hdr_badge'); if(hb){
+    if(on){ hb.style.display='none'; hb.onclick=null; }
+    else { hb.style.display='inline-block'; hb.className='pill failed'; hb.style.cursor='pointer';
+      hb.title='Los envíos están en pausa — clic para activarlos'; hb.textContent='⏸ Pausado · activar'; hb.onclick=enableSending; }
+  }
+  const sb=$('send_banner'); if(sb){ sb.hidden=false;
+    if(on){ sb.className='active'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>Envíos activos.</b> Tus mensajes se entregan con normalidad.</span><button class="sb-pause" onclick="setSending(false)">Pausar envíos</button>'; }
+    else { sb.className='paused'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>⏸ Los envíos están EN PAUSA.</b> Ningún mensaje (Telegram ni WhatsApp) saldrá hasta que los actives. Lo que se captura queda en espera.</span><button class="sb-go" onclick="enableSending()">▶ Activar envíos</button>'; }
+  }
 }
-async function toggleSending(){
-  const on=$('sending_enabled').checked;
-  if(!on && !(await confirmModal('¿Pausar TODOS los envíos (Telegram y WhatsApp)? Nada saldrá hasta reactivar.',{okText:'Pausar'}))){ $('sending_enabled').checked=true; return; }
+async function setSending(on){
+  if(!on){ if(!(await confirmModal('¿Pausar TODOS los envíos (Telegram y WhatsApp)? Nada saldrá hasta que los reactives.',{okText:'Pausar envíos',danger:true}))){ renderSendingState(true); return; } }
+  else { if(!(await confirmModal('¿Activar los envíos? A partir de ahora los mensajes —incluidos los que estén en cola— se entregarán a tus contactos, de forma gradual (anti-baneo).',{okText:'Activar envíos'}))){ renderSendingState(false); return; } }
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sending_enabled:on})});
-    renderSendingState(on); toast(on?'✓ Envíos ACTIVADOS':'⏸ Envíos PAUSADOS', on?'info':'warn'); }
-  catch(e){ toast('Error al cambiar el estado',true); $('sending_enabled').checked=!on; }
+    renderSendingState(on); toast(on?'✓ Envíos ACTIVADOS — los mensajes ya se entregan':'⏸ Envíos PAUSADOS', on?'info':'warn');
+    if($('k_sent')) loadDashboard(); }
+  catch(e){ toast('Error al cambiar el estado',true); renderSendingState(!on); }
 }
+function enableSending(){ return setSending(true); }
+function toggleSending(){ return setSending($('sending_enabled').checked); }
 async function cancelPending(){
   if(!await confirmModal('¿Cancelar todas las difusiones pendientes/en curso? No se enviarán (ni al reactivar).',{danger:true,okText:'Cancelar difusiones'})) return;
   try{ const r=await api('/api/plans/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
@@ -2372,6 +2399,7 @@ async function loadDashboard(){
     ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e=$(id); if(e) e.classList.remove('kpi-load');});
     renderSteps(c);
     const on=c.sending_enabled!==false; const de=$('dash_estado');
+    renderSendingState(on);
     if(de){ de.className='callout '+(on?'ok':'warn');
       de.innerHTML='Envíos: <b>'+(on?'ACTIVOS':'PAUSADOS')+'</b> · '+(c.window_enabled?('ventana '+c.window_start+'–'+c.window_end):'24 h')+' · WhatsApp '+(c.whatsapp_enabled?'activo':'desactivado')+' · lote '+(c.batch_size|0); }
     const s=(m.serie||[]).slice(-14); const max=Math.max(1,...s.map(d=>(d.sent|0)+(d.failed|0)));
