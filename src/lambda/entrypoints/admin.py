@@ -830,6 +830,20 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             config.clear_login_temp()
             _audit("telethon:logout", "limpiar sesión userbot")
             return _json({"ok": True})
+        if sub == "/api/telethon/refresh-contacts" and method == "POST":
+            # Relee los contactos del userbot EN VIVO (GetContacts) y actualiza la caché, saltando
+            # el TTL del poller. Útil tras cambiar un nombre en la agenda (Google Contacts → Telegram).
+            fuente = wiring.build_contacts_source()
+            if fuente is None:
+                return _json({"error": "Solo en modo userbot (en modo bot los destinatarios son los suscriptores)."}, 400)
+            try:
+                contactos = fuente.listar()
+            except Exception as exc:  # FloodWait u otros: no romper el panel
+                logger.exception("refresh-contacts falló")
+                return _json({"error": "No se pudieron leer los contactos ahora (¿FloodWait de Telegram? espera unos minutos): " + str(exc)[:140]}, 502)
+            config.set_contacts(contactos)
+            _audit("telethon:refresh-contacts", f"{len(contactos)} contactos")
+            return _json({"ok": True, "count": len(contactos)})
         if sub == "/api/broadcasts/delete" and method == "POST":
             cuerpo = _body(event)
             if cuerpo.get("finished"):
@@ -883,6 +897,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if sub == "/api/whatsapp/reset" and method == "POST":
             _audit("whatsapp:reset", "limpiar sesión de WhatsApp")
             return _whatsapp_proxy("/reset", timeout=25, body={})
+        if sub == "/api/whatsapp/sync" and method == "POST":
+            # Re-sincroniza el estado de la cuenta (resyncAppState): trae cambios de nombre
+            # de la agenda al servicio (que escucha contacts.update). Útil tras editar contactos.
+            _audit("whatsapp:sync", "re-sincronizar contactos")
+            return _whatsapp_proxy("/sync", timeout=25, body={})
     except Exception:
         logger.exception("Error en admin %s %s", method, sub)
         return _json({"error": "internal"}, 500)
@@ -1901,6 +1920,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
   </div>
   <div class="card" data-tab="fuentes" data-sub="tg"><h2>Destinatarios<span class="help" tabindex="0" data-tip="Contactos a los que envías por Telegram. Filtra por estado (Todos/Incluidos/Excluidos). Marca y usa Excluir/Incluir; incluir un contacto que coincide con un patrón crea una EXCEPCIÓN (se envía pese al patrón).">ⓘ</span> <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
+   <div style="margin-top:8px"><button class="sec" onclick="tgRefreshContacts()">🔄 Actualizar nombres</button><span class="help" tabindex="0" data-tip="Relee tus contactos de Telegram EN VIVO y actualiza los nombres aquí. Úsalo si cambiaste un nombre en tu agenda (p. ej. Google Contacts) y quieres que se refleje. (Sin esto, se refrescan solos cada ~30 min.)">ⓘ</span></div>
    <input id="subsearch" placeholder="🔎 Buscar por nombre o número..." oninput="onSearch()" style="margin-top:10px">
    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
      <span class="hint" style="margin:0">Mostrar:</span>
@@ -1947,7 +1967,11 @@ th.selcol,td.selcol{width:34px;text-align:center}
   </div>
   <div class="card" data-tab="fuentes" data-sub="wa"><h2>Destinatarios WhatsApp<span class="help" tabindex="0" data-tip="Contactos de WhatsApp (cárgalos del servicio conectado). Filtra por estado y marca para Excluir/Incluir; incluir un contacto que coincide con un patrón crea una EXCEPCIÓN.">ⓘ</span> <span id="wa_c_count" class="hint"></span></h2>
    <div class="hint">Carga tus contactos (servicio conectado), busca por nombre, y marca para <b>excluir/incluir</b>. Los excluidos NO reciben las difusiones por WhatsApp.</div>
-   <button class="sec" style="margin-top:10px" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button>
+   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+     <button class="sec" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button>
+     <button class="sec" onclick="waSyncContacts()">🔄 Sincronizar nombres</button>
+     <span class="help" tabindex="0" data-tip="Re-sincroniza tu cuenta de WhatsApp para traer cambios de nombre de la agenda (p. ej. Google Contacts). Tras sincronizar, recarga los contactos para ver los nombres nuevos.">ⓘ</span>
+   </div>
    <input id="wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="renderWa()" style="margin-top:10px">
    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
      <span class="hint" style="margin:0">Mostrar:</span>
@@ -2618,6 +2642,11 @@ function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length
 async function loadSubs(){ const d=await api('/api/subscribers');
   DEST=d.subscribers||[];
   loadPatterns(); render(); }  // EXCLUDED/EXCEPT/patrones son por-usuario (loadPatterns vía /api/patterns)
+async function tgRefreshContacts(){
+  toast('Actualizando contactos de Telegram (en vivo)…','info');
+  try{ const r=await api('/api/telethon/refresh-contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    toast('✓ '+(r.count||0)+' contactos actualizados'); loadSubs(); }
+  catch(e){ toast(e.message||'No se pudo actualizar',true); } }
 function onSearch(){ FILTER=$('subsearch').value.trim(); PAGE=0; render(); }
 function prevPage(){ PAGE--; render(); }
 function nextPage(){ PAGE++; render(); }
@@ -2723,6 +2752,11 @@ function waName(c){ return c.name || '(sin nombre)'; }
 async function loadWaContacts(){ $('wa_c_count').textContent='· cargando...';
   try{ const r=await api('/api/whatsapp/contacts'); WA_DEST=r.contacts||[]; WA_PAGE=0; renderWa(); }
   catch(e){ $('wa_c_count').textContent='· servicio inaccesible (¿conectado?)'; } }
+async function waSyncContacts(){
+  toast('Sincronizando contactos de WhatsApp…','info');
+  try{ await api('/api/whatsapp/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    toast('✓ Sincronizado. Recargando contactos…'); setTimeout(loadWaContacts, 2000); }
+  catch(e){ toast(e.message||'No se pudo sincronizar',true); } }
 function waFiltered(){ let arr=WA_DEST; const q=($('wa_search').value||'').trim().toLowerCase();
   if(q) arr=arr.filter(c=> waName(c).toLowerCase().includes(q) || String(c.id||'').toLowerCase().includes(q));
   if(WA_STATEF==='inc') arr=arr.filter(c=>!isExcludedWa(c));
