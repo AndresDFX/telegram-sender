@@ -1982,6 +1982,9 @@ function dsModal(o){ o=o||{}; return new Promise(resolve=>{
 }); }
 function confirmModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'¿Confirmas?',message:message,okText:opts.okText||'Aceptar',cancelText:opts.cancelText,danger:!!opts.danger}); }
 function promptModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'Escribe un valor',message:message,input:true,placeholder:opts.placeholder,okText:opts.okText||'Aceptar'}); }
+// Skeleton de carga reutilizable: filas placeholder con shimmer mientras llegan los datos (solo 1ª carga).
+function skelTable(id,cols,rows){ const t=$(id); if(!t) return; const r=rows||4, c=cols||3;
+  t.innerHTML=Array.from({length:r},()=>'<tr class="skeleton">'+Array.from({length:c},()=>'<td><div class="sk-line"></div></td>').join('')+'</tr>').join(''); }
 async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':'+p);
   try{ await fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{if(!r.ok)throw 0;}); sessionStorage.setItem('cred',CRED); sessionStorage.setItem('cred_ts',String(Date.now()));
     $('login').style.display='none'; $('app').style.display='block'; $('who').textContent=u; boot(); }
@@ -2008,6 +2011,7 @@ async function fpReset(){
 // --- usuarios del panel ---
 let USR_ME='';
 async function loadUsers(){
+  { const _u=$('usr_rows'); if(_u && !_u.children.length) skelTable('usr_rows',3,3); }
   try{ const r=await api('/api/users'); USR_ME=r.me||''; const list=r.users||[];
     $('usr_n').textContent='· '+list.length;
     $('usr_rows').innerHTML=list.map(u=>{ const me=u.username===USR_ME;
@@ -2557,6 +2561,7 @@ function sgDesc(s){
 function sgWhen(ep){ if(!ep) return '—'; try{ return new Date(ep*1000).toLocaleString('es',{dateStyle:'medium',timeStyle:'short'}); }catch(e){ return '—'; } }
 function sgChans(s){ return [s.telegram?'✈️':'', s.whatsapp?'🟢':''].filter(Boolean).join(' ')||'—'; }
 async function loadSchedules(){
+  { const _s=$('sg_rows'); if(_s && !_s.children.length) skelTable('sg_rows',5,3); }
   let data;
   try{ data=(await api('/api/schedules')).schedules||[]; }catch(e){ return; }
   $('sg_n').textContent=data.length?('· '+data.length):'';
@@ -2610,6 +2615,7 @@ function bcRow(b){
   return tr;
 }
 async function loadBroadcasts(){
+  { const _b=$('bc_rows'); if(_b && !_b.children.length) skelTable('bc_rows',5,4); }
   try{
     const r=await api('/api/broadcasts');
     const list=r.broadcasts||[];
