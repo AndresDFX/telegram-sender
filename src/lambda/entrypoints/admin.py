@@ -1432,7 +1432,7 @@ button.ok{background:var(--ok);border-color:transparent;color:#11331F}
 button.ok:hover{background:#46e0a9}
 .err:empty{margin-top:0;min-height:0}
 /* toasts: icono, variantes y barra de auto-cierre */
-.toast{display:flex;align-items:center;gap:9px;padding-right:16px;position:relative;overflow:hidden}
+.toast{display:flex;align-items:center;gap:9px;padding-right:16px;overflow:hidden}
 .toast::before{content:"\2713";font-weight:800}
 .toast.err::before{content:"!"}
 .toast.info{background:#0F2440;color:#bcd6ff;border-color:rgba(96,165,250,.35)}
@@ -1566,6 +1566,11 @@ a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visib
   .stat b{font-size:26px}
   .markup input{font-size:26px}
   h1{font-size:18px}
+  html,body{overflow-x:hidden;max-width:100%}
+  main,.card{max-width:100%}
+  .nav{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;justify-content:flex-start;-webkit-overflow-scrolling:touch}
+  .nav button{flex:0 0 auto}
+  .nav button.on::after{display:none}
 }
 th.selcol,td.selcol{width:34px;text-align:center}
 </style></head><body>
