@@ -838,7 +838,11 @@ class DynamoDbPlanStore:
                     f"{cursor} = :nxt, {disp} = :disp, "
                     "dispatch_log = list_append(if_not_exists(dispatch_log, :empty), :entry)"
                 ),
-                ConditionExpression="attribute_exists(pid) AND #st <> :canceled",
+                # LOCK OPTIMISTA anti-duplicado: solo reclama el índice si el cursor SIGUE en `index`.
+                # Si otra invocación concurrente del dispatcher (cron solapado / doble disparo de
+                # EventBridge) ya avanzó el cursor, la condición falla → NO se despacha el mismo lote
+                # dos veces (que iría con batch_ids distintos y el dedup no lo frenaría).
+                ConditionExpression=f"attribute_exists(pid) AND #st <> :canceled AND {cursor} = :curidx",
                 ExpressionAttributeNames={"#st": "status"},
                 ExpressionAttributeValues={
                     ":running": "running",
@@ -848,6 +852,7 @@ class DynamoDbPlanStore:
                     ":ch": channel,
                     ":tgt": Decimal(int(target)),
                     ":nxt": Decimal(int(index) + 1),
+                    ":curidx": Decimal(int(index)),
                     ":disp": Decimal(int(target)),
                     ":empty": [],
                     ":entry": [entry],

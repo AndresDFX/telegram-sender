@@ -26,6 +26,7 @@ class DeliverBatch:
         sleep: Callable[[float], None] = time.sleep,
         delay_min: float | None = None,
         delay_max: float | None = None,
+        dedup=None,
     ) -> None:
         self._sender = sender
         self._subscribers = subscribers
@@ -34,10 +35,25 @@ class DeliverBatch:
         self._delay_min = delay if delay_min is None else delay_min
         self._delay_max = delay if delay_max is None else delay_max
         self._sleep = sleep
+        # Idempotencia POR DESTINATARIO (opcional): evita que un mismo contacto reciba el mensaje
+        # dos veces si el lote se REENTREGA (p. ej. timeout de Lambda a mitad de lote → SQS reentrega).
+        # En la reentrega se saltan los ya enviados y el lote RESUME donde quedó (sin duplicar).
+        self._dedup = dedup
 
-    def __call__(self, text: str, chat_ids: Sequence[str], image_url: str | None = None) -> BroadcastStats:
+    def __call__(
+        self, text: str, chat_ids: Sequence[str], image_url: str | None = None, batch_id: str | None = None
+    ) -> BroadcastStats:
         stats = BroadcastStats(total=len(chat_ids))
+        usar_dedup = bool(self._dedup and batch_id)
         for chat_id in chat_ids:
+            # Si este destinatario YA recibió este lote (reentrega), se omite para no duplicar.
+            if usar_dedup:
+                try:
+                    if self._dedup.procesado(f"{batch_id}:{chat_id}"):
+                        stats.sent += 1  # ya entregado antes; cuenta como enviado, NO reenvía
+                        continue
+                except Exception:
+                    logger.exception("dedup por destinatario falló al leer %s; continúo (fail-open)", chat_id)
             try:
                 # Imagen + texto en UN SOLO mensaje (caption) cuando el texto cabe en el límite de
                 # Telegram (~1024). Si el texto es más largo, la foto va sin caption y el texto
@@ -52,6 +68,7 @@ class DeliverBatch:
                         continue
                     if cap_ok or not text:
                         stats.sent += 1  # el texto ya viajó como caption (o no hay texto): un solo mensaje
+                        self._marcar_dest(batch_id, chat_id)
                         self._wait()
                         continue
                     self._wait()  # texto demasiado largo para caption → se envía aparte abajo
@@ -62,6 +79,7 @@ class DeliverBatch:
                     self._inactivar(chat_id)
                 else:
                     stats.sent += 1
+                    self._marcar_dest(batch_id, chat_id)
             except Exception as exc:
                 stats.failed += 1
                 stats.failed_ids.append(chat_id)
@@ -74,6 +92,14 @@ class DeliverBatch:
             self._wait()
 
         return stats
+
+    def _marcar_dest(self, batch_id: str | None, chat_id: str) -> None:
+        """Marca que ESTE destinatario ya recibió ESTE lote (idempotencia por destinatario)."""
+        if self._dedup and batch_id:
+            try:
+                self._dedup.marcar(f"{batch_id}:{chat_id}")
+            except Exception:
+                logger.exception("dedup por destinatario falló al marcar %s", chat_id)
 
     def _inactivar(self, chat_id: str) -> None:
         try:

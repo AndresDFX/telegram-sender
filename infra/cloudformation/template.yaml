@@ -148,10 +148,13 @@ Parameters:
 
   WorkerTimeoutSeconds:
     Type: Number
-    Default: 120
+    Default: 300
     MinValue: 30
     MaxValue: 300
-    Description: Timeout del worker por lote. La VisibilityTimeout de la cola debe superarlo.
+    Description: >-
+      Timeout del worker por lote (= VisibilityTimeout de la cola). 300s para que un lote de hasta
+      150 con jitter alcance a completarse en pocas reentregas; la idempotencia POR DESTINATARIO
+      garantiza que aunque un lote se reentregue NO se reenvía a quien ya recibió (sin duplicados).
 
   WorkerReservedConcurrency:
     Type: Number

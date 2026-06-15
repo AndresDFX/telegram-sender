@@ -1,10 +1,18 @@
-# Replica — difusión de listas (Telegram + WhatsApp)
+# Replica — plataforma de difusión y envío masivo (Telegram + WhatsApp)
 
-**Replica** mirrorea un **canal de precios de Telegram** hacia tus contactos/suscriptores: detecta cada
-lista publicada, le aplica un **markup configurable** a los precios, quita el bloque de ubicación, añade
-tu footer/imagen, y la **difunde** por **Telegram** (bot a suscriptores **o** userbot a tus contactos) y
-por **WhatsApp** (cuenta personal vía Baileys). Todo se gestiona desde un **panel web** y los envíos
-tienen **estados** (encolado→enviando→enviado/parcial/fallido) con ritmo **anti-baneo**.
+**Replica** es una **plataforma de difusión y envío masivo** por **Telegram** (bot a suscriptores **o**
+userbot a tus contactos) y **WhatsApp** (cuenta personal vía Baileys), gestionada desde un **panel web**.
+Tiene **dos modos**, ambos de primera clase:
+
+- **Réplica automática de un canal:** mirrorea un **canal de precios de Telegram**, detecta cada lista
+  publicada, le aplica un **markup configurable**, quita el bloque de ubicación, añade footer/imagen y la difunde.
+- **Envío masivo manual:** **redacta tu propio mensaje** (texto + imagen) y envíalo —ya o **programado**— a
+  **listas, audiencias o contactos** elegidos por número, a uno o ambos canales. No depende del canal fuente:
+  sirve como herramienta de **broadcasting** general cuando lo necesites.
+
+Los envíos van **fraccionados y secuenciales** con ritmo **anti-baneo** (jitter + ventana horaria por canal),
+tienen **estados** (encolado→enviando→enviado/parcial/fallido) y son **idempotentes** (nadie recibe un mensaje
+dos veces, ni ante reintentos). El interruptor maestro pausa solo lo **automático**; el envío **manual** siempre sale.
 
 > Documento de contexto del proyecto: arquitectura, componentes, despliegue, uso y estado actual.
 
@@ -20,8 +28,15 @@ tienen **estados** (encolado→enviando→enviado/parcial/fallido) con ritmo **a
 - **Difusión** desacoplada por **SQS** → worker, con **listas de distribución** (whitelist/blacklist) por canal.
 - **Telegram**: modo **bot** (a quienes dan `/start`) o **userbot** (Telethon, desde tu cuenta a tus contactos).
 - **WhatsApp**: servicio Node (Baileys) que reenvía las mismas listas a tus contactos.
-- **Envío manual**: componer un mensaje propio (no del canal) y enviarlo por los canales/listas elegidos.
-- **Estados + anti-baneo**: cada difusión es un *job* con progreso por canal; envío con delay para reducir baneos.
+- **Envío masivo manual**: componer un mensaje propio (texto + imagen) y enviarlo —ya o **programado**— a
+  listas/audiencias/contactos elegidos, a uno o ambos canales. Herramienta de broadcasting independiente del canal.
+- **Resolución por NÚMERO/id, no por nombre**: las listas y selecciones explícitas se envían validando por
+  número de teléfono/id; si un contacto cambia de nombre, igual recibe (el patrón de nombre solo auto-excluye
+  en envíos amplios "todos/excepto", nunca en una lista o selección explícita).
+- **Idempotencia**: nadie recibe un mensaje dos veces — dedup por lote y **por destinatario** (en una reentrega
+  se saltan los ya enviados y el lote resume), cursor con lock optimista (sin doble-despacho concurrente).
+- **Estados + anti-baneo**: cada difusión es un *job* con progreso por canal; envío fraccionado con delay
+  aleatorio y **ventana horaria por canal** (Telegram y WhatsApp independientes) para reducir baneos.
 
 ---
 

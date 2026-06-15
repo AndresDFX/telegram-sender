@@ -45,6 +45,19 @@ class FakeSubscribers:
         self.inactivos.append(chat_id)
 
 
+class FakeDedup:
+    def __init__(self, ya=()):
+        self.ya = set(ya)
+        self.marcados = []
+
+    def procesado(self, key):
+        return key in self.ya
+
+    def marcar(self, key):
+        self.marcados.append(key)
+        return True
+
+
 class DeliverBatchTests(unittest.TestCase):
     def test_clasifica_enviados_bloqueados_y_fallidos(self):
         sender = FakeSender({
@@ -87,6 +100,19 @@ class DeliverBatchTests(unittest.TestCase):
         self.assertEqual(stats.sent, 2)
         self.assertEqual(sender.fotos, [("1", "http://img/p.jpg", "lista corta"), ("2", "http://img/p.jpg", "lista corta")])
         self.assertEqual(sender.calls, [])  # NO se envió texto por separado (un solo mensaje)
+
+    def test_idempotencia_por_destinatario_no_reenvia_en_reentrega(self):
+        # Reentrega del lote: el contacto que YA recibió ("b1:2") se salta (no se reenvía); los
+        # demás se entregan y se marcan. Evita duplicados aunque el lote se reentregue (timeout).
+        sender = FakeSender()
+        dd = FakeDedup({"b1:2"})
+        deliver = DeliverBatch(sender, FakeSubscribers(), delay=0, dedup=dd)
+        stats = deliver("hola", ["1", "2", "3"], batch_id="b1")
+        self.assertEqual(stats.sent, 3)  # 1 y 3 enviados ahora + 2 ya contaba como entregado
+        self.assertEqual([c[0] for c in sender.calls], ["1", "3"])  # al 2 NO se le reenvió
+        self.assertIn("b1:1", dd.marcados)
+        self.assertIn("b1:3", dd.marcados)
+        self.assertNotIn("b1:2", dd.marcados)
 
     def test_imagen_con_texto_largo_va_en_dos_mensajes(self):
         # Texto > 1024 no cabe en caption: foto SIN caption + texto completo aparte.

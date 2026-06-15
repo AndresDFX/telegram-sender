@@ -87,6 +87,9 @@ class BroadcastList:
         source: str = "channel",
     ) -> None:
         bs = int(cfg.get("batch_size", 150))
+        # Dedup de destinatarios: un mismo id NO debe recibir el mensaje dos veces aunque aparezca
+        # repetido (solape lista+ad-hoc, id duplicado en una lista, etc.). Preserva el orden.
+        clientes = list(dict.fromkeys(str(c) for c in clientes))
         tg_lotes = self._chunk(clientes, bs) if tg_on else []
         wa_exclude = cfg.get("whatsapp_excluded", []) if wa_on else []
         wa_total, wa_resolved = self._resolver_wa_total(
@@ -150,11 +153,18 @@ class BroadcastList:
             return set()
 
     def _destinatarios_telegram(self, cfg: dict, target: dict | None = None) -> list:
-        excluidos = list(cfg.get("excluded_ids", [])) + list(self._excluidos_patron_tg(cfg))
+        tgt = target if target is not None else cfg.get("telegram_target", {})
+        # Las exclusiones MANUALES por id/número (excluded_ids) aplican siempre. La auto-exclusión
+        # por PATRÓN DE NOMBRE solo aplica a envíos AMPLIOS (all/except): en modo "only" (lista
+        # explícita) los destinatarios se validan por id/número y NO se descartan por el nombre —
+        # si un contacto de la lista se renombró, igual se le envía.
+        excluidos = list(cfg.get("excluded_ids", []))
+        if (tgt or {}).get("mode") != "only":
+            excluidos += list(self._excluidos_patron_tg(cfg))
         return filtrar_destinatarios(
             self._subscribers.listar_activos(),
             cfg.get("telegram_lists", []),
-            target if target is not None else cfg.get("telegram_target", {}),
+            tgt,
             excluidos=excluidos,
         )
 
@@ -261,11 +271,11 @@ class BroadcastList:
         if not telegram:
             return []
         if telegram_ids:
+            # Selección EXPLÍCITA por id/número: se envía a EXACTAMENTE esos contactos. NO se aplica
+            # la auto-exclusión por patrón de NOMBRE (el usuario los eligió por número; si el nombre
+            # del contacto cambió, igual se le envía).
             sel = {str(x) for x in telegram_ids}
-            # El guardrail por patrón de nombre (p. ej. "FAM") también aplica a la selección
-            # ad-hoc — igual que en WhatsApp, donde el servicio filtra patrones aun en mode=only.
-            fuera = self._excluidos_patron_tg(cfg)
-            return [c for c in self._subscribers.listar_activos() if str(c) in sel and str(c) not in fuera]
+            return [c for c in self._subscribers.listar_activos() if str(c) in sel]
         return self._destinatarios_telegram(cfg, self._target_para(cfg, "telegram", telegram_list))
 
     def previsualizar(

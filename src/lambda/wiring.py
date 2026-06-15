@@ -171,6 +171,7 @@ def build_deliver_batch() -> DeliverBatch:
         _recipients(cfg),
         delay_min=cfg.get("tg_delay_min", fijo),
         delay_max=cfg.get("tg_delay_max", fijo),
+        dedup=build_dedup(),  # idempotencia POR DESTINATARIO (no duplicar en reentrega de lote)
     )
 
 

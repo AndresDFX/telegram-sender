@@ -460,8 +460,11 @@ function resolverTargets(mode, list_ids, exclude, exclude_patterns, pattern_exce
       if (!id.endsWith('@s.whatsapp.net')) return false
       if (ex.has(id) || ex.has(id.split('@')[0])) return false
       if ((failures[id] || 0) >= BLOQUEO_UMBRAL) return false // opt-out: auto-excluido por fallos
-      if (coincidePatron(id)) return false // auto-excluido por patrón de nombre
+      // El patrón por NOMBRE solo auto-excluye en envíos AMPLIOS (all/except). En modo "only"
+      // (lista explícita) los destinatarios se validan por NÚMERO/jid: si el nombre cambió, igual
+      // se envía (el usuario los eligió por número, no por nombre).
       if (mode === 'only') return enSeleccion(id)
+      if (coincidePatron(id)) return false // auto-excluido por patrón de nombre (solo all/except)
       if (mode === 'except') return !enSeleccion(id)
       return true
     })

@@ -106,7 +106,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                         continue
                 except Exception:
                     logger.exception("No se pudo verificar el estado del plan %s; continúo (fail-open)", pid)
-            stats = deliver(body["text"], body.get("chat_ids", []), _resolver_imagen(body))
+            # batch_id se propaga a deliver para idempotencia POR DESTINATARIO: si el lote se
+            # reentrega (timeout a mitad), los ya enviados se saltan y el lote resume sin duplicar.
+            stats = deliver(body["text"], body.get("chat_ids", []), _resolver_imagen(body), batch_id=batch_id)
             logger.info("Lote %s procesado: %s", body.get("batch_index"), stats.resumen())
             bid = body.get("broadcast_id")
             # Auditoría: guarda la razón legible del fallo (idempotente: set + last_error, no infla

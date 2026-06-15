@@ -77,13 +77,33 @@ class ExclusionPatronTelegramTests(unittest.TestCase):
         BroadcastList(subs, queue, cfg)("Hola $100.000")
         self.assertEqual(set(queue.calls[0][1]), {"2", "3"})  # "FAM Juan" auto-excluido
 
-    def test_ids_ad_hoc_tambien_respetan_el_patron(self):
+    def test_ids_ad_hoc_ignoran_el_patron_seleccion_explicita(self):
+        # Selección EXPLÍCITA por id/número: se envía a EXACTAMENTE esos contactos, AUNQUE su
+        # nombre coincida con un patrón (el usuario los eligió por número; un cambio de nombre no
+        # debe sacarlos). El patrón solo auto-excluye en envíos amplios (all/except).
         queue = FakeQueue()
         subs = FakeSubs(["1", "2", "3"], names={"1": "FAM Juan", "2": "Cliente", "3": "María"})
         cfg = FakeConfig(telegram_exclude_patterns=["FAM"])
         bl = BroadcastList(subs, queue, cfg)
         clientes = bl._tg_clientes(cfg.get(), True, None, ["1", "2"])
-        self.assertEqual(set(clientes), {"2"})  # "1" excluido por patrón pese a elegirse a mano
+        self.assertEqual(set(clientes), {"1", "2"})  # "1" SÍ se incluye pese al patrón (elegido a mano)
+
+    def test_lista_only_ignora_patron_envia_por_numero(self):
+        # Enviar a una LISTA (mode only) valida por id/número: un miembro cuyo nombre coincide con
+        # un patrón IGUAL recibe (si se renombró a algo que matchea, no se cae de la lista).
+        subs = FakeSubs(["1", "2"], names={"1": "FAM Juan", "2": "Cliente"})
+        cfg = FakeConfig(telegram_exclude_patterns=["FAM"],
+                         telegram_lists=[{"name": "VIP", "ids": ["1", "2"]}],
+                         telegram_target={"mode": "only", "lists": ["VIP"]})
+        bl = BroadcastList(subs, FakeQueue(), cfg)
+        self.assertEqual(set(bl._destinatarios_telegram(cfg.get())), {"1", "2"})  # "1" (FAM) incluido
+
+    def test_canal_all_sigue_excluyendo_por_patron(self):
+        # En envío AMPLIO (all) el patrón SÍ auto-excluye (guardrail intacto).
+        subs = FakeSubs(["1", "2"], names={"1": "FAM Juan", "2": "Cliente"})
+        cfg = FakeConfig(telegram_exclude_patterns=["FAM"], telegram_target={"mode": "all", "lists": []})
+        bl = BroadcastList(subs, FakeQueue(), cfg)
+        self.assertEqual(set(bl._destinatarios_telegram(cfg.get())), {"2"})  # "1" excluido en modo all
 
     def test_sin_patron_no_excluye(self):
         queue = FakeQueue()
