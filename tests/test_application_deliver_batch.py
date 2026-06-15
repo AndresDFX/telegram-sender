@@ -27,7 +27,7 @@ class FakeSender:
         return outcome
 
     def enviar_foto(self, chat_id, image_url, caption=""):
-        self.fotos.append((chat_id, image_url))
+        self.fotos.append((chat_id, image_url, caption))
         return SendResult(ok=True)
 
 
@@ -79,13 +79,24 @@ class DeliverBatchTests(unittest.TestCase):
             self.assertGreaterEqual(s, 1.0)
             self.assertLessEqual(s, 4.0)
 
-    def test_envia_foto_y_texto_cuando_hay_imagen(self):
+    def test_imagen_con_texto_corto_va_en_un_solo_mensaje_caption(self):
+        # Texto que cabe en caption (<=1024): la foto LLEVA el texto y NO hay mensaje de texto aparte.
         sender = FakeSender()
         deliver = DeliverBatch(sender, FakeSubscribers(), delay=0)
-        stats = deliver("lista", ["1", "2"], image_url="http://img/p.jpg")
+        stats = deliver("lista corta", ["1", "2"], image_url="http://img/p.jpg")
         self.assertEqual(stats.sent, 2)
-        self.assertEqual(sender.fotos, [("1", "http://img/p.jpg"), ("2", "http://img/p.jpg")])  # foto por chat
-        self.assertEqual([c[0] for c in sender.calls], ["1", "2"])  # y el texto
+        self.assertEqual(sender.fotos, [("1", "http://img/p.jpg", "lista corta"), ("2", "http://img/p.jpg", "lista corta")])
+        self.assertEqual(sender.calls, [])  # NO se envió texto por separado (un solo mensaje)
+
+    def test_imagen_con_texto_largo_va_en_dos_mensajes(self):
+        # Texto > 1024 no cabe en caption: foto SIN caption + texto completo aparte.
+        sender = FakeSender()
+        deliver = DeliverBatch(sender, FakeSubscribers(), delay=0)
+        largo = "x" * 1100
+        stats = deliver(largo, ["1"], image_url="http://img/p.jpg")
+        self.assertEqual(stats.sent, 1)
+        self.assertEqual(sender.fotos, [("1", "http://img/p.jpg", "")])  # foto sin caption
+        self.assertEqual([c[0] for c in sender.calls], ["1"])  # y el texto completo aparte
 
     def test_fallo_al_inactivar_no_rompe(self):
         class BadSubs(FakeSubscribers):

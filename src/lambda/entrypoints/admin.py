@@ -1402,6 +1402,7 @@ input[type=file]::file-selector-button{
 input[type=file]::file-selector-button:hover{background:#3F3D39}
 input[type=checkbox],input[type=radio]{accent-color:var(--ac);width:auto;cursor:pointer}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.row>*{min-width:0}
 
 /* ---------- buttons ---------- */
 button{
@@ -2711,7 +2712,7 @@ async function dlqPurge(){
 // --- Opt-out WhatsApp: contactos auto-excluidos por fallos ---
 async function loadBlocked(){
   try{ const r=await api('/api/whatsapp/blocked'); $('wa_blk_n').textContent='· '+(r.total||0)+' (umbral '+(r.umbral||3)+')';
-    const b=r.blocked||[]; if($('wa_blk_list')) $('wa_blk_list').innerHTML = b.length? b.map(x=>bcEsc(x.name)+' — '+x.fallos+' fallos').join('<br>') : 'Ninguno por ahora.';
+    const b=r.blocked||[]; if($('wa_blk_list')) $('wa_blk_list').innerHTML = b.length? b.map(x=>bcEsc(x.name)+' 📞 '+bcEsc(waNum(x))+' — '+x.fallos+' fallos').join('<br>') : 'Ninguno por ahora.';
   }catch(e){ if($('wa_blk_n')) $('wa_blk_n').textContent='· servicio inaccesible'; if($('wa_blk_list')) $('wa_blk_list').textContent='—'; }
 }
 async function clearBlocked(){
@@ -2933,7 +2934,9 @@ async function createListFromIncluded(ch){ await crearListaCon(ch, includedIds(c
 function audienceFor(ch){
   const dest = ch==='telegram'? DEST : WA_DEST;
   const idOf = ch==='telegram'? (x=>String(x.chatId)) : (x=>String(x.id||''));
-  const nameOf = ch==='telegram'? (x=>x.name||x.phone||String(x.chatId||'')) : waName;
+  const nameOf = ch==='telegram'
+    ? (x=>{ const n=x.name||'(sin nombre)'; const num=String(x.phone||x.chatId||''); return num?(n+' · '+num):n; })
+    : (x=>{ const num=waNum(x); return num?(waName(x)+' · '+num):waName(x); });
   const isExc = ch==='telegram'? isExcludedTg : isExcludedWa;
   const tgt = TGT[ch]||{mode:'all',lists:[]}; const mode=tgt.mode||'all';
   const sel=new Set(); (LISTS[ch]||[]).forEach(l=>{ if((tgt.lists||[]).includes(l.name)) (l.ids||[]).forEach(x=>sel.add(String(x))); });
@@ -2958,6 +2961,7 @@ let WA_DEST=[], WA_PAGE=0, WA_EXCLUDED=new Set(), WA_STATEF='', WA_EXCL_PAT=[], 
 function isExcludedWa(c){ const id=String(c.id||'');
   return WA_EXCLUDED.has(id) || (nameMatchesPatterns(waName(c), WA_EXCL_PAT) && !WA_EXCEPT.has(id)); }
 function waName(c){ return c.name || '(sin nombre)'; }
+function waNum(c){ return String(c.id||'').split('@')[0]; }  // número desde el jid (sin @s.whatsapp.net)
 async function loadWaContacts(){ $('wa_c_count').textContent='· cargando...';
   try{ const r=await api('/api/whatsapp/contacts'); WA_DEST=r.contacts||[]; WA_PAGE=0; renderWa(); }
   catch(e){ $('wa_c_count').textContent='· servicio inaccesible (¿conectado?)'; } }
@@ -2982,7 +2986,7 @@ function renderWa(){ const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.le
   slice.forEach(c=>{ const id=String(c.id||''); const exM=WA_EXCLUDED.has(id); const matchP=nameMatchesPatterns(waName(c), WA_EXCL_PAT);
     const exP=!exM && matchP && !WA_EXCEPT.has(id); const exc=!exM && matchP && WA_EXCEPT.has(id); const tr=document.createElement('tr');
     const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido · patrón</span>':(exc?'<span class="pill exc-ok">Incluido · excepción</span>':'<span class="pill active">Incluido</span>'));
-    tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${bcEsc(waName(c))}</b><div class="hint" style="margin-top:2px;font-size:11px">${bcEsc(id)}</div></td>`+
+    tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${bcEsc(waName(c))}</b><div class="hint" style="margin-top:2px;font-size:11px">📞 ${bcEsc(waNum(c)||id)}</div></td>`+
       `<td>${pill}</td>`; t.appendChild(tr); });
   $('wa_pageinfo').textContent=f.length?`página ${WA_PAGE+1} de ${pages}`:'sin resultados'; }
 function waSelectedIds(){ return [...document.querySelectorAll('.wsel:checked')].map(c=>String(c.dataset.id)); }
@@ -3026,6 +3030,7 @@ function bcCount(){ const n=$('bc_text').value.length, el=$('bc_count');
 let BC_TG_SEL=new Set(), BC_WA_SEL=new Set();
 function bcSel(ch){ return ch==='tg'?BC_TG_SEL:BC_WA_SEL; }
 function bcNameOf(ch,c){ return ch==='tg'?(c.name||'(sin nombre)'):waName(c); }
+function bcNumOf(ch,c){ return ch==='tg'?String(c.phone||c.chatId||''):waNum(c); }  // número visible del contacto
 function bcIdOf(ch,c){ return ch==='tg'?String(c.chatId):String(c.id); }
 function bcRenderPick(ch){
   const box=$('bc_'+ch+'_pick'); if(!box) return;
@@ -3033,9 +3038,9 @@ function bcRenderPick(ch){
   const q=($('bc_'+ch+'_search').value||'').trim().toLowerCase();
   const f=data.filter(c=>{ if(!q) return true;
     const id=(ch==='tg'?String(c.chatId||''):String(c.id||'')).toLowerCase();
-    return bcNameOf(ch,c).toLowerCase().includes(q) || id.includes(q); }).slice(0,40);
-  box.innerHTML = f.length ? f.map(c=>{ const id=bcIdOf(ch,c);
-    return `<label class="pickitem"><input type="checkbox" ${sel.has(id)?'checked':''} onchange="bcTogglePick('${ch}','${id}',this.checked)"> ${bcEsc(bcNameOf(ch,c))}</label>`; }).join('')
+    return bcNameOf(ch,c).toLowerCase().includes(q) || id.includes(q) || bcNumOf(ch,c).toLowerCase().includes(q); }).slice(0,40);
+  box.innerHTML = f.length ? f.map(c=>{ const id=bcIdOf(ch,c); const num=bcNumOf(ch,c);
+    return `<label class="pickitem"><input type="checkbox" ${sel.has(id)?'checked':''} onchange="bcTogglePick('${ch}','${id}',this.checked)"> <span>${bcEsc(bcNameOf(ch,c))}</span>${num?` <span class="hint" style="margin-left:6px">📞 ${bcEsc(num)}</span>`:''}</label>`; }).join('')
     : '<div class="hint">'+(data.length?'sin resultados':'sin contactos cargados aún')+'</div>';
 }
 function bcTogglePick(ch,id,on){ const s=bcSel(ch); on?s.add(id):s.delete(id); bcPrev(); }

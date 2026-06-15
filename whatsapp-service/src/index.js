@@ -536,8 +536,8 @@ async function enviarLote(text, image_url, targets, track) {
     try {
       const hasText = !!(text && String(text).trim())
       if (imgBuffer) {
-        await sock.sendMessage(jid, { image: imgBuffer })  // bytes ya en memoria, no URL
-        if (hasText) await sock.sendMessage(jid, { text })
+        // UN SOLO mensaje: imagen con el texto como caption (no dos mensajes separados).
+        await sock.sendMessage(jid, hasText ? { image: imgBuffer, caption: text } : { image: imgBuffer })
       } else if (hasText) {
         await sock.sendMessage(jid, { text })
       } else {

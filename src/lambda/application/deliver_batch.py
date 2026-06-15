@@ -39,14 +39,22 @@ class DeliverBatch:
         stats = BroadcastStats(total=len(chat_ids))
         for chat_id in chat_ids:
             try:
+                # Imagen + texto en UN SOLO mensaje (caption) cuando el texto cabe en el límite de
+                # Telegram (~1024). Si el texto es más largo, la foto va sin caption y el texto
+                # completo se envía aparte (no se puede meter >1024 en un caption).
+                cap_ok = bool(text) and len(text) <= 1024
                 if image_url:
-                    foto = self._sender.enviar_foto(chat_id, image_url)
+                    foto = self._sender.enviar_foto(chat_id, image_url, caption=(text if cap_ok else ""))
                     if foto.blocked:
                         stats.blocked += 1
                         self._inactivar(chat_id)
                         self._wait()
                         continue
-                    self._wait()
+                    if cap_ok or not text:
+                        stats.sent += 1  # el texto ya viajó como caption (o no hay texto): un solo mensaje
+                        self._wait()
+                        continue
+                    self._wait()  # texto demasiado largo para caption → se envía aparte abajo
 
                 result = self._sender.enviar(chat_id, text)
                 if result.blocked:

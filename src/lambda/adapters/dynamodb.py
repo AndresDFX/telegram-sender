@@ -6,12 +6,15 @@ puedan importar este módulo sin tenerlos instalados (el runtime Lambda los trae
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 import uuid
 from datetime import datetime, timezone
 
 from application.ports import ConfigStore, DedupStore, HighWaterMarkStore, SubscriberRepository
+
+logger = logging.getLogger(__name__)
 from domain.markup import DEFAULT_CURRENCY_SYMBOLS
 from domain.message import DEFAULT_LOCATION_PATTERNS
 from domain.models import ACTIVE, INACTIVE
@@ -113,7 +116,14 @@ class DynamoDbDedupStore(DedupStore):
         except ClientError as error:
             if error.response["Error"]["Code"] == "ConditionalCheckFailedException":
                 return False
-            raise
+            # Fallo de infra (permiso/tabla): NO re-lanzar. Simétrico con procesado() (fail-open).
+            # Si re-lanzáramos, el worker reencolaría un lote YA ENTREGADO y lo RE-ENTREGARÍA en
+            # bucle (duplicados). Mejor seguir sin marcar que duplicar el mensaje.
+            logger.exception("dedup.marcar falló para %s; continúo sin marcar (evita reentrega-duplicado)", key)
+            return False
+        except Exception:
+            logger.exception("dedup.marcar error inesperado para %s; continúo sin marcar", key)
+            return False
 
     def borrar(self, key: str) -> None:
         self._t().delete_item(Key={"updateId": str(key)})

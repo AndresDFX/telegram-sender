@@ -71,15 +71,16 @@ class DedupStoreTests(unittest.TestCase):
         with patch.object(dynamodb, "_table", return_value=table):
             self.assertFalse(store.marcar("42"))
 
-    def test_otro_error_propaga(self):
+    def test_otro_error_no_propaga_fail_open(self):
+        # Fallo de infra (permiso/throughput/tabla): marcar NO re-lanza, devuelve False.
+        # Si re-lanzara, el worker reencolaría un lote YA ENTREGADO → reentrega-duplicado.
         table = MagicMock()
         table.put_item.side_effect = ClientError(
-            {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "x"}}, "PutItem"
+            {"Error": {"Code": "AccessDeniedException", "Message": "x"}}, "PutItem"
         )
         store = dynamodb.DynamoDbDedupStore()
         with patch.object(dynamodb, "_table", return_value=table):
-            with self.assertRaises(ClientError):
-                store.marcar("42")
+            self.assertFalse(store.marcar("42"))  # no lanza: fail-open simétrico con procesado()
 
 
 class ConfigStoreTests(unittest.TestCase):

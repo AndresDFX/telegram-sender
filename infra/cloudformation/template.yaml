@@ -678,6 +678,11 @@ Resources:
           # al nombre por defecto "Config" -> AccessDenied -> el worker fallaba en _ensure y
           # NINGÚN envío de Telegram se entregaba (fallo silencioso -> DLQ, sin marcar fallido).
           CONFIG_TABLE: !Ref ConfigTable
+          # PROCESSED_UPDATES_TABLE es OBLIGATORIO para la IDEMPOTENCIA del worker: sin él,
+          # DynamoDbDedupStore caía al nombre por defecto "ProcessedUpdates" -> marcar() daba
+          # AccessDenied y RE-LANZABA -> el lote se reencolaba en SQS y se RE-ENTREGABA en bucle
+          # (hasta maxReceiveCount) -> el MISMO mensaje llegaba varias veces al destinatario.
+          PROCESSED_UPDATES_TABLE: !Ref ProcessedUpdatesTable
           TELEGRAM_BOT_TOKEN: !Ref TelegramBotToken
           SEND_DELAY_SECONDS: !Ref SendDelaySeconds
           IMAGES_BUCKET: !Ref LambdaCodeS3Bucket
