@@ -2729,9 +2729,20 @@ async function loadAudit(){
   }catch(e){}
 }
 // --- Estado de conexiones (Telegram bot + WhatsApp) en el header ---
+// Estado de SINCRONIZACIÓN de cada cuenta. Si la cuenta NO está sincronizada/conectada, las
+// pantallas NO muestran contactos cacheados viejos (solo las LISTAS persisten). null = sin verificar.
+let TG_STALE=false, WA_STALE=false;
+function syncReRender(){ // refresca las vistas de contactos según el estado de sincronización
+  try{ if(typeof render==='function' && $('subs')) render(); }catch(e){}
+  try{ if(typeof renderWa==='function' && $('wa_subs')) renderWa(); }catch(e){}
+  try{ if(typeof bcRenderPick==='function'){ bcRenderPick('tg'); bcRenderPick('wa'); } }catch(e){}
+}
 async function refreshConn(){
   const tg=$('conn_tg'), wa=$('conn_wa');
   try{ const a=await api('/api/telegram/account');
+    // userbot con sesión caída (connected===false) => contactos cacheados VIEJOS (no sincronizado).
+    // En modo bot los suscriptores no son caché de sesión (vienen de /start) => nunca "viejos".
+    TG_STALE = (a.mode==='userbot' && a.connected===false);
     if(tg){ tg.onclick=null; tg.style.cursor='';
       const irCuenta=()=>{ showTab('ajustes'); try{ showSub('ajustes','telegram'); }catch(e){} };
       if(a.mode==='userbot'){
@@ -2752,10 +2763,12 @@ async function refreshConn(){
     } }
   catch(e){ if(tg){ tg.className='pill failed'; tg.innerHTML=ICO_TG+' ✕'; tg.onclick=null; } }
   try{ const s=await api('/api/whatsapp/status'); const ok=s&&s.connected;
+    WA_STALE = !ok;  // WhatsApp no conectado => sus contactos cacheados están viejos (no sincronizado)
     if(wa){ const num=(ok&&s.me&&s.me.id)?('+'+String(s.me.id).split('@')[0].split(':')[0]):'';
       wa.className='pill '+(ok?'active':'failed'); wa.innerHTML=ok?(ICO_WA+' '+bcEsc(num||'WhatsApp')):(ICO_WA+' WA ✕');
       wa.title=ok?((num?('WhatsApp '+num):'WhatsApp conectado')+(s.contacts?(' · '+s.contacts+' contactos'):'')):('desconectado'+(s.lastCloseMsg?(' · '+s.lastCloseMsg):'')); } }
-  catch(e){ if(wa){ wa.className='pill inactive'; wa.innerHTML=ICO_WA+' WA ?'; wa.title='servicio no configurado o inaccesible'; } }
+  catch(e){ WA_STALE=true; if(wa){ wa.className='pill inactive'; wa.innerHTML=ICO_WA+' WA ?'; wa.title='servicio no configurado o inaccesible'; } }
+  syncReRender();  // refleja el estado de sincronización en las pantallas de contactos
 }
 let CONN_TIMER=null;
 function connStartPolling(){ if(CONN_TIMER) return; refreshConn();
@@ -2833,7 +2846,19 @@ function filtered(){ let arr=DEST;
 function setStateFilter(v){ STATEF=v; PAGE=0;
   document.querySelectorAll('#seg_tg button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.classList.toggle('exc',on&&v==='exc'); });
   render(); }
-function render(){ const f=filtered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
+function render(){
+  // Si la cuenta de Telegram NO está sincronizada (userbot con sesión caída), NO mostramos
+  // contactos cacheados viejos. Las LISTAS sí persisten (más abajo, no dependen de esto).
+  if(TG_STALE){
+    const t=$('subs'); if(t) t.innerHTML=''; if($('selall')) $('selall').checked=false;
+    if($('subcount')) $('subcount').textContent='· cuenta no sincronizada';
+    if($('pageinfo')) $('pageinfo').textContent='';
+    const e=$('subsempty'); if(e){ e.style.display='block';
+      e.innerHTML='⚠️ La cuenta de Telegram no está conectada/sincronizada. Conéctala (Ajustes → Cuenta de Telegram) para ver tus contactos. <b>Tus listas se conservan</b> y se reusarán al reconectar.'; }
+    return;
+  }
+  { const e=$('subsempty'); if(e) e.innerHTML='Sin destinatarios (modo bot: nadie dio /start; modo userbot: la cuenta no tiene contactos).'; }
+  const f=filtered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
   if(PAGE>=pages) PAGE=pages-1; if(PAGE<0) PAGE=0;
   const slice=f.slice(PAGE*PAGE_SIZE,(PAGE+1)*PAGE_SIZE);
   const t=$('subs'); t.innerHTML=''; $('selall').checked=false;
@@ -2978,7 +3003,16 @@ function waFiltered(){ let arr=WA_DEST; const q=($('wa_search').value||'').trim(
 function setWaStateFilter(v){ WA_STATEF=v; WA_PAGE=0;
   document.querySelectorAll('#seg_wa button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.classList.toggle('exc',on&&v==='exc'); });
   renderWa(); }
-function renderWa(){ const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
+function renderWa(){
+  // Si WhatsApp NO está conectado/sincronizado, no mostramos contactos cacheados viejos
+  // (las listas de WhatsApp sí persisten y se reusan al reconectar).
+  if(WA_STALE){
+    const t=$('wa_subs'); if(t) t.innerHTML='<tr><td colspan="3" class="hint" style="padding:12px">⚠️ WhatsApp no está conectado/sincronizado. Conéctalo (Ajustes → WhatsApp) para ver tus contactos. <b>Tus listas se conservan</b> y se reusarán al reconectar.</td></tr>';
+    if($('wa_c_count')) $('wa_c_count').textContent='· WhatsApp no conectado';
+    if($('wa_pageinfo')) $('wa_pageinfo').textContent='';
+    return;
+  }
+  const f=waFiltered(); const pages=Math.max(1,Math.ceil(f.length/PAGE_SIZE));
   if(WA_PAGE>=pages)WA_PAGE=pages-1; if(WA_PAGE<0)WA_PAGE=0; const slice=f.slice(WA_PAGE*PAGE_SIZE,(WA_PAGE+1)*PAGE_SIZE);
   const t=$('wa_subs'); t.innerHTML='';
   const exCount=WA_DEST.filter(isExcludedWa).length; const inc=WA_DEST.length-exCount;
@@ -3034,6 +3068,11 @@ function bcNumOf(ch,c){ return ch==='tg'?String(c.phone||c.chatId||''):waNum(c);
 function bcIdOf(ch,c){ return ch==='tg'?String(c.chatId):String(c.id); }
 function bcRenderPick(ch){
   const box=$('bc_'+ch+'_pick'); if(!box) return;
+  // Cuenta no sincronizada: no ofrecer contactos cacheados viejos para elegir (sí puedes usar listas).
+  if(ch==='tg'?TG_STALE:WA_STALE){
+    box.innerHTML='<div class="hint">⚠️ Cuenta no conectada — conéctala (Ajustes) para elegir contactos. Las listas siguen disponibles.</div>';
+    return;
+  }
   const data=(ch==='tg'?DEST:WA_DEST)||[], sel=bcSel(ch);
   const q=($('bc_'+ch+'_search').value||'').trim().toLowerCase();
   const f=data.filter(c=>{ if(!q) return true;
@@ -3076,12 +3115,18 @@ async function bcPrev(){
   clearTimeout(BC_PREV_T);
   const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked, out=$('bc_preview');
   if(!tg && !wa){ out.textContent='—'; return; }
+  const noSync='<span class="hint">(cuenta no conectada)</span>';  // no mostramos conteos del caché viejo
+  // Si TODOS los canales elegidos están sin sincronizar, ni siquiera consultamos el conteo.
+  if((!tg || TG_STALE) && (!wa || WA_STALE)){
+    const parts=[]; if(tg) parts.push(ICO_TG+' Telegram: '+noSync); if(wa) parts.push(ICO_WA+' WhatsApp: '+noSync);
+    out.innerHTML=parts.join(' · '); return;
+  }
   out.textContent='calculando destinatarios…';
   BC_PREV_T=setTimeout(async()=>{
     try{ const r=await api('/api/broadcast/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bcBody())});
       const parts=[];
-      if(tg) parts.push(ICO_TG+' Telegram: <b>'+(r.telegram??0)+'</b>');
-      if(wa) parts.push(ICO_WA+' WhatsApp: <b>'+(r.whatsapp??0)+'</b>');
+      if(tg) parts.push(ICO_TG+' Telegram: '+(TG_STALE?noSync:('<b>'+(r.telegram??0)+'</b>')));
+      if(wa) parts.push(ICO_WA+' WhatsApp: '+(WA_STALE?noSync:('<b>'+(r.whatsapp??0)+'</b>')));
       out.innerHTML='Se enviará a → '+parts.join(' · ');
     }catch(e){ out.textContent='no se pudo calcular la previsualización'; }
   }, 300);
