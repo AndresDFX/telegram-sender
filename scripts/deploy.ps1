@@ -45,6 +45,7 @@ $params = @(
   "LambdaCodeS3Bucket=$bucket",
   "LambdaCodeS3Key=$key",
   "WorkerReservedConcurrency=0",
+  "WorkerTimeoutSeconds=300",
   "BroadcastBatchSize=150",
   "AlertEmail=castano.julian@correounivalle.edu.co",
   "AdminUser=admin",
