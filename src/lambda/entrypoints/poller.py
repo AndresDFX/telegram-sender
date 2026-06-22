@@ -45,10 +45,13 @@ def _refresh_contacts() -> None:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     _ensure()
-    # Interruptor maestro: si los envíos están desactivados, no difundir (no se crean planes).
-    if not config_store.get().get("sending_enabled", True):
-        logger.info("Envíos PAUSADOS (sending_enabled=False); el poller no difunde.")
-        return {"paused": True}
+    # La RECOPILACIÓN es independiente del ENVÍO: el poller captura mientras capture_enabled esté
+    # activo, aunque sending_enabled esté apagado. En ese caso PollChannel/BroadcastList solo
+    # registran y previsualizan la lista (no la difunden). El gate de ENVÍO lo aplica BroadcastList.
+    if not config_store.get().get("capture_enabled", True):
+        logger.info("Recopilación automática PAUSADA (capture_enabled=False); el poller no captura.")
+        _refresh_contacts()  # el panel sigue necesitando los contactos al día
+        return {"capture_paused": True}
     resultado = poll()
     _refresh_contacts()
     return resultado

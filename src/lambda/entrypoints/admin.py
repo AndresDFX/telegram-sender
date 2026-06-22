@@ -63,7 +63,11 @@ _CAMPOS_EDITABLES = (
     "telegram_target",
     "whatsapp_lists",
     "whatsapp_target",
+    # Lista existente que usa el ENVÍO AUTOMÁTICO del canal (por canal).
+    "auto_telegram_list",
+    "auto_whatsapp_list",
     # Anti-baneo / colas / ventana de envío.
+    "capture_enabled",
     "sending_enabled",
     "batch_size",
     "scheduling_enabled",
@@ -100,7 +104,7 @@ _LISTAS_NOMBRADAS = ("telegram_lists", "whatsapp_lists")
 _TARGETS = ("telegram_target", "whatsapp_target")
 _FLOATS = ("tg_delay_min", "tg_delay_max")
 _ENTEROS = ("batch_size", "wa_delay_min", "wa_delay_max", "window_tz")
-_BOOLS = ("whatsapp_enabled", "scheduling_enabled", "window_enabled", "sending_enabled",
+_BOOLS = ("whatsapp_enabled", "scheduling_enabled", "window_enabled", "capture_enabled", "sending_enabled",
           "tg_window_enabled", "wa_window_enabled")
 # Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
 _NO_VACIAR = ("telethon_session", "telethon_api_id", "telethon_api_hash", "whatsapp_token", "bot_token", "resend_api_key")
@@ -2290,16 +2294,31 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>Nueva contraseña (mínimo 8)</label><input id="cp_new" type="password">
    <div style="margin-top:10px"><button onclick="changePassword()">Cambiar contraseña</button> <span id="cp_status" class="hint" style="margin-left:10px"></span></div>
   </div>
-  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Interruptor de envíos<span class="help" tabindex="0" data-tip="Pausa o activa los envíos AUTOMÁTICOS (captura del canal y difusión programada). El envío MANUAL (Componer → Enviar) SIEMPRE sale, aun en pausa. La captura del canal NUNCA se detiene: lo capturado en pausa queda en espera y sale al reactivar.">ⓘ</span></h2>
+  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Recopilación automática<span class="help" tabindex="0" data-tip="Lee el canal fuente y guarda cada lista nueva (con markup y footer) para que la VEAS, sin enviarla a nadie. Es independiente del ENVÍO: puedes recopilar con el envío apagado.">ⓘ</span></h2>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-     <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos activos</b></label>
+     <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="capture_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleCapture()"> <b>Recopilar listas del canal</b></label>
+     <span id="cap_badge" class="pill">—</span>
+   </div>
+   <div class="hint" style="margin-top:10px">Lee <b>@iproparts</b> y registra cada lista nueva para que la <b>veas</b>, <b>sin enviarla a nadie</b>. Mientras el <b>envío automático</b> esté apagado, cada lista capturada aparece en <b>Envíos</b> como <b>📥 Capturada</b> y se te manda a tus <b>Mensajes Guardados</b> de Telegram. Es independiente del envío.</div>
+  </div>
+  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Envío automático<span class="help" tabindex="0" data-tip="Pausa o activa el ENVÍO automático de las listas capturadas. El envío MANUAL (Componer → Enviar) SIEMPRE sale, aun en pausa. La RECOPILACIÓN es aparte (arriba).">ⓘ</span></h2>
+   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+     <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos automáticos activos</b></label>
      <span id="sys_badge" class="pill">—</span>
    </div>
-   <div class="hint" style="margin-top:10px">Controla <b>solo el ENVÍO</b>. La <b>captura de @iproparts siempre está activa</b> (la información nunca se pierde): mientras esto esté apagado, lo capturado queda <b>EN ESPERA</b> y se envía en cuanto lo reactivas. Apágalo como freno: pausa al instante Telegram y WhatsApp.</div>
+   <div class="hint" style="margin-top:10px">Controla <b>solo el ENVÍO</b> de lo recopilado. <b>Apagado:</b> cada lista capturada solo se <b>ve</b> (en Envíos y en tus Mensajes Guardados), NO se envía. <b>Activado:</b> cada lista nueva se envía <b>a la lista que elijas abajo</b> por canal. Activar <b>no</b> reenvía lo ya capturado. El envío MANUAL siempre funciona.</div>
    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bd)">
      <div class="hint" style="margin-top:0">¿Hay difusiones en cola que NO quieres enviar? Cancélalas (no se enviarán, ni al reactivar).</div>
      <button class="danger" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>
    </div>
+  </div>
+  <div class="card" data-tab="ajustes" data-sub="envio"><h2>Lista del envío automático<span class="help" tabindex="0" data-tip="Cuando el envío automático está activo, cada lista capturada se envía SOLO a la lista que elijas aquí, por canal. Elige una para no enviar a 'todos' por error.">ⓘ</span></h2>
+   <div class="hint">Al activar el envío automático, cada lista del canal se enviará <b>solo a la lista elegida</b> por canal. Crea listas en <b>Fuentes y listas</b>.</div>
+   <div class="row" style="margin-top:10px">
+     <div><label>✈️ Telegram</label><select id="auto_telegram_list" onchange="saveAutoList()"></select></div>
+     <div><label>🟢 WhatsApp</label><select id="auto_whatsapp_list" onchange="saveAutoList()"></select></div>
+   </div>
+   <div class="hint" style="margin-top:8px">Si dejas un canal sin lista, al intentar activar el envío te pediremos elegir una (para no difundir a todos).</div>
   </div>
   <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Anti-baneo · lotes y ritmo<span class="help" tabindex="0" data-tip="Tamaño de lote (máx 150) y delays ALEATORIOS entre mensajes para no parecer spam y reducir el riesgo de baneo. Envío fraccionado = un lote a la vez.">ⓘ</span></h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="scheduling_enabled" style="width:auto"> Envío fraccionado y secuencial (procesa un lote a la vez)</label>
@@ -2499,7 +2518,30 @@ async function loadCfg(){ const c=await api('/api/config');
   if($('mail_from')) $('mail_from').value=c.mail_from||'';
   if($('mail_status')) $('mail_status').textContent = c.resend_api_key_set ? '· API key configurada ✓' : '· sin API key (usa SNS)';
   loadPatterns();
+  autoFillLists(c);
+  renderCaptureState(c.capture_enabled!==false);
   renderSendingState(c.sending_enabled!==false); }
+// Selectores de LISTA para el envío automático (por canal). Se rellenan desde las listas existentes.
+function autoFillLists(c){
+  const fill=(sel,arr,cur)=>{ if(!sel) return;
+    sel.innerHTML='<option value="">— sin lista (no auto-envía) —</option>'+(arr||[]).map(l=>`<option value="${bcEsc(l.name)}">${bcEsc(l.name)} (${(l.ids||[]).length})</option>`).join('');
+    sel.value=(cur||''); };
+  fill($('auto_telegram_list'),(LISTS&&LISTS.telegram)||[],c&&c.auto_telegram_list);
+  fill($('auto_whatsapp_list'),(LISTS&&LISTS.whatsapp)||[],c&&c.auto_whatsapp_list);
+}
+async function saveAutoList(){
+  const b={ auto_telegram_list:($('auto_telegram_list')?$('auto_telegram_list').value:'')||'',
+            auto_whatsapp_list:($('auto_whatsapp_list')?$('auto_whatsapp_list').value:'')||'' };
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); toast('✓ Lista del envío automático guardada'); }
+  catch(e){ toast('Error al guardar',true); } }
+function renderCaptureState(on){
+  if($('capture_enabled')) $('capture_enabled').checked = on;
+  const b=$('cap_badge'); if(b){ b.className='pill '+(on?'active':'failed'); b.textContent = on?'ACTIVA':'PAUSADA'; } }
+async function setCapture(on){
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({capture_enabled:on})});
+    renderCaptureState(on); toast(on?'✓ Recopilación ACTIVADA':'⏸ Recopilación PAUSADA — no se leerán listas nuevas', on?'info':'warn'); }
+  catch(e){ toast('Error al cambiar la recopilación',true); renderCaptureState(!on); } }
+function toggleCapture(){ return setCapture($('capture_enabled').checked); }
 // Info de DESTINATARIOS por usuario (patrones, excepciones y exclusiones manuales, ambos canales):
 // se carga/guarda en /api/patterns (registro del usuario), no en la config global. El envío real
 // usa la UNIÓN de todos los usuarios; el panel muestra LO TUYO.
@@ -2535,8 +2577,8 @@ function renderSendingState(on){
       hb.title='Envíos AUTOMÁTICOS en pausa (puedes seguir enviando manualmente) — clic para activarlos'; hb.textContent='⏸ Auto en pausa · activar'; hb.onclick=enableSending; }
   }
   const sb=$('send_banner'); if(sb){ sb.hidden=false;
-    if(on){ sb.className='active'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>Envíos automáticos activos.</b> La captura del canal se entrega con normalidad.</span><button class="sb-pause" onclick="setSending(false)">Pausar automáticos</button>'; }
-    else { sb.className='paused'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>⏸ Envíos AUTOMÁTICOS en pausa.</b> La captura del canal queda en espera y no sale sola. <b>Tú sí puedes enviar manualmente</b> desde «Componer → Enviar en el momento».</span><button class="sb-go" onclick="enableSending()">▶ Activar automáticos</button>'; }
+    if(on){ sb.className='active'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>Envíos automáticos activos.</b> Cada lista nueva del canal se envía a la lista elegida por canal.</span><button class="sb-pause" onclick="setSending(false)">Pausar automáticos</button>'; }
+    else { sb.className='paused'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>⏸ Envíos AUTOMÁTICOS en pausa.</b> Las listas capturadas solo se VEN (en Envíos y en tus Mensajes Guardados), no se envían. <b>Tú sí puedes enviar manualmente</b> desde «Componer → Enviar en el momento».</span><button class="sb-go" onclick="enableSending()">▶ Activar automáticos</button>'; }
   }
 }
 async function pendingSummary(){
@@ -2550,22 +2592,33 @@ async function pendingSummary(){
   }catch(e){ return {planes:0,envios:0,items:[]}; }
 }
 async function setSending(on){
-  if(!on){ if(!(await confirmModal('¿Pausar los envíos AUTOMÁTICOS? La captura del canal dejará de salir sola (queda en espera). Podrás seguir enviando manualmente desde «Componer → Enviar en el momento».',{okText:'Pausar automáticos',danger:true}))){ renderSendingState(true); return; } }
+  if(!on){ if(!(await confirmModal('¿Pausar el ENVÍO automático? Las listas que se capturen quedarán solo VISIBLES (en Envíos y en tus Mensajes Guardados), sin enviarse a nadie. Podrás seguir enviando manualmente desde «Componer → Enviar en el momento».',{okText:'Pausar automáticos',danger:true}))){ renderSendingState(true); return; } }
   else {
     toast('Calculando a quién se enviará…','info');
+    const c=await api('/api/config');
+    // OBLIGATORIO elegir lista para el envío automático (evita difundir a TODOS por error).
+    const faltan=[];
+    if(!c.auto_telegram_list) faltan.push('✈️ Telegram');
+    if(c.whatsapp_enabled && !c.auto_whatsapp_list) faltan.push('🟢 WhatsApp');
+    if(faltan.length){
+      await confirmModal('Antes de activar el ENVÍO automático, elige una LISTA para: '+faltan.join(' y ')+'.\n\nVe a Ajustes → «Lista del envío automático» y elige una lista por canal (así no se envía a TODOS por error).',{okText:'Entendido',noCancel:true});
+      renderSendingState(false); return;
+    }
     const ps=await pendingSummary();
     const {waOk}=await ensureContactsLoaded();
-    const tg=audienceFor('telegram'), wa=audienceFor('whatsapp');
+    const autoT=c.auto_telegram_list?{mode:'only',lists:[c.auto_telegram_list]}:(TGT.telegram||{mode:'all',lists:[]});
+    const autoW=c.auto_whatsapp_list?{mode:'only',lists:[c.auto_whatsapp_list]}:(TGT.whatsapp||{mode:'all',lists:[]});
+    const tg=audienceFor('telegram',autoT), wa=audienceFor('whatsapp',autoW);
     const fmt=(emoji,canal,a,ok)=>{ if(ok===false) return emoji+' '+canal+': no se pudo calcular (abre Fuentes → '+canal+' para ver el detalle).';
       const MAX=12, lista=a.names.slice(0,MAX).map(x=>'   • '+x).join('\n'), mas=a.names.length>MAX?('\n   …y '+(a.names.length-MAX)+' más'):'';
       return emoji+' '+canal+' ('+a.mode+') — '+a.total+' contacto(s)'+(a.total?':\n'+lista+mas:' (nadie)'); };
-    let msg='Al ACTIVAR, los envíos saldrán a esta AUDIENCIA (según tu configuración actual):\n\n'
+    let msg='Al ACTIVAR, cada lista NUEVA del canal se enviará SOLO a la lista elegida por canal:\n\n'
       + fmt('✈️','Telegram',tg,true) + '\n\n' + fmt('🟢','WhatsApp',wa,waOk);
     if(ps.planes>0){
       const ne = ps.envios>0 ? (' (~'+ps.envios.toLocaleString('es')+' envíos)') : '';
       msg += '\n\n⚠️ Además hay '+ps.planes+' difusión(es) EN COLA'+ne+' que saldrán al activar (gestiónalas en «Envíos fraccionados»).';
     }
-    msg += '\n\n¿Activar los envíos?';
+    msg += '\n\n¿Activar los envíos automáticos?';
     if(!(await confirmModal(msg,{okText:'Activar envíos',danger:ps.planes>0}))){ renderSendingState(false); return; }
   }
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sending_enabled:on})});
@@ -2956,14 +3009,14 @@ async function createListFromGrid(ch){
 async function createListFromIncluded(ch){ await crearListaCon(ch, includedIds(ch), 'incluidos'); }
 // Audiencia EFECTIVA por canal (a quién se enviaría con la config actual): aplica modo
 // (todos/solo/excepto) + listas activas + exclusiones (manuales y por patrón). Devuelve nombres.
-function audienceFor(ch){
+function audienceFor(ch, overrideTgt){
   const dest = ch==='telegram'? DEST : WA_DEST;
   const idOf = ch==='telegram'? (x=>String(x.chatId)) : (x=>String(x.id||''));
   const nameOf = ch==='telegram'
     ? (x=>{ const n=x.name||'(sin nombre)'; const num=String(x.phone||x.chatId||''); return num?(n+' · '+num):n; })
     : (x=>{ const num=waNum(x); return num?(waName(x)+' · '+num):waName(x); });
   const isExc = ch==='telegram'? isExcludedTg : isExcludedWa;
-  const tgt = TGT[ch]||{mode:'all',lists:[]}; const mode=tgt.mode||'all';
+  const tgt = overrideTgt || TGT[ch]||{mode:'all',lists:[]}; const mode=tgt.mode||'all';
   const sel=new Set(); (LISTS[ch]||[]).forEach(l=>{ if((tgt.lists||[]).includes(l.name)) (l.ids||[]).forEach(x=>sel.add(String(x))); });
   const inc=(dest||[]).filter(x=>{ const id=idOf(x);
     if(isExc(x)) return false;
@@ -3198,7 +3251,7 @@ async function sendBroadcast(){
 // ===== Envíos: listado + polling (GET /api/broadcasts) =====
 let BC_TIMER=null;
 const BC_POLL=4000;
-const BC_STATUS={ queued:'En cola', sending:'Enviando', done:'Completado', failed:'Fallido', partial:'Parcial' };
+const BC_STATUS={ queued:'En cola', sending:'Enviando', done:'Completado', failed:'Fallido', partial:'Parcial', captured:'📥 Capturada (no enviada)' };
 function bcEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 // ===== Mensajes programados (módulo /api/schedules) =====

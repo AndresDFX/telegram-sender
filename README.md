@@ -199,13 +199,17 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
   evalúa la ventana **por canal**: una ventana cerrada en un canal NO frena al otro, y un WhatsApp caído (no
   resuelve su total) **no bloquea** los envíos de Telegram (Telegram se despacha primero, sin depender de WhatsApp).
   Los delays anti-baneo también son por canal (`tg_delay_*` / `wa_delay_*`).
-- **Interruptor maestro** (`sending_enabled`): pausa/activa los envíos **AUTOMÁTICOS** (captura del canal y
-  difusión programada). El **envío MANUAL** (Componer → Enviar) **SIEMPRE sale**, aun en pausa: el plan se marca
-  `source="manual"` y el dispatcher/worker lo dejan pasar (lo automático es `source="channel"`). La **captura del
-  canal nunca se detiene** — en pausa se crean planes EN ESPERA que salen al reactivar (la info no se pierde).
-  Si un envío manual queda **sin destinatarios** (p. ej. patrones que excluyen a todos) se rechaza con motivo y se
-  audita (`broadcast:rechazado`), para que se vea EN LA APP por qué "no envió". Auto-pausa anti-baneo tras 2 lotes
-  totalmente fallidos.
+- **Recopilación y envío SEPARADOS** (dos interruptores independientes):
+  - **Recopilación** (`capture_enabled`): el poller lee `@iproparts` y, por cada lista nueva, la registra
+    (visible en el panel como **📥 Capturada**) y se la **autoenvía a Mensajes Guardados** del userbot
+    (`enviar("me", …)`) para verla. Es independiente del envío.
+  - **Envío automático** (`sending_enabled`): cuando está **apagado**, las listas capturadas **solo se ven**
+    (panel + Mensajes Guardados), NO se difunden, NO crean plan ni cola — activar **no** reenvía lo ya capturado.
+    Cuando está **activo**, cada lista nueva se difunde **solo a la lista elegida por canal**
+    (`auto_telegram_list` / `auto_whatsapp_list`); el panel **exige** elegir lista antes de activar (evita enviar
+    a "todos"). El **envío MANUAL** (Componer → Enviar) **SIEMPRE sale**, aun con el envío apagado (`source="manual"`;
+    lo del canal es `source="channel"`/`"capture"`). Si un manual queda **sin destinatarios** se rechaza con motivo
+    y se audita (`broadcast:rechazado`). Auto-pausa anti-baneo (solo el envío) tras 2 lotes totalmente fallidos.
 - **Programación y fraccionado**: **schedules** (once/daily/weekly; `application/materialize_schedules.py` los
   materializa en envíos) y **plans** (envío fraccionado y secuencial: un lote a la vez con jitter y ventana
   horaria; `application/dispatch.py` los gotea). Un EventBridge cron dispara el dispatcher cada minuto.
@@ -240,6 +244,8 @@ Validación JS del servicio y del panel: `node --check whatsapp-service/src/inde
 `RESEND_API_KEY`, `MAIL_FROM` (correo de recuperación; opcionales, sin ellos usa SNS), `ALERTS_TOPIC_ARN`.
 Muchos valores son **editables en runtime** desde el panel (tabla `config` de DynamoDB) y tienen prioridad
 sobre el entorno; los `*_exclude_patterns`, listas y ventanas viven solo en esa config, no en el entorno.
+Solo-config (no en el entorno): `capture_enabled` (recopilación, default `True`), `sending_enabled` (envío
+automático) y `auto_telegram_list`/`auto_whatsapp_list` (lista que usa el envío automático por canal).
 Servicio WhatsApp: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`, `BROADCASTS_TABLE`, `AWS_*`, `SEND_DELAY_MS`.
 
 ---
@@ -247,10 +253,11 @@ Servicio WhatsApp: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`, `BROADCASTS_TABLE`, 
 ## 8. Estado actual y pendientes
 
 - ✅ Telegram (bot+userbot), WhatsApp (Baileys), listas, **exclusión por patrón de nombre**, estados,
-  envío manual, **programado y fraccionado**, interruptor maestro, **correo Resend**, panel moderno
+  envío manual, **programado y fraccionado**, **recopilación separada del envío** (captura + preview a
+  Mensajes Guardados, envío auto a lista elegida por canal), **correo Resend**, panel moderno
   (filtros, borrado individual/masivo, barra de estado) — desplegado y verificado.
 - ✅ Despliegue reproducible (`package-lambda.ps1` + `deploy.ps1`); **CI en GitHub Actions** (tests en cada
-  push; deploy gated por `DEPLOY_ENABLED`); **207 tests**.
+  push; deploy gated por `DEPLOY_ENABLED`); **244 tests**.
 - ⏳ Secretos en SSM/Secrets Manager; encriptación KMS de la tabla config; rate-limit distribuido del login.
 - ⚠️ WhatsApp/userbot: riesgo de baneo por envío masivo — usar listas pequeñas y delays altos.
 

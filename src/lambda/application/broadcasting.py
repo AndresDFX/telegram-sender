@@ -32,6 +32,7 @@ class BroadcastList:
         image_store: ImageStore | None = None,
         broadcasts=None,
         plans=None,
+        preview_sender=None,
     ) -> None:
         self._subscribers = subscribers
         self._queue = queue
@@ -40,6 +41,9 @@ class BroadcastList:
         self._image_store = image_store
         self._broadcasts = broadcasts
         self._plans = plans
+        # Enviador para PREVISUALIZAR a Mensajes Guardados las listas capturadas cuando el envío
+        # automático está apagado (userbot → "me"). None en modo bot o si no se inyecta.
+        self._preview_sender = preview_sender
 
     # --- helpers ---------------------------------------------------------------
 
@@ -199,14 +203,32 @@ class BroadcastList:
             except Exception:
                 logger.exception("No se pudo marcar WhatsApp fallido en el job %s", broadcast_id)
 
+    def _auto_target(self, cfg: dict, canal: str) -> dict:
+        """Target del ENVÍO AUTOMÁTICO del canal para ``canal`` (telegram/whatsapp): la LISTA
+        elegida en el panel para ese canal (``auto_<canal>_list``). Si no se eligió ninguna,
+        cae al target configurado del canal (``<canal>_target``). El panel exige elegir una lista
+        antes de activar el envío para no difundir a 'todos' por error."""
+        nombre = str(cfg.get(f"auto_{canal}_list") or "").strip()
+        if nombre:
+            return {"mode": "only", "lists": [nombre]}
+        return cfg.get(f"{canal}_target", {})
+
+    def _preview(self, mensaje: str) -> None:
+        """Autoenvía la lista capturada a Mensajes Guardados del userbot (verla en Telegram sin
+        difundirla). Best-effort: nunca debe romper la captura."""
+        if not self._preview_sender:
+            return
+        try:
+            self._preview_sender.enviar(
+                "me", "📥 Lista capturada (envío automático apagado — NO enviada):\n\n" + mensaje
+            )
+        except Exception:
+            logger.exception("No se pudo previsualizar la lista capturada en Mensajes Guardados")
+
     # --- difusión desde el canal (con markup/footer) ---------------------------
 
     def __call__(self, text: str) -> dict[str, int]:
         cfg = self._config.get()
-        # CAPTURA SIEMPRE: la info del canal (iproparts) se guarda aunque los envíos estén
-        # pausados — se crea el plan EN ESPERA y el dispatcher lo enviará al activar el interruptor.
-        # Nunca se pierde un post; lo opcional es el envío, no la captura.
-        habilitado = bool(cfg.get("sending_enabled", True))
         mensaje = componer_mensaje(
             text,
             markup_percentage=cfg["markup_percentage"],
@@ -214,13 +236,26 @@ class BroadcastList:
             strip_patterns=cfg["strip_patterns"],
             footer=cfg["whatsapp_footer"],
         )
-        clientes = self._destinatarios_telegram(cfg)
+        # RECOPILACIÓN ≠ ENVÍO. Si el ENVÍO automático está apagado (sending_enabled=False) solo se
+        # RECOPILA: se registra la lista (visible en el panel como "capturado") y se previsualiza en
+        # tus Mensajes Guardados. NO se difunde, NO se crea plan, NO se reenvía a WhatsApp. Activar el
+        # envío NO vacía ninguna cola: las listas capturadas no se reenvían retroactivamente.
+        if not bool(cfg.get("sending_enabled", True)):
+            bid = self._nuevo_id()
+            self._registrar(bid, mensaje, "capture", [], 0)
+            self._preview(mensaje)
+            logger.info("Lista capturada %s (envío automático apagado): registrada + previsualizada, NO enviada", bid)
+            return {"captured": True, "broadcast_id": bid}
+
+        # ENVÍO AUTOMÁTICO: difunde a la LISTA elegida por canal (auto_<canal>_list); si no hay
+        # lista elegida, cae al target configurado del canal.
+        clientes = self._destinatarios_telegram(cfg, self._auto_target(cfg, "telegram"))
         wa_on = bool(self._whatsapp and cfg.get("whatsapp_enabled"))
         channels = ["telegram"] + (["whatsapp"] if wa_on else [])
         bid = self._nuevo_id()
         self._registrar(bid, mensaje, "channel", channels, len(clientes))
 
-        wa_t = cfg.get("whatsapp_target", {})
+        wa_t = self._auto_target(cfg, "whatsapp")
         wa_mode = wa_t.get("mode", "all")
         wa_list_ids = ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_t)
 
@@ -233,14 +268,9 @@ class BroadcastList:
                 wa_text=mensaje, wa_image_url=self._image_url_para_whatsapp(cfg),
                 wa_image_key=cfg.get("image_key") or None,
             )
-            estado = "PROGRAMADA" if habilitado else "EN ESPERA (envíos pausados)"
-            logger.info("Difusión %s %s (fraccionada) para %d clientes", bid, estado, len(clientes))
-            return {"scheduled": True, "subscribers": len(clientes), "broadcast_id": bid, "held": not habilitado}
+            logger.info("Difusión %s PROGRAMADA (fraccionada) para %d clientes", bid, len(clientes))
+            return {"scheduled": True, "subscribers": len(clientes), "broadcast_id": bid}
 
-        if not habilitado:
-            # Modo inline (sin scheduler, p.ej. dev): no hay plan que retener; no se envía mientras esté pausado.
-            logger.info("Difusión %s registrada pero NO enviada (envíos pausados, modo inline)", bid)
-            return {"paused": True, "subscribers": len(clientes), "broadcast_id": bid}
         lotes = self._queue.encolar(
             mensaje,
             clientes,

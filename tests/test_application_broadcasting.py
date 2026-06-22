@@ -69,6 +69,17 @@ class FakePlansEspera:
         self.created.append((bid, kw))
 
 
+class FakePreview:
+    """Enviador de PREVIEW a Mensajes Guardados (userbot 'me')."""
+
+    def __init__(self):
+        self.sent = []
+
+    def enviar(self, chat_id, text):
+        self.sent.append((chat_id, text))
+        return None
+
+
 class ExclusionPatronTelegramTests(unittest.TestCase):
     def test_canal_excluye_por_patron_de_nombre(self):
         queue = FakeQueue()
@@ -143,24 +154,34 @@ class BroadcastListTests(unittest.TestCase):
         BroadcastList(FakeSubs(["1"]), queue, FakeConfig(image_url="http://img/p.jpg"))("A $100.000")
         self.assertEqual(queue.calls[0][2], "http://img/p.jpg")
 
-    def test_pausado_captura_y_crea_plan_en_espera(self):
-        # Captura SIEMPRE: con envíos pausados se crea el plan (en espera), no se pierde el post.
-        plans, queue = FakePlansEspera(), FakeQueue()
+    def test_envio_apagado_solo_captura_no_crea_plan_ni_envia(self):
+        # RECOPILACIÓN ≠ ENVÍO. Con el ENVÍO automático apagado solo se RECOPILA: no se crea plan,
+        # no se encola, y se previsualiza a Mensajes Guardados (userbot 'me'). No se reenvía después.
+        plans, queue, prev = FakePlansEspera(), FakeQueue(), FakePreview()
         bl = BroadcastList(
             FakeSubs(["1", "2"]), queue,
-            FakeConfig(scheduling_enabled=True, sending_enabled=False), plans=plans,
+            FakeConfig(scheduling_enabled=True, sending_enabled=False), plans=plans, preview_sender=prev,
         )
         res = bl("A06 $100.000")
-        self.assertTrue(res.get("scheduled"))
-        self.assertTrue(res.get("held"))          # marcado EN ESPERA
-        self.assertEqual(len(plans.created), 1)    # plan creado = info guardada
-        self.assertEqual(queue.calls, [])          # nada enviado por la cola
+        self.assertTrue(res.get("captured"))
+        self.assertEqual(plans.created, [])        # NO crea plan (no se vacía cola al activar)
+        self.assertEqual(queue.calls, [])          # NO envía
+        self.assertEqual(len(prev.sent), 1)        # previsualizada en Mensajes Guardados
+        self.assertEqual(prev.sent[0][0], "me")
+        self.assertIn("$115.000", prev.sent[0][1])  # markup aplicado en la preview
 
-    def test_pausado_inline_no_envia(self):
+    def test_envio_apagado_inline_no_envia_pero_captura(self):
         queue = FakeQueue()
         res = BroadcastList(FakeSubs(["1"]), queue, FakeConfig(sending_enabled=False))("A $100.000")
-        self.assertTrue(res.get("paused"))
-        self.assertEqual(queue.calls, [])          # modo inline: no envía mientras esté pausado
+        self.assertTrue(res.get("captured"))
+        self.assertEqual(queue.calls, [])          # no envía mientras el ENVÍO esté apagado
+
+    def test_envio_auto_usa_lista_seleccionada_por_canal(self):
+        # Con el envío activo, la difusión del canal va SOLO a la lista elegida (auto_telegram_list).
+        queue = FakeQueue()
+        cfg = FakeConfig(telegram_lists=[{"name": "Auto", "ids": ["1", "3"]}], auto_telegram_list="Auto")
+        BroadcastList(FakeSubs(["1", "2", "3"]), queue, cfg)("A $100.000")
+        self.assertEqual(set(queue.calls[0][1]), {"1", "3"})  # "2" fuera (no está en la lista Auto)
 
     def test_excluye_ids(self):
         queue = FakeQueue()

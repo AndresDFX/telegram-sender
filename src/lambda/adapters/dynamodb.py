@@ -181,8 +181,13 @@ class DynamoDbConfigStore(ConfigStore):
         "telegram_target",
         "whatsapp_lists",
         "whatsapp_target",
+        # Lista existente que usa el ENVÍO AUTOMÁTICO del canal (por canal). Vacío = ese canal no
+        # difunde automáticamente (evita inundar a "todos" por error). El envío MANUAL no lo usa.
+        "auto_telegram_list",
+        "auto_whatsapp_list",
         # Anti-baneo / colas / ventana de envío (editable desde el panel).
-        "sending_enabled",  # interruptor maestro: si es False, NADA se envía (pausa total)
+        "capture_enabled",  # recopilación automática del canal (independiente del envío)
+        "sending_enabled",  # interruptor de ENVÍO automático (independiente de la captura)
         "batch_size",
         "scheduling_enabled",
         "tg_delay_min",
@@ -247,8 +252,12 @@ class DynamoDbConfigStore(ConfigStore):
             "telegram_target": {"mode": "all", "lists": []},
             "whatsapp_lists": [],
             "whatsapp_target": {"mode": "all", "lists": []},
+            # Lista para el ENVÍO AUTOMÁTICO del canal (por canal). Vacío = ese canal no auto-difunde.
+            "auto_telegram_list": "",
+            "auto_whatsapp_list": "",
             # --- Anti-baneo / colas / ventana ---
-            "sending_enabled": True,  # interruptor maestro de envíos (activar/desactivar)
+            "capture_enabled": True,  # recopilación automática del canal (separada del envío)
+            "sending_enabled": True,  # interruptor de ENVÍO automático (activar/desactivar)
             "batch_size": int(os.environ.get("BROADCAST_BATCH_SIZE", "150")),  # tope 150
             "scheduling_enabled": True,  # fraccionar y enviar 1 lote a la vez (secuencial)
             "tg_delay_min": float(os.environ.get("TG_DELAY_MIN", "1")),  # jitter Telegram (s)
@@ -288,7 +297,10 @@ class DynamoDbConfigStore(ConfigStore):
         # Anti-baneo / colas / ventana
         from domain.scheduling import cap_batch_size
 
+        cfg["capture_enabled"] = bool(cfg["capture_enabled"])
         cfg["sending_enabled"] = bool(cfg["sending_enabled"])
+        cfg["auto_telegram_list"] = str(cfg.get("auto_telegram_list") or "").strip()
+        cfg["auto_whatsapp_list"] = str(cfg.get("auto_whatsapp_list") or "").strip()
         cfg["batch_size"] = cap_batch_size(cfg["batch_size"])
         cfg["scheduling_enabled"] = bool(cfg["scheduling_enabled"])
         cfg["tg_delay_min"] = float(cfg["tg_delay_min"])
@@ -567,6 +579,9 @@ class DynamoDbBroadcastStore:
 
     @staticmethod
     def _estado(j: dict) -> str:
+        # Lista RECOPILADA pero NO enviada (envío automático apagado): estado propio, no es "enviado".
+        if str(j.get("source", "")) == "capture":
+            return "captured"
         chans = j.get("channels", []) or []
         tg_sent, tg_failed = int(j.get("tg_sent", 0)), int(j.get("tg_failed", 0))
         wa_sent, wa_failed = int(j.get("wa_sent", 0)), int(j.get("wa_failed", 0))

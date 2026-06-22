@@ -88,9 +88,12 @@ def _broadcast_list() -> BroadcastList:
     # El scheduler (planes en DynamoDB) solo aplica con SQS real (AWS); en inline (dev) se
     # envía de inmediato. Así el envío fraccionado/secuencial no depende de tablas en local.
     plans = build_plan_store() if config.broadcast_queue_url() else None
+    # PREVIEW a Mensajes Guardados de las listas capturadas con el envío apagado: solo en userbot
+    # (el userbot puede enviarse a sí mismo, "me"); en modo bot no aplica. Conexión perezosa.
+    preview = _sender(cfg) if _es_userbot(cfg) else None
     return BroadcastList(
         recipients, queue, store, whatsapp=whatsapp, image_store=S3ImageStore(),
-        broadcasts=build_broadcast_store(), plans=plans,
+        broadcasts=build_broadcast_store(), plans=plans, preview_sender=preview,
     )
 
 
