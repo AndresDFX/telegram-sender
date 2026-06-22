@@ -348,6 +348,16 @@ Lista accionable para no repetir fallos:
 - Sin CORS explícito en el panel.
 - `/api/auth/forgot|reset` son públicos (con anti-fuerza-bruta local).
 
+### Hardening de backend pendiente (bug-hunt "otros errores", baja prioridad)
+
+Tras la ronda de revisión se cerraron todas las altas y la mayoría de medias/bajas (commits `fix(backend) Batch 4..10` / `fix(whatsapp-service) Batch 5`). Quedan, por bajo impacto o por tocar flujos sensibles no testeables aquí:
+
+- **M22 / B11 (sesión Baileys, `whatsapp-service/src/dynamoAuth.js`):** `keys.set` persiste par a par sin atomicidad y `clearAll` borra ítem por ítem en serie (Scan+Delete) sin BatchWrite/reintento → un fallo parcial deja la sesión inconsistente. Solo se ejercita al vincular/`/reset` (raro). Fix: `BatchWriteItem(25)` con reintento de `UnprocessedItems` y no marcar `clearOnStart` consumido si el borrado no terminó.
+- **B12 (`/pair`, linking):** tras el timeout de 20s devuelve 504 pero el `requestPairingCode` pendiente puede generar un código sobre el socket viejo y el `restart()` corre sin `await`. Solo afecta el flujo de vinculación. Fix: `clearTimeout` del pairing pendiente + `await restart()`.
+- **B15 (perf captura):** el preview a Mensajes Guardados conecta/desconecta Telethon UNA vez por post capturado en una misma corrida del poller → riesgo de FloodWait si se capturan muchos a la vez. Fix: reutilizar una conexión por corrida.
+- **B18 (cosmético):** `registrar_error` es last-writer-wins para `last_error` (el set `error_reasons` sí conserva todas las razones).
+- **B9:** ya mitigado — `preview_sender` solo se construye en userbot y con conexión perezosa (no conecta al instanciar).
+
 ---
 
 ## Checklist de handoff
