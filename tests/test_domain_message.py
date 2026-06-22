@@ -120,5 +120,15 @@ class TelefonoTests(unittest.TestCase):
         self.assertIn("A06 4-64GB $374.000", out)
 
 
+class ComponerVacioTests(unittest.TestCase):
+    def test_solo_ubicacion_no_difunde_solo_footer(self):
+        # M4: si la limpieza vacía el cuerpo, devolver "" (no "solo footer", que sería spam).
+        out = componer_mensaje("IPRO PARTS\nUBICADOS EN EL C.C", footer="📲 Pedidos: +57 300", markup_percentage=15)
+        self.assertEqual(out, "")
+
+    def test_texto_vacio_da_vacio(self):
+        self.assertEqual(componer_mensaje("   \n\n  ", footer="X"), "")
+
+
 if __name__ == "__main__":
     unittest.main()

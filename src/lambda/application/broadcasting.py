@@ -252,6 +252,11 @@ class BroadcastList:
             strip_patterns=cfg["strip_patterns"],
             footer=cfg["whatsapp_footer"],
         )
+        # M4: un post del canal que tras la limpieza queda vacío (solo era ubicación/branding) NO se
+        # captura ni difunde — evita "enviar" un mensaje vacío o solo-footer a los contactos.
+        if not mensaje.strip():
+            logger.info("Post del canal sin contenido tras la limpieza; no se captura ni difunde")
+            return {"skipped": "vacio"}
         # RECOPILACIÓN ≠ ENVÍO. Si el ENVÍO automático está apagado (sending_enabled=False) solo se
         # RECOPILA: se registra la lista (visible en el panel como "capturado") y se previsualiza en
         # tus Mensajes Guardados. NO se difunde, NO se crea plan, NO se reenvía a WhatsApp. Activar el

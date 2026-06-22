@@ -101,7 +101,9 @@ class TelethonUserSender(_TelethonBase, MessageSender):
 
         import requests
 
-        data = requests.get(image_url, timeout=20).content
+        resp = requests.get(image_url, timeout=20)
+        resp.raise_for_status()   # M13: no enviar una página de error 404/403 como si fuera la foto
+        data = resp.content
 
         def _enviar():
             # BytesIO CON nombre+extensión => Telegram lo trata como FOTO (no como documento
@@ -157,11 +159,9 @@ class TelethonAccount(_TelethonBase):
             }
         finally:
             # El verificador se llama en un poll (60s): cerramos la conexión para no acumularlas
-            # en contenedores Lambda calientes (cada request crea una instancia nueva).
-            try:
-                c.disconnect()
-            except Exception:
-                pass
+            # en contenedores Lambda calientes. M11: usar desconectar() (resetea self._client) para
+            # que una reutilización del contenedor no use un cliente ya desconectado (muerto).
+            self.desconectar()
 
 
 class ContactRecipients:

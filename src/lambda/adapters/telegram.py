@@ -73,6 +73,18 @@ class TelegramSender(MessageSender):
                 self._sleep(min(2 ** (attempt - 1), _MAX_BACKOFF))
                 continue
 
+            # M12: 400 PERMANENTE (destinatario inválido/inalcanzable) = bloqueado, NO error transitorio.
+            # Si se lanzara, el lote fallaría y SQS lo reentregaría en bucle hasta la DLQ por unos pocos
+            # destinatarios muertos. Se tratan como 'blocked' (se marcan inactivos y el lote avanza).
+            if status == 400:
+                desc = str(data.get("description", "")).lower()
+                if any(s in desc for s in (
+                    "chat not found", "user is deactivated", "peer_id_invalid", "user not found",
+                    "chat_id is empty", "group chat was upgraded", "bot can't initiate conversation",
+                )):
+                    logger.warning("Destinatario %s no entregable (%s); marcado bloqueado", chat_id, desc)
+                    return SendResult(ok=False, blocked=True)
+
             response.raise_for_status()
             if not data.get("ok"):
                 raise RuntimeError(f"Telegram API error: {data}")

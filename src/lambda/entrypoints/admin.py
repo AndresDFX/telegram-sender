@@ -166,6 +166,11 @@ def _auth_bloqueado() -> bool:
 def _auth_fallo() -> None:
     # M16: NO dormir el handler (bloquea el worker Lambda y se factura). El freno real es el
     # lock 'locked_until' (devuelve 429 sin procesar) + el throttling de API Gateway.
+    # M26: si el cooldown anterior YA expiró, reiniciar el contador (si no, un solo fallo posterior
+    # re-bloquearía 5 min porque 'fails' seguía en 5).
+    if _AUTH["locked_until"] and _AUTH["locked_until"] <= time.time():
+        _AUTH["fails"] = 0
+        _AUTH["locked_until"] = 0.0
     _AUTH["fails"] += 1
     if _AUTH["fails"] >= _AUTH_MAX_FAILS:
         _AUTH["locked_until"] = time.time() + _AUTH_LOCK_SECS

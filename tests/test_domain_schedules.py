@@ -68,6 +68,12 @@ class WeeklyTests(unittest.TestCase):
     def test_hora_invalida_es_none(self):
         self.assertIsNone(proximo_run("daily", "99:99", None, 0, LUN_0000))
 
+    def test_dias_malformados_no_revientan(self):
+        # M2: días no numéricos antes lanzaban ValueError; ahora se ignoran (None si no queda ninguno).
+        self.assertIsNone(proximo_run("weekly", "09:00", ["lunes", None, "x"], 0, LUN_0000))
+        # con un día válido mezclado, sigue funcionando
+        self.assertEqual(proximo_run("weekly", "09:00", ["x", 0], 0, LUN_0000), LUN_0000 + 9 * H)
+
 
 if __name__ == "__main__":
     unittest.main()

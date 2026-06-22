@@ -695,10 +695,11 @@ class DynamoDbBroadcastStore:
         self._t().delete_item(Key={"id": broadcast_id})
 
     def borrar_terminados(self) -> int:
-        """Borra todos los envíos ya terminados (estado != queued/sending). Devuelve cuántos."""
+        """Borra los envíos terminados (estado != queued/sending). NO toca los CAPTURADOS (M27):
+        son justo lo que el modo captura quiere conservar para verlos; se borran a mano si se quiere."""
         n = 0
         for j in self._scan_todo():
-            if self._estado(j) not in ("queued", "sending"):
+            if self._estado(j) not in ("queued", "sending", "captured"):
                 try:
                     self._t().delete_item(Key={"id": j.get("id")})
                     n += 1

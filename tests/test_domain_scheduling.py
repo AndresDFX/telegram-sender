@@ -82,5 +82,18 @@ class DelayTests(unittest.TestCase):
         self.assertEqual(delay_aleatorio(1, 4, rng=lambda a, b: a), 1)
 
 
+class CapBatchNoFiniteTests(unittest.TestCase):
+    def test_inf_nan_no_revientan(self):  # A1: int(float('inf')) lanzaba OverflowError
+        for v in ("inf", "1e400", "nan", "Infinity", "-inf"):
+            self.assertEqual(cap_batch_size(v), 150)
+
+
+class VentanaHoraInvalidaTests(unittest.TestCase):
+    def test_minutos_invalidos_no_se_reinterpretan(self):
+        # M1: "08:90" antes daba 9:30 (570 min); ahora es inválido -> fallback (start=00:00).
+        # Con start inválido (->00:00) y end 20:00, las 06:00 caen DENTRO (antes caían fuera con 08:00).
+        self.assertTrue(ventana_abierta(6 * H, enabled=True, start="08:90", end="20:00", tz_offset_min=0))
+
+
 if __name__ == "__main__":
     unittest.main()

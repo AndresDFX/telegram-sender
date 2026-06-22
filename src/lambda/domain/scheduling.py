@@ -6,6 +6,7 @@ Sin dependencias de infraestructura para poder probarlas de forma aislada. El di
 
 from __future__ import annotations
 
+import math
 import random
 
 # Tope duro de contactos por lote (editable a la baja desde el panel, nunca por encima).
@@ -15,10 +16,12 @@ BATCH_MAX = 150
 def cap_batch_size(value, maximo: int = BATCH_MAX) -> int:
     """Normaliza el tamaño de lote al rango [1, maximo]. Default = maximo si es inválido."""
     try:
-        n = int(float(value))
+        n = float(value)
     except (TypeError, ValueError):
         return maximo
-    return max(1, min(n, maximo))
+    if not math.isfinite(n):   # A1: 'inf'/'1e400'/'nan' no deben reventar (int(inf) lanza OverflowError)
+        return maximo
+    return max(1, min(int(n), maximo))
 
 
 def total_lotes(total: int, batch_size: int) -> int:
@@ -32,9 +35,9 @@ def total_lotes(total: int, batch_size: int) -> int:
 def _hhmm_a_minutos(texto: str, fallback: int) -> int:
     try:
         h, m = str(texto).strip().split(":")
-        mins = int(h) * 60 + int(m)
-        if 0 <= mins <= 24 * 60:
-            return mins
+        h, m = int(h), int(m)
+        if 0 <= h <= 23 and 0 <= m <= 59:   # M1: rechazar minutos/horas fuera de rango (antes "08:90" pasaba)
+            return h * 60 + m
     except (ValueError, AttributeError):
         pass
     return fallback

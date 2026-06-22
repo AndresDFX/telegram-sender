@@ -54,7 +54,15 @@ def proximo_run(tipo: str, at: str, dias, tz_off_min: int, desde_epoch: int) -> 
             cand += timedelta(days=1)
         return _epoch(cand, tz_off_min)
     if tipo == WEEKLY:
-        dset = sorted({int(d) for d in (dias or []) if 0 <= int(d) <= 6})
+        dias_ok = set()
+        for d in (dias or []):
+            try:                       # M2: un día malformado devuelve None (no lanza), como documenta
+                n = int(d)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= n <= 6:
+                dias_ok.add(n)
+        dset = sorted(dias_ok)
         if not dset:
             return None
         for add in range(0, 8):  # hoy .. +7 días: garantiza encontrar el próximo día válido

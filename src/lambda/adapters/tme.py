@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import html
+import logging
 import re
 import urllib.request
 
 from application.ports import ChannelReader
 from domain.models import Post
+
+logger = logging.getLogger(__name__)
 
 _DATA_POST = re.compile(r'data-post="[^"/]+/(\d+)"')
 _MSG_TEXT = re.compile(r'<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', re.S)
@@ -48,4 +51,10 @@ class TmePreviewChannelReader(ChannelReader):
         return posts
 
     def leer_publicaciones(self, channel: str) -> list[Post]:
-        return self.parse(self._fetch(channel))
+        # M14: un 404/429/5xx del preview o un fallo de red NO debe reventar el poll;
+        # se devuelve vacío y se reintenta en el próximo ciclo del cron.
+        try:
+            return self.parse(self._fetch(channel))
+        except Exception:
+            logger.exception("No se pudo leer el preview de %s; sin publicaciones este ciclo", channel)
+            return []

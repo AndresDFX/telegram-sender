@@ -86,6 +86,10 @@ def componer_mensaje(
     limpio = quitar_lineas(texto, strip_patterns)
     limpio = quitar_lineas(limpio, DEFAULT_PHONE_PATTERNS)  # quita líneas con teléfono CO (siempre)
     con_markup = aplicar_markup(limpio, markup_percentage, currency_symbols=currency_symbols)
+    # M4: si la limpieza dejó el cuerpo vacío, NO componer (devolver solo el footer sería spam);
+    # el llamador (captura del canal) salta los mensajes vacíos.
+    if not con_markup.strip():
+        return ""
     if footer:
         con_markup = f"{con_markup}\n\n{footer}"
     return con_markup

@@ -41,6 +41,11 @@ def _refresh_contacts() -> None:
         config_store.set_contacts(fuente.listar())
     except Exception:
         logger.exception("No se pudo refrescar el caché de contactos")
+    finally:
+        try:
+            fuente.desconectar()  # M17: no dejar la conexión Telethon (GetContacts) abierta cada invoke
+        except Exception:
+            pass
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
