@@ -59,6 +59,33 @@ class EstadoTests(unittest.TestCase):
         self.assertEqual(E(job(channels=["telegram"], tg_total=5, tg_failed=5, tg_sent=0)), "failed")
 
 
+class BorrarTerminadosTests(unittest.TestCase):
+    def _store(self, jobs):
+        store = DynamoDbBroadcastStore.__new__(DynamoDbBroadcastStore)
+        store._scan_todo = lambda: jobs
+        borrados = []
+
+        class _T:
+            def delete_item(self, Key):
+                borrados.append(Key["id"])
+
+        store._t = lambda: _T()
+        return store, borrados
+
+    def test_m8_no_borra_job_de_plan_activo(self):
+        import time
+        viejo = int(time.time()) - DynamoDbBroadcastStore._EDAD_TERMINAL - 100
+        # Job incompleto y viejo → _estado lo daría 'partial' (terminal por EDAD) → borrable...
+        store, borrados = self._store([job(id="b1", tg_total=10, tg_sent=3, created_at=viejo)])
+        # ...pero su plan sigue EN VUELO (excluir_ids) → NO se borra (M8).
+        self.assertEqual(store.borrar_terminados(excluir_ids=["b1"]), 0)
+        self.assertEqual(borrados, [])
+        # Sin excluir, el mismo job sí se borra (comportamiento normal de limpieza).
+        store2, borrados2 = self._store([job(id="b1", tg_total=10, tg_sent=3, created_at=viejo)])
+        self.assertEqual(store2.borrar_terminados(), 1)
+        self.assertEqual(borrados2, ["b1"])
+
+
 class MetricasTests(unittest.TestCase):
     def test_agrega_enviados_fallidos_y_tasa(self):
         import time as _t

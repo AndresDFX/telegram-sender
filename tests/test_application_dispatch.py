@@ -41,7 +41,7 @@ class FakePlans:
     def ids_lote_tg(self, pid, idx):
         return [f"tg{idx}-{i}" for i in range(150 if idx == 0 else 150)]
 
-    def registrar_dispatch(self, plan_id, *, channel, index, n, target, now):
+    def registrar_dispatch(self, plan_id, *, channel, index, n, target, now, prev_log=None):
         if not self.claim:
             return False  # cancelado en carrera: el dispatcher debe abortar sin encolar
         self.dispatched.append({"ch": channel, "idx": index, "n": n, "target": target, "now": now})
@@ -171,11 +171,34 @@ class DispatchTests(unittest.TestCase):
 
     def test_lote_estancado_se_libera_por_timeout(self):
         plans = FakePlans(_plan(status="running", in_flight="TG#0", in_flight_channel="tg",
-                                in_flight_target=150, in_flight_at=0, tg_next=1, tg_dispatched=150))
+                                in_flight_target=150, in_flight_at=1, tg_next=1, tg_dispatched=150))
         bc = FakeBroadcasts({"tg": 10, "wa": 0})  # no llegó al target pero...
-        res = _disp(plans, broadcasts=bc, now=2000, stale=900)()  # 2000-0 > 900 -> estancado
+        res = _disp(plans, broadcasts=bc, now=2000, stale=900)()  # 2000-1 > 900 -> estancado
         self.assertEqual(plans.cleared, 1)
         self.assertEqual(res["despachado"], "TG#1")
+
+    def test_b17_inflight_at_cero_no_se_abandona(self):
+        # B17: in_flight_at==0 (escritura parcial/legacy) NO debe contar como antigüedad gigante y
+        # abandonar un lote recién reclamado; se espera (no se libera) hasta tener un timestamp real.
+        plans = FakePlans(_plan(status="running", in_flight="TG#0", in_flight_channel="tg",
+                                in_flight_target=150, in_flight_at=0, tg_next=1, tg_dispatched=150))
+        bc = FakeBroadcasts({"tg": 10, "wa": 0})
+        res = _disp(plans, broadcasts=bc, now=10**9, stale=900)()  # now enorme, pero in_flight_at=0
+        self.assertEqual(plans.cleared, 0)             # NO se abandona
+        self.assertEqual(res["esperando"], "TG#0")
+
+    def test_m29_estancado_registra_error(self):
+        # M29: al liberar un lote estancado se registra la causa en el job (no queda colgado sin motivo).
+        class Broad(FakeBroadcasts):
+            def __init__(self): super().__init__({"tg": 10, "wa": 0}); self.error=None
+            def registrar_error(self, bid, msg): self.error=msg
+        plans = FakePlans(_plan(status="running", in_flight="TG#0", in_flight_channel="tg",
+                                in_flight_target=150, in_flight_at=1, tg_next=1, tg_dispatched=150))
+        b = Broad()
+        _disp(plans, broadcasts=b, now=2000, stale=900)()
+        self.assertEqual(plans.cleared, 1)
+        self.assertIsNotNone(b.error)
+        self.assertIn("estancado", b.error)
 
     def test_ventana_cerrada_difiere(self):
         plans = FakePlans(_plan())
@@ -246,6 +269,19 @@ class DispatchTests(unittest.TestCase):
                                 wa_total=150, wa_batches=1, wa_image_url="https://stale/x", wa_image_key="images/x.jpg"))
         _disp(plans, wa=Wa(), image_store=IS())()
         self.assertEqual(captured['url'], "https://fresh/images/x.jpg")
+
+    def test_b5_refirma_imagen_falla_no_despacha_y_reintenta(self):
+        # B5: si la re-firma de la imagen WA falla y hay wa_image_key, NO se despacha con la URL caduca
+        # ni se avanza el cursor; se reintenta el próximo tick (esperando_wa).
+        class ISBoom:
+            def url_temporal(self, key, expira=3600): raise RuntimeError("S3 caído")
+        wa = FakeWa()
+        plans = FakePlans(_plan(tg_next=2, tg_dispatched=300, wa_enabled=True, wa_resolved=True,
+                                wa_total=150, wa_batches=1, wa_image_url="https://stale/x", wa_image_key="images/x.jpg"))
+        res = _disp(plans, wa=wa, image_store=ISBoom())()
+        self.assertTrue(res.get("esperando_wa"))
+        self.assertEqual(wa.calls, [])             # NO se envió con URL caduca
+        self.assertEqual(plans.dispatched, [])     # cursor NO avanzó (se reintenta)
 
     def test_whatsapp_caido_no_bloquea_telegram(self):
         # Si WhatsApp no resuelve su total (servicio caído), Telegram debe salir igual (independencia).

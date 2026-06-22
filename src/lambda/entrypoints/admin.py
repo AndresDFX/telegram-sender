@@ -1021,7 +1021,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if sub == "/api/broadcasts/delete" and method == "POST":
             cuerpo = _body(event)
             if cuerpo.get("finished"):
-                n = broadcast_store.borrar_terminados()
+                # M8: excluye los jobs cuyo plan sigue EN VUELO (pending/running), para no borrar un
+                # envío fraccionado largo que _estado() daría por terminal solo por antigüedad.
+                try:
+                    activos = [p.get("broadcast_id") for p in plan_store.activos()]
+                except Exception:
+                    activos = []
+                n = broadcast_store.borrar_terminados(excluir_ids=activos)
                 _audit("broadcasts:borrar", f"terminados {n}")
                 return _json({"ok": True, "deleted": n})
             ids = cuerpo.get("ids")

@@ -704,11 +704,19 @@ class DynamoDbBroadcastStore:
         """Borra DEFINITIVAMENTE un envío de la tabla (no solo a nivel visual)."""
         self._t().delete_item(Key={"id": broadcast_id})
 
-    def borrar_terminados(self) -> int:
+    def borrar_terminados(self, excluir_ids=None) -> int:
         """Borra los envíos terminados (estado != queued/sending). NO toca los CAPTURADOS (M27):
-        son justo lo que el modo captura quiere conservar para verlos; se borran a mano si se quiere."""
+        son justo lo que el modo captura quiere conservar para verlos; se borran a mano si se quiere.
+
+        M8: ``excluir_ids`` son los broadcast_ids de planes que SIGUEN EN VUELO (pending/running)
+        según el PlanStore. No se borran aunque _estado() los crea terminal: el cálculo por edad
+        (_EDAD_TERMINAL) daría por terminal un envío fraccionado largo (>1h) que aún despacha, y
+        borrarlo perdería su tracking (los incrementos posteriores del worker fallarían en silencio)."""
+        excluir = {str(x) for x in (excluir_ids or [])}
         n = 0
         for j in self._scan_todo():
+            if str(j.get("id")) in excluir:
+                continue  # su plan sigue activo (fuente autoritativa): NO borrar
             if self._estado(j) not in ("queued", "sending", "captured"):
                 try:
                     self._t().delete_item(Key={"id": j.get("id")})
@@ -809,10 +817,13 @@ class DynamoDbPlanStore:
             "dispatch_log": [],
             "ttl": now + ttl_days * 86400,
         }
+        lote_ttl = now + ttl_days * 86400  # M7: mismo TTL que el meta para que expiren juntos
         with self._t().batch_writer() as bw:
             bw.put_item(Item=meta)
             for i, ids in enumerate(tg_lotes):
-                bw.put_item(Item={"pid": plan_id, "sk": self._tg_sk(i), "ids": list(ids), "n": len(ids)})
+                # M7: los items de lote llevan `ttl` (antes no): sin él DynamoDB nunca los expiraba y
+                # quedaban huérfanos para siempre tras caducar el meta (cada lote guarda hasta 150 ids).
+                bw.put_item(Item={"pid": plan_id, "sk": self._tg_sk(i), "ids": list(ids), "n": len(ids), "ttl": lote_ttl})
 
     def activos(self) -> list[dict]:
         """Planes PLAN pendientes/en curso, del más antiguo al más nuevo (orden de despacho)."""
@@ -837,13 +848,19 @@ class DynamoDbPlanStore:
         item = self._t().get_item(Key={"pid": plan_id, "sk": self._tg_sk(index)}).get("Item") or {}
         return [str(x) for x in item.get("ids", [])]
 
+    _LOG_MAX = 200  # M9: máximo de entradas de dispatch_log conservadas en el meta
+
     def registrar_dispatch(
-        self, plan_id: str, *, channel: str, index: int, n: int, target: int, now: int
+        self, plan_id: str, *, channel: str, index: int, n: int, target: int, now: int, prev_log=None
     ) -> bool:
         """Reclama un lote (avanza cursor, fija in_flight, añade bitácora) SI el plan sigue
         despachable. Condicional sobre status != 'canceled' para que un cancel concurrente
         SIEMPRE gane (no se puede 'resucitar' un plan cancelado). Devuelve True si reclamó,
-        False si el plan ya estaba cancelado (carrera con cancelar_pendientes)."""
+        False si el plan ya estaba cancelado (carrera con cancelar_pendientes).
+
+        ``prev_log``: bitácora actual del plan (la trae el caller). Si se pasa, dispatch_log se
+        ACOTA a las últimas _LOG_MAX entradas con un SET (M9); si es None, se hace list_append
+        sin cota (compatibilidad)."""
         from decimal import Decimal
 
         from botocore.exceptions import ClientError
@@ -857,14 +874,35 @@ class DynamoDbPlanStore:
             "n": int(n),
             "target": int(target),
         }
+        values = {
+            ":running": "running",
+            ":canceled": "canceled",
+            ":sk": f"{channel.upper()}#{index:06d}",
+            ":now": Decimal(int(now)),
+            ":ch": channel,
+            ":tgt": Decimal(int(target)),
+            ":nxt": Decimal(int(index) + 1),
+            ":curidx": Decimal(int(index)),
+            ":disp": Decimal(int(target)),
+        }
+        # M9: el lock optimista (cursor==index) serializa los claims del MISMO plan, así que prev_log
+        # (del plan que trae el caller) está fresco; usamos SET con la lista TRUNCADA en vez de
+        # list_append sin cota, para que el item meta no crezca hacia el límite de 400KB en planes
+        # con miles de lotes (que abortaría el UpdateItem condicional → despacho atascado) ni infle WCU.
+        if prev_log is not None:
+            log_expr = "dispatch_log = :log"
+            values[":log"] = (list(prev_log) + [entry])[-self._LOG_MAX:]
+        else:
+            log_expr = "dispatch_log = list_append(if_not_exists(dispatch_log, :empty), :entry)"
+            values[":empty"] = []
+            values[":entry"] = [entry]
         try:
             self._t().update_item(
                 Key={"pid": plan_id, "sk": self._META},
                 UpdateExpression=(
                     "SET #st = :running, in_flight = :sk, in_flight_at = :now, "
                     "in_flight_channel = :ch, in_flight_target = :tgt, "
-                    f"{cursor} = :nxt, {disp} = :disp, "
-                    "dispatch_log = list_append(if_not_exists(dispatch_log, :empty), :entry)"
+                    f"{cursor} = :nxt, {disp} = :disp, " + log_expr
                 ),
                 # LOCK OPTIMISTA anti-duplicado: solo reclama el índice si el cursor SIGUE en `index`.
                 # Si otra invocación concurrente del dispatcher (cron solapado / doble disparo de
@@ -872,19 +910,7 @@ class DynamoDbPlanStore:
                 # dos veces (que iría con batch_ids distintos y el dedup no lo frenaría).
                 ConditionExpression=f"attribute_exists(pid) AND #st <> :canceled AND {cursor} = :curidx",
                 ExpressionAttributeNames={"#st": "status"},
-                ExpressionAttributeValues={
-                    ":running": "running",
-                    ":canceled": "canceled",
-                    ":sk": f"{channel.upper()}#{index:06d}",
-                    ":now": Decimal(int(now)),
-                    ":ch": channel,
-                    ":tgt": Decimal(int(target)),
-                    ":nxt": Decimal(int(index) + 1),
-                    ":curidx": Decimal(int(index)),
-                    ":disp": Decimal(int(target)),
-                    ":empty": [],
-                    ":entry": [entry],
-                },
+                ExpressionAttributeValues=values,
             )
             return True
         except ClientError as error:

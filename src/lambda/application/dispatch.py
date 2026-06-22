@@ -83,12 +83,29 @@ class DispatchCampaigns:
         if in_flight:
             ch = plan.get("in_flight_channel") or ("tg" if in_flight.startswith("TG") else "wa")
             target = int(plan.get("in_flight_target", 0))
-            prog = self._broadcasts.progreso(bid) if bid else {"tg": target, "wa": target}
-            edad = now - int(plan.get("in_flight_at", 0))
+            # M5: sin bid NO hay forma de leer el progreso real; NO asumir 'completado' (antes prog se
+            # sustituía por {tg:target, wa:target} → el lote se daba por terminado al instante, rompiendo
+            # la secuencialidad 'un lote a la vez' y solapando lotes). Sin bid el progreso es desconocido
+            # (0): el lote queda pendiente hasta que lo libere el corte por estancamiento.
+            prog = self._broadcasts.progreso(bid) if bid else {}
+            in_flight_at = int(plan.get("in_flight_at", 0))
+            # B17: in_flight_at==0 (escritura parcial/legacy) NO debe contar como antigüedad gigante
+            # (now-0 ≈ now) y abandonar un lote recién reclamado; se exige in_flight_at>0 para el corte.
+            estancado = in_flight_at > 0 and (now - in_flight_at) > self._stale
             if prog.get(ch, 0) >= target:
                 self._plans.limpiar_inflight(pid)
-            elif edad > self._stale:
+            elif estancado:
+                edad = now - in_flight_at
                 logger.warning("Lote %s del plan %s estancado (%ss); libero el cursor", in_flight, pid, edad)
+                # M29: persistir la causa para que el job no quede colgado sin explicación (sin esto el
+                # cálculo por edad de _estado() lo cerraría como partial/failed pero sin motivo). NO se
+                # tocan los contadores del canal: un slice WA estancado no debe corromper el tracking de
+                # los slices que aún quedan por despachar.
+                if bid:
+                    try:
+                        self._broadcasts.registrar_error(bid, f"Lote {in_flight} estancado {edad}s; se libera y se continúa")
+                    except Exception:
+                        logger.exception("No se pudo registrar el lote estancado del plan %s", pid)
                 self._plans.limpiar_inflight(pid)
             else:
                 return {"plan": pid, "esperando": in_flight, "progreso": prog.get(ch, 0), "target": target}
@@ -114,7 +131,7 @@ class DispatchCampaigns:
             ids = self._plans.ids_lote_tg(pid, tg_next)
             target = int(plan.get("tg_dispatched", 0)) + len(ids)
             # Reclama el lote ANTES de encolar: si un cancel concurrente ganó, no se envía.
-            if not self._plans.registrar_dispatch(pid, channel="tg", index=tg_next, n=len(ids), target=target, now=now):
+            if not self._plans.registrar_dispatch(pid, channel="tg", index=tg_next, n=len(ids), target=target, now=now, prev_log=plan.get("dispatch_log", [])):
                 logger.info("Plan %s cancelado en carrera; no se despacha TG#%d", pid, tg_next)
                 return {"plan": pid, "cancelado": True}
             try:
@@ -171,18 +188,27 @@ class DispatchCampaigns:
                 wa_total = int(plan.get("wa_total", 0))
                 limit = max(0, min(bs, wa_total - offset))
                 target = int(plan.get("wa_dispatched", 0)) + limit
-                # Reclama el lote ANTES de llamar al servicio: si se canceló en carrera, no se envía.
-                if not self._plans.registrar_dispatch(pid, channel="wa", index=wa_next, n=limit, target=target, now=now):
-                    logger.info("Plan %s cancelado en carrera; no se despacha WA#%d", pid, wa_next)
-                    return {"plan": pid, "cancelado": True}
-                # RE-FIRMA la URL de imagen desde su clave S3 (la prefirmada del plan pudo caducar).
+                # B5: RE-FIRMA la URL de imagen desde su clave S3 ANTES de reclamar el lote (la
+                # prefirmada del plan pudo caducar). Si la firma falla y HAY wa_image_key, NO se continúa
+                # con la URL potencialmente caduca (daría "imagen no disponible") ni se avanza el cursor:
+                # se reintenta la firma en el próximo tick. Distingue 'sin imagen' de 'imagen no firmable'.
                 wa_img = plan.get("wa_image_url") or None
                 wa_key = plan.get("wa_image_key")
                 if wa_key and self._image_store:
                     try:
                         wa_img = self._image_store.url_temporal(wa_key)
                     except Exception:
-                        logger.exception("No se pudo re-firmar la imagen WhatsApp del plan %s", pid)
+                        logger.exception("No se pudo re-firmar la imagen WhatsApp del plan %s; reintento luego", pid)
+                        if bid:
+                            try:
+                                self._broadcasts.registrar_error(bid, "WhatsApp — no se pudo re-firmar la imagen; se reintenta el próximo tick")
+                            except Exception:
+                                pass
+                        return {"plan": pid, "esperando_wa": True}
+                # Reclama el lote ANTES de llamar al servicio: si se canceló en carrera, no se envía.
+                if not self._plans.registrar_dispatch(pid, channel="wa", index=wa_next, n=limit, target=target, now=now, prev_log=plan.get("dispatch_log", [])):
+                    logger.info("Plan %s cancelado en carrera; no se despacha WA#%d", pid, wa_next)
+                    return {"plan": pid, "cancelado": True}
                 try:
                     res = self._whatsapp.forward(
                         plan.get("wa_text", "") or plan.get("text", ""),
