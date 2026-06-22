@@ -2438,7 +2438,7 @@ const $ = id => document.getElementById(id);
 // en diálogos de texto plano (confirmModal/alert/toast) se mantienen los emojis ✈️/🟢.
 const ICO_TG = '<svg class="ico"><use href="#i-tg"></use></svg>';
 const ICO_WA = '<svg class="ico"><use href="#i-wa"></use></svg>';
-let CRED = sessionStorage.getItem('cred') || '';
+let CRED = '';  // M17: la credencial vive SOLO en memoria (no se persiste). Recargar => re-login.
 function hdr(extra){ return Object.assign({Authorization:'Basic '+CRED}, extra||{}); }
 async function api(p, opt){ opt=opt||{}; opt.headers=hdr(opt.headers); const r=await fetch(BASE+p,opt);
   if(r.status===401){ logout(); throw new Error('401'); }
@@ -2477,7 +2477,6 @@ function skelTable(id,cols,rows){ const t=$(id); if(!t) return; const r=rows||4,
 async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':'+p);
   try{ const r=await fetch(BASE+'/api/me',{headers:hdr()});
     if(!r.ok){ const j=await r.json().catch(()=>({})); const er=new Error(j.error||''); er.status=r.status; throw er; }
-    sessionStorage.setItem('cred',CRED); sessionStorage.setItem('cred_ts',String(Date.now()));
     $('login').style.display='none'; $('app').style.display='block'; $('who').textContent=u; boot(); }
   catch(e){ CRED='';
     $('lerr').textContent = (e&&e.status===429&&e.message) ? e.message : 'Usuario o contraseña incorrectos (tras varios intentos se bloquea unos minutos)'; } }
@@ -2729,10 +2728,12 @@ async function saveSched(){
     wa_window_enabled:ww, wa_window_start:was||'08:00', wa_window_end:wae||'20:00' };
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); toast('✓ Guardado'); loadCfg(); }
   catch(e){ toast('Error al guardar',true); } }
-async function saveWhatsapp(){ const b={ whatsapp_enabled:$('whatsapp_enabled').checked, whatsapp_service_url:$('whatsapp_service_url').value };
+async function saveWhatsapp(){ const b={ whatsapp_enabled:$('whatsapp_enabled').checked, whatsapp_service_url:($('whatsapp_service_url').value||'').trim() };
    const tok=$('whatsapp_token').value; if(tok) b.whatsapp_token=tok;
+   // B9: no activar el reenvío sin URL del servicio (quedaría "activado" pero inoperativo).
+   if(b.whatsapp_enabled && !b.whatsapp_service_url){ toast('Pon la URL del servicio de WhatsApp antes de activar el reenvío',true); return; }
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
-    toast('✓ WhatsApp guardado'); $('whatsapp_token').value=''; loadCfg(); } catch(e){ toast('Error',true); } }
+    toast('✓ WhatsApp guardado'); $('whatsapp_token').value=''; loadCfg(); } catch(e){ toast(e.message||'No se pudo guardar WhatsApp',true); } }
 async function waStatus(showQr){ $('wa_state').textContent='consultando...';
   try{ const s=await api('/api/whatsapp/status');
     let txt = s.connected ? ('conectado ✓ ('+(s.contacts||0)+' contactos)') : 'no conectado';
@@ -2752,7 +2753,7 @@ async function saveAccount(){ const b={ send_mode:$('send_mode').value, telethon
    telethon_api_hash:$('telethon_api_hash').value, telethon_session:$('telethon_session').value };
   const bt=$('bot_token').value.trim(); if(bt) b.bot_token=bt;
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
-    toast('✓ Cuenta guardada'); $('telethon_session').value=''; $('bot_token').value=''; loadCfg(); loadSubs(); } catch(e){ toast('Error',true); } }
+    toast('✓ Cuenta guardada'); $('telethon_session').value=''; $('bot_token').value=''; loadCfg(); loadSubs(); } catch(e){ toast(e.message||'No se pudo guardar la cuenta de Telegram',true); } }
 async function tlSendCode(){
   const phone=$('tl_phone').value.trim(); if(!phone){ toast('Ingresa el número de teléfono',true); return; }
   $('tl_send').disabled=true; toast('Enviando código…','info');
@@ -2842,12 +2843,12 @@ async function loadDlq(){
 }
 async function dlqRedrive(){
   if(!await confirmModal('¿Reintentar todos los fallidos? Volverán a la cola para procesarse.',{okText:'Reintentar'})) return;
-  try{ await api('/api/dlq/redrive',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ Reintento iniciado'); setTimeout(loadDlq,1500); }
-  catch(e){ toast('Error al reintentar',true); }
+  try{ await api('/api/dlq/redrive',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ Reintento iniciado'); setTimeout(()=>{ loadDlq(); loadQueue(); if($('k_dlq')) loadDashboard(); },1500); }  // M21: refresca cola + KPI
+  catch(e){ toast(e.message||'No se pudo reintentar (¿ya hay un reintento en curso?)',true); }
 }
 async function dlqPurge(){
   if(!await confirmModal('¿Descartar TODOS los mensajes fallidos? No se podrán recuperar.',{danger:true,okText:'Descartar'})) return;
-  try{ await api('/api/dlq/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ DLQ descartada'); setTimeout(loadDlq,1500); }
+  try{ await api('/api/dlq/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ DLQ descartada'); setTimeout(()=>{ loadDlq(); loadQueue(); if($('k_dlq')) loadDashboard(); },1500); }  // M21
   catch(e){ toast('Error al descartar',true); }
 }
 // --- Opt-out WhatsApp: contactos auto-excluidos por fallos ---
@@ -3062,12 +3063,15 @@ function addList(ch){ const inp=$(ch==='telegram'?'tg_newlist':'wa_newlist'); co
   if(LISTS[ch].some(l=>l.name===n)){ toast('Ya existe una lista con ese nombre',true); return; }
   LISTS[ch].push({name:n,ids:[]}); inp.value=''; renderLists(ch); }
 async function delList(ch,i){ const n=LISTS[ch][i].name; if(!await confirmModal('¿Borrar la lista "'+n+'"?',{danger:true,okText:'Borrar'}))return;
-  LISTS[ch].splice(i,1); TGT[ch].lists=(TGT[ch].lists||[]).filter(x=>x!==n); renderLists(ch); }
-function toggleListActive(ch,i,v){ const n=LISTS[ch][i].name; const s=new Set(TGT[ch].lists||[]); v?s.add(n):s.delete(n); TGT[ch].lists=[...s]; }
+  LISTS[ch].splice(i,1); TGT[ch].lists=(TGT[ch].lists||[]).filter(x=>x!==n); renderLists(ch);
+  // M6: si la lista borrada era la del envío automático, limpiar ese campo (no dejarlo apuntando a nada).
+  const asel=$('auto_'+ch+'_list'); if(asel && asel.value===n){ asel.value=''; try{ await saveAutoList(); }catch(e){} }
+  await saveLists(ch); }  // A2: persistir de inmediato
+function toggleListActive(ch,i,v){ const n=LISTS[ch][i].name; const s=new Set(TGT[ch].lists||[]); v?s.add(n):s.delete(n); TGT[ch].lists=[...s]; saveLists(ch); }  // A2
 function addToList(ch,i){ const ids=selForChannel(ch); if(!ids.length){ toast('Marca contactos primero',true); return; }
-  LISTS[ch][i].ids=[...new Set([...LISTS[ch][i].ids.map(String),...ids])]; renderLists(ch); toast('✓ '+ids.length+' añadidos a '+LISTS[ch][i].name); }
+  LISTS[ch][i].ids=[...new Set([...LISTS[ch][i].ids.map(String),...ids])]; renderLists(ch); saveLists(ch); }  // A2: persiste (saveLists avisa)
 function removeFromList(ch,i){ const ids=new Set(selForChannel(ch)); if(!ids.size){ toast('Marca contactos primero',true); return; }
-  LISTS[ch][i].ids=LISTS[ch][i].ids.filter(x=>!ids.has(String(x))); renderLists(ch); toast('✓ quitados de '+LISTS[ch][i].name); }
+  LISTS[ch][i].ids=LISTS[ch][i].ids.filter(x=>!ids.has(String(x))); renderLists(ch); saveLists(ch); }  // A2
 function curMode(ch){ const r=document.querySelector(`input[name=mode_${ch}]:checked`); return r?r.value:'all'; }
 async function saveLists(ch){ TGT[ch].mode=curMode(ch);
   const body=ch==='telegram'?{telegram_lists:LISTS.telegram,telegram_target:TGT.telegram}:{whatsapp_lists:LISTS.whatsapp,whatsapp_target:TGT.whatsapp};
@@ -3201,6 +3205,8 @@ function a11yEnhance(){ try{
   document.querySelectorAll('label:not([for])').forEach(l=>{ if(l.querySelector('input,select,textarea')) return; const n=l.nextElementSibling; if(n && /^(INPUT|SELECT|TEXTAREA)$/.test(n.tagName) && n.id) l.htmlFor=n.id; });  // M28
   ['tl_status','fp_status','cp_status','mail_save_status','bc_status','sg_status','wa_reset_out','wa_state','tg_state','sess_status','bot_status','mail_status'].forEach(id=>{ const e=$(id); if(e && !e.getAttribute('aria-live')) e.setAttribute('aria-live','polite'); });  // M30
   const m=document.querySelector('main'); if(m && !$('page_h1')){ const h=document.createElement('h1'); h.id='page_h1'; h.className='sr-only'; h.textContent='Panel'; m.insertBefore(h,m.firstChild); }  // B22
+  // M4: el modo de envío (Todos/Solo/Excepto) se persiste al cambiarlo (antes solo con "Guardar listas").
+  ['telegram','whatsapp'].forEach(ch=>document.querySelectorAll('input[name=mode_'+ch+']').forEach(r=>r.addEventListener('change',()=>saveLists(ch))));
 }catch(e){} }
 function boot(){ a11yEnhance(); showTab((()=>{try{const s=localStorage.getItem('tab');return ['inicio','fuentes','envios','ajustes'].includes(s)?s:'inicio'}catch(e){return 'inicio'}})()); loadMe(); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
 if(CRED && !sessionFresca()){ logout(); }
@@ -3286,7 +3292,8 @@ async function bcPrev(){
 function bcEffectiveUrl(){ return ($('bc_image_url').value || '').trim() || BC_IMG_URL || ''; }
 function bcPreview(){
   const u=bcEffectiveUrl(), p=$('bc_imgprev');
-  if(u){ p.src=u; p.style.display='block'; } else { p.style.display='none'; p.removeAttribute('src'); }
+  if(u){ p.onerror=()=>{ p.style.display='none'; toast('No se pudo cargar la imagen de esa URL',true); };  // B2: URL rota no deja un <img> roto
+    p.src=u; p.style.display='block'; } else { p.onerror=null; p.style.display='none'; p.removeAttribute('src'); }
 }
 async function bcUploadImg(){
   const f=$('bc_imgfile').files[0]; if(!f) return;
