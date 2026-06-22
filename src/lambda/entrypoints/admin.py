@@ -1070,10 +1070,12 @@ _PAGE = r"""<!doctype html><html lang="es" data-theme="dark"><head><meta charset
 <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><defs><linearGradient id='f' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%23FD531E'/><stop offset='1' stop-color='%23FD9E76'/></linearGradient></defs><rect width='48' height='48' rx='12' fill='url(%23f)'/><g fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='M21 24c5 0 5.5-9 11.5-9'/><path d='M21 24h11.5'/><path d='M21 24c5 0 5.5 9 11.5 9'/></g><circle cx='15' cy='24' r='4.2' fill='%23fff'/><circle cx='33.5' cy='15' r='3' fill='%23fff'/><circle cx='34.5' cy='24' r='3' fill='%23fff'/><circle cx='33.5' cy='33' r='3' fill='%23fff'/></svg>">
 <meta name="theme-color" content="#FD531E">
 <style>
-/* === DESIGN SYSTEM TOKENS (Replica) — fuente: docs/design-system/tokens.css === */
-/* Replica Design System — Tokens de diseño
-   Primario: #FD531E · Neutro base: #4A4A49
-   Generado automaticamente. Editar aqui es la fuente de verdad de los valores. */
+/* === DESIGN SYSTEM TOKENS (Replica) ===
+   ⚠️ OJO (consolidación): el :root de ABAJO (--color-*, escala gris fría, tema claro/oscuro y
+   @media prefers-color-scheme) es un set "de referencia" que el panel HOY **NO usa**: la UI real
+   se pinta con el :root de RUNTIME (más abajo, el de --bg/--ac/--r... dark-only, marca Replica naranja).
+   Para CAMBIAR EL ASPECTO edita el :root de RUNTIME, no este. Este bloque queda como base por si se
+   reactiva el tema dual. (La fuente de verdad de marca documental es docs/brand/integratech/tokens.css.) */
 
 :root {
   /* ============================================================
@@ -1318,6 +1320,7 @@ _PAGE = r"""<!doctype html><html lang="es" data-theme="dark"><head><meta charset
   --tx:#FBFAF9; --tx2:#E4E1DB; --mut:#A39D93; --mut2:#787269;
   --ac:#FD531E; --ac-h:#FF6A3C; --ac2:#FF9166;
   --ok:#34d399; --warn:#fbbf24; --bad:#fb7185; --info:#60a5fa;
+  --danger:#DC362E; --danger-h:#C02B24;   /* B18: rojo destructivo tokenizado en el runtime (mismos hex) */
   --r:14px; --r-sm:10px;
   --sh:0 1px 0 rgba(255,255,255,.04) inset, 0 1px 2px rgba(0,0,0,.28), 0 24px 56px -28px rgba(0,0,0,.82);
   --glow:0 6px 22px -8px rgba(253,83,30,.55);
@@ -1466,8 +1469,8 @@ button.sec{background:#34322F;color:var(--tx2);border-color:var(--bd2)}
 button.sec:hover{background:#3F3D39;filter:none;box-shadow:none}
 button.ghost{background:transparent;border:1px solid var(--bd2);color:var(--mut)}
 button.ghost:hover{background:rgba(255,255,255,.05);color:var(--tx2);filter:none;box-shadow:none}
-button.danger{background:var(--color-danger);color:#fff;border-color:transparent}
-button.danger:hover{background:#C02B24;filter:none;box-shadow:0 6px 22px -8px rgba(192,43,36,.5)}
+button.danger{background:var(--danger);color:#fff;border-color:transparent}
+button.danger:hover{background:var(--danger-h);filter:none;box-shadow:0 6px 22px -8px rgba(192,43,36,.5)}
 
 /* ---------- markup widget ---------- */
 .markup{display:flex;align-items:center;gap:18px;background:var(--elev);border:1px solid var(--bd);border-radius:var(--r);padding:18px}
