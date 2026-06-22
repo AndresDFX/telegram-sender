@@ -2967,7 +2967,7 @@ async function loadDashboard(){
     if(de){ de.className='callout '+(on?'ok':'warn'); const win=(en,a,b)=>en?(a+'–'+b):'24h';
       de.innerHTML='Envíos: <b>'+(on?'ACTIVOS':'PAUSADOS')+'</b> · '+ICO_TG+' '+win(c.tg_window_enabled,c.tg_window_start,c.tg_window_end)+' · '+ICO_WA+' '+win(c.wa_window_enabled,c.wa_window_start,c.wa_window_end)+' · WhatsApp '+(c.whatsapp_enabled?'activo':'desactivado')+' · lote '+(c.batch_size|0); }
     const s=(m.serie||[]).slice(-14); const max=Math.max(1,...s.map(d=>(d.sent|0)+(d.failed|0)));
-    if($('dash_serie')) $('dash_serie').innerHTML='<div class="hint" style="margin-top:0">Actividad (últimos '+s.length+' días con envíos)</div>'+
+    if($('dash_serie')) $('dash_serie').innerHTML='<div class="hint" style="margin-top:0">Días con actividad (de los últimos 30; cada barra es un día con envíos)</div>'+
       '<div style="display:flex;gap:3px;align-items:flex-end;height:56px;margin-top:6px">'+
       (s.length? s.map(d=>`<div title="${d.dia}: ${d.sent} enviados, ${d.failed} fallidos" style="flex:1;background:linear-gradient(180deg,var(--ac),var(--ac2));height:${Math.round(((d.sent|0)+(d.failed|0))/max*100)}%;min-height:2px;border-radius:3px 3px 0 0"></div>`).join('') : '<div class="hint">sin actividad aún</div>')+'</div>';
     try{ const last=((await api('/api/broadcasts')).broadcasts||[])[0];
@@ -3032,7 +3032,9 @@ function prevPage(){ PAGE--; render(); }
 function nextPage(){ PAGE++; render(); }
 function toggleAll(v){ document.querySelectorAll('.selrow').forEach(c=>c.checked=v); $('selall').checked=v; }
 function selectedIds(){ return [...document.querySelectorAll('.selrow:checked')].map(c=>String(c.dataset.id)); }
-async function persistExcluded(){ await api('/api/patterns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({excluded_ids:[...EXCLUDED],telegram_pattern_exceptions:[...EXCEPT_TG]})}); render(); }
+async function persistExcluded(){ // B6: si falla, re-sincroniza desde el servidor (no dejar estado local divergente) y devuelve false
+  try{ await api('/api/patterns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({excluded_ids:[...EXCLUDED],telegram_pattern_exceptions:[...EXCEPT_TG]})}); render(); return true; }
+  catch(e){ toast('No se pudo guardar — recargado desde el servidor',true); await loadPatterns(); return false; } }
 // Incluir un id que coincide con un patrón crea una EXCEPCIÓN (se envía pese al patrón).
 function tgInclExcl(id,accion){
   if(accion==='excluir'){ EXCLUDED.add(id); EXCEPT_TG.delete(id); }
@@ -3042,10 +3044,10 @@ function tgInclExcl(id,accion){
 }
 async function bulk(accion){ const ids=selectedIds(); if(!ids.length){ toast('Marca al menos un contacto (visible)',true); return; }
   ids.forEach(id=>tgInclExcl(id,accion));
-  await persistExcluded(); toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); }
+  if(await persistExcluded()) toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); }
 async function bulkFiltered(accion){ const ids=filtered().map(s=>String(s.chatId)); if(!ids.length){ toast('Sin contactos que coincidan',true); return; }
   ids.forEach(id=>tgInclExcl(id,accion));
-  await persistExcluded(); toast('✓ '+ids.length+((FILTER||STATEF)?' filtrados ':' ')+(accion==='excluir'?'excluidos':'incluidos')); }
+  if(await persistExcluded()) toast('✓ '+ids.length+((FILTER||STATEF)?' filtrados ':' ')+(accion==='excluir'?'excluidos':'incluidos')); }
 // --- listas de distribución (genérico para ambos canales) ---
 let LISTS={telegram:[],whatsapp:[]}, TGT={telegram:{mode:'all',lists:[]},whatsapp:{mode:'all',lists:[]}};
 function listsBox(ch){ return ch==='telegram'?'tg_lists':'wa_lists'; }
@@ -3101,7 +3103,11 @@ async function createListFromGrid(ch){
   if(!ids.length){ toast('Marca primero los contactos en el grid de arriba',true); return; }
   await crearListaCon(ch, ids, 'marcados');
 }
-async function createListFromIncluded(ch){ await crearListaCon(ch, includedIds(ch), 'incluidos'); }
+async function createListFromIncluded(ch){
+  // M5: bajo cuenta no sincronizada el grid está vacío pero DEST conserva contactos viejos;
+  // no crear una lista a partir de ese caché para no incluir datos obsoletos.
+  if(ch==='telegram'?TG_STALE:WA_STALE){ toast('Conecta la cuenta para crear listas con «incluidos»',true); return; }
+  await crearListaCon(ch, includedIds(ch), 'incluidos'); }
 // Audiencia EFECTIVA por canal (a quién se enviaría con la config actual): aplica modo
 // (todos/solo/excepto) + listas activas + exclusiones (manuales y por patrón). Devuelve nombres.
 function audienceFor(ch, overrideTgt){
@@ -3173,7 +3179,9 @@ function renderWa(){
   $('wa_pageinfo').textContent=f.length?`página ${WA_PAGE+1} de ${pages}`:'sin resultados'; }
 function waSelectedIds(){ return [...document.querySelectorAll('.wsel:checked')].map(c=>String(c.dataset.id)); }
 function waToggleAll(v){ document.querySelectorAll('.wsel').forEach(c=>c.checked=v); }
-async function persistWaExcluded(){ await api('/api/patterns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({whatsapp_excluded:[...WA_EXCLUDED],whatsapp_pattern_exceptions:[...WA_EXCEPT]})}); renderWa(); }
+async function persistWaExcluded(){ // B6: rollback desde el servidor si falla
+  try{ await api('/api/patterns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({whatsapp_excluded:[...WA_EXCLUDED],whatsapp_pattern_exceptions:[...WA_EXCEPT]})}); renderWa(); return true; }
+  catch(e){ toast('No se pudo guardar — recargado desde el servidor',true); await loadPatterns(); return false; } }
 async function waBulk(accion){ const ids=waSelectedIds(); if(!ids.length){ toast('Marca al menos un contacto',true); return; }
   ids.forEach(id=>{
     if(accion==='excluir'){ WA_EXCLUDED.add(id); WA_EXCEPT.delete(id); }
@@ -3181,7 +3189,7 @@ async function waBulk(accion){ const ids=waSelectedIds(); if(!ids.length){ toast
       const c=WA_DEST.find(x=>String(x.id||'')===id);
       if(c && nameMatchesPatterns(waName(c), WA_EXCL_PAT)) WA_EXCEPT.add(id); else WA_EXCEPT.delete(id); } // excepción al patrón
   });
-  await persistWaExcluded(); toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); }
+  if(await persistWaExcluded()) toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); }
 function waPrev(){ WA_PAGE--; renderWa(); }
 function waNext(){ WA_PAGE++; renderWa(); }
 // Sub-navegación genérica (por pestaña): muestra solo las tarjetas con el data-sub elegido.
