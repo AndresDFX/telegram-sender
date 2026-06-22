@@ -2035,7 +2035,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="callout warn">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza con listas pequeñas. Las <b>exclusiones</b> se gestionan por nombre abajo, en <b>Destinatarios WhatsApp</b>.</div>
   </div>
   <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Canal y mensaje<span class="help" tabindex="0" data-tip="Canal público de Telegram que se sondea (t.me/s/canal) y la limpieza del mensaje: líneas a quitar (ubicación/teléfono), símbolos de moneda y footer de WhatsApp.">ⓘ</span></h2>
-   <div class="hint" style="margin-top:-4px">La <b>captura del canal está siempre activa</b> (se guarda cada lista publicada). El <b>envío</b> a tus contactos se controla con el <b>interruptor</b> en «Ajustes y estado»: si está apagado, lo capturado queda en espera.</div>
+   <div class="hint" style="margin-top:-4px">La <b>recopilación</b> del canal y el <b>envío</b> a tus contactos son interruptores <b>separados</b> en «Ajustes y estado → Envío». Con la recopilación activa se guarda y se ve cada lista publicada (en «Envíos»); el envío automático se controla aparte.</div>
    <label>Canal fuente (username sin @)</label><input id="source_channel">
    <label>Símbolos de moneda</label><input id="currency_symbols">
    <label>Footer WhatsApp (se añade al final de cada lista)</label><textarea id="whatsapp_footer"></textarea>
@@ -2060,7 +2060,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="stats"><div class="stat"><b id="q_p">–</b><span>lotes programados pendientes</span></div>
      <div class="stat"><b id="q_b">–</b><span>en cola SQS (en vuelo)</span></div>
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
-   <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>⏱️ Programación</b>.</div>
+   <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>Envíos → Envíos fraccionados</b>.</div>
    <button class="sec" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
   </div>
   <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
@@ -2276,7 +2276,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <label>Días</label>
      <div class="chan-row" id="sg_days"></div>
    </div>
-   <div class="hint" style="margin-top:8px">La hora usa la zona horaria configurada en la pestaña <b>Programación</b> (ventana de envío).</div>
+   <div class="hint" style="margin-top:8px">La hora usa la zona horaria configurada en <b>Ajustes y estado → Envío → Anti-baneo</b> (ventana de envío).</div>
    <div class="compose-actions">
      <button id="sg_create" onclick="sgCreate()">Programar</button>
      <button class="ghost" onclick="sgClear()">Limpiar</button>
@@ -2332,7 +2332,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="capture_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleCapture()"> <b>Recopilar listas del canal</b></label>
      <span id="cap_badge" class="pill">—</span>
    </div>
-   <div class="hint" style="margin-top:10px">Lee <b>@iproparts</b> y registra cada lista nueva para que la <b>veas</b>, <b>sin enviarla a nadie</b>. Mientras el <b>envío automático</b> esté apagado, cada lista capturada aparece en <b>Envíos</b> como <b>📥 Capturada</b> y se te manda a tus <b>Mensajes Guardados</b> de Telegram. Es independiente del envío.</div>
+   <div class="hint" style="margin-top:10px">Lee el <b>canal fuente configurado</b> y registra cada lista nueva para que la <b>veas</b>, <b>sin enviarla a nadie</b>. Mientras el <b>envío automático</b> esté apagado, cada lista capturada aparece en <b>Envíos</b> como <b>📥 Capturada</b> y se te manda a tus <b>Mensajes Guardados</b> de Telegram. Es independiente del envío.</div>
   </div>
   <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Envío automático<span class="help" tabindex="0" data-tip="Pausa o activa el ENVÍO automático de las listas capturadas. El envío MANUAL (Componer → Enviar) SIEMPRE sale, aun en pausa. La RECOPILACIÓN es aparte (arriba).">ⓘ</span></h2>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
@@ -2402,7 +2402,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
  </main>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <script>
 const BASE = location.pathname.replace(/\/admin.*/, '/admin');
 const $ = id => document.getElementById(id);
@@ -2418,6 +2418,8 @@ async function api(p, opt){ opt=opt||{}; opt.headers=hdr(opt.headers); const r=a
   return r.json(); }
 function toast(m,v){ const t=$('toast'); t.textContent=m;
   const cls = v===true ? 'err' : (typeof v==='string' && v ? v : '');  // true=err (compat); 'info'/'warn'/'err'
+  // A8: los errores se anuncian de inmediato (assertive); el resto, cortés (polite).
+  t.setAttribute('aria-live', (v===true||cls==='err'||cls==='warn') ? 'assertive' : 'polite');
   t.className='toast show'+(cls?' '+cls:''); setTimeout(()=>t.className='toast',2200); }
 // Modales (promesas): reemplazan confirm()/prompt() nativos por diálogos de marca, accesibles (Esc/Enter, foco).
 function dsModal(o){ o=o||{}; return new Promise(resolve=>{
@@ -2448,7 +2450,10 @@ async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':
   try{ await fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{if(!r.ok)throw 0;}); sessionStorage.setItem('cred',CRED); sessionStorage.setItem('cred_ts',String(Date.now()));
     $('login').style.display='none'; $('app').style.display='block'; $('who').textContent=u; boot(); }
   catch(e){ $('lerr').textContent='Usuario o contraseña incorrectos (tras varios intentos se bloquea unos minutos)'; } }
-function logout(){ sessionStorage.removeItem('cred'); CRED=''; $('app').style.display='none'; $('login').style.display='flex'; }
+function logout(){ sessionStorage.removeItem('cred'); CRED='';
+  // M39: detener TODOS los polls (si no, CONN_TIMER y otros siguen vivos tras salir).
+  try{ [BC_TIMER,Q_TIMER,PL_TIMER,CONN_TIMER].forEach(t=>{ if(t) clearInterval(t); }); BC_TIMER=Q_TIMER=PL_TIMER=CONN_TIMER=null; }catch(e){}
+  $('app').style.display='none'; $('login').style.display='flex'; }
 // --- recuperación de contraseña (público, sin sesión) ---
 function fpToggle(){ const b=$('fp_box'); b.style.display = b.style.display==='none'?'block':'none'; }
 async function fpSend(){
@@ -2517,6 +2522,7 @@ async function deleteUser(u){ if(!await confirmModal('¿Borrar el usuario "'+u+'
   }catch(e){ toast(e.message||'Error',true); } }
 async function changePassword(){
   const cur=$('cp_cur').value, nw=$('cp_new').value; if(!cur||!nw){ toast('Completa ambos campos',true); return; }
+  if(nw.length<8){ toast('La nueva contraseña debe tener al menos 8 caracteres',true); return; }
   $('cp_status').textContent='Cambiando…';
   try{ const r=await fetch(BASE+'/api/auth/change-password',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({current:cur,new:nw})});
     const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status));
@@ -2668,14 +2674,28 @@ async function cancelPending(){
   catch(e){ toast('Error al cancelar',true); }
 }
 async function saveSched(){
+  const HHMM=/^([01]?\d|2[0-3]):[0-5]\d$/;
+  const tw=$('tg_window_enabled').checked, ww=$('wa_window_enabled').checked;
+  const tgs=($('tg_window_start').value||'').trim(), tge=($('tg_window_end').value||'').trim();
+  const was=($('wa_window_start').value||'').trim(), wae=($('wa_window_end').value||'').trim();
+  // A4: una hora mal escrita ya no se acepta silenciosamente (antes caía a ventana 24h).
+  if(tw && (!HHMM.test(tgs)||!HHMM.test(tge))){ toast('Horario de Telegram inválido — usa HH:MM (p. ej. 08:00)',true); return; }
+  if(ww && (!HHMM.test(was)||!HHMM.test(wae))){ toast('Horario de WhatsApp inválido — usa HH:MM (p. ej. 08:00)',true); return; }
+  // M11: el lote vacío ya no se coerce silenciosamente a 150 (el valor más agresivo).
+  const bs=parseInt($('batch_size').value,10);
+  if(!Number.isFinite(bs)||bs<1||bs>150){ toast('Tamaño de lote inválido (1–150)',true); return; }
+  const tdmin=parseFloat($('tg_delay_min').value), tdmax=parseFloat($('tg_delay_max').value);
+  const wdmin=parseInt($('wa_delay_min').value,10), wdmax=parseInt($('wa_delay_max').value,10);
+  if([tdmin,tdmax].some(x=>!Number.isFinite(x)||x<0)){ toast('Delays de Telegram inválidos',true); return; }
+  if([wdmin,wdmax].some(x=>!Number.isFinite(x)||x<0)){ toast('Delays de WhatsApp inválidos',true); return; }
+  // M12: el delay mínimo no puede ser mayor que el máximo.
+  if(tdmin>tdmax || wdmin>wdmax){ toast('El delay mínimo no puede ser mayor que el máximo',true); return; }
   const b={ scheduling_enabled:$('scheduling_enabled').checked,
-    batch_size:parseInt($('batch_size').value||'150',10),
-    tg_delay_min:parseFloat($('tg_delay_min').value||'1'), tg_delay_max:parseFloat($('tg_delay_max').value||'4'),
-    wa_delay_min:parseInt($('wa_delay_min').value||'3000',10), wa_delay_max:parseInt($('wa_delay_max').value||'9000',10),
+    batch_size:bs, tg_delay_min:tdmin, tg_delay_max:tdmax, wa_delay_min:wdmin, wa_delay_max:wdmax,
     window_tz:parseInt($('window_tz').value||'-300',10),
     // Ventana horaria INDEPENDIENTE por canal.
-    tg_window_enabled:$('tg_window_enabled').checked, tg_window_start:($('tg_window_start').value||'08:00').trim(), tg_window_end:($('tg_window_end').value||'20:00').trim(),
-    wa_window_enabled:$('wa_window_enabled').checked, wa_window_start:($('wa_window_start').value||'08:00').trim(), wa_window_end:($('wa_window_end').value||'20:00').trim() };
+    tg_window_enabled:tw, tg_window_start:tgs||'08:00', tg_window_end:tge||'20:00',
+    wa_window_enabled:ww, wa_window_start:was||'08:00', wa_window_end:wae||'20:00' };
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); toast('✓ Guardado'); loadCfg(); }
   catch(e){ toast('Error al guardar',true); } }
 async function saveWhatsapp(){ const b={ whatsapp_enabled:$('whatsapp_enabled').checked, whatsapp_service_url:$('whatsapp_service_url').value };
@@ -2694,7 +2714,7 @@ async function waPair(){ const num=$('wa_pair_num').value.replace(/[^0-9]/g,'');
   if(num.length<8){ toast('Número inválido (incluye código de país, sin +)',true); return; }
   out.style.display='block'; out.textContent='generando código... (puede tardar unos segundos)';
   try{ const r=await api('/api/whatsapp/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({number:num})});
-    if(r.pairingCode){ out.innerHTML='Código: <b style="font-size:19px;letter-spacing:3px;color:var(--ac2)">'+r.pairingCode+'</b><br>En el teléfono: WhatsApp → Dispositivos vinculados → <b>Vincular con número de teléfono</b> → ingresa el código.'; }
+    if(r.pairingCode){ out.innerHTML='Código: <b style="font-size:19px;letter-spacing:3px;color:var(--ac2)">'+bcEsc(r.pairingCode)+'</b><br>En el teléfono: WhatsApp → Dispositivos vinculados → <b>Vincular con número de teléfono</b> → ingresa el código.'; }
     else { out.textContent='No se pudo generar: '+(r.error||r.detalle||'desconocido'); } }
   catch(e){ out.textContent='Error: el servicio no respondió (¿ya conectado? ¿URL/token?)'; } }
 async function saveAccount(){ const b={ send_mode:$('send_mode').value, telethon_api_id:$('telethon_api_id').value,
@@ -2746,9 +2766,13 @@ async function tgWebhook(){ $('tg_state').textContent='registrando webhook...';
   try{ const r=await api('/api/telegram/webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     $('tg_state').textContent = (r.ok || r.result===true) ? 'webhook registrado ✓ (el bot ya recibe /start)' : ('error: '+(r.description||r.detalle||r.error||'desconocido')); }
   catch(e){ $('tg_state').textContent='error registrando webhook'; } }
-async function saveCfg(){ const b={ source_channel:$('source_channel').value, markup_percentage:parseFloat($('markup_percentage').value),
+async function saveCfg(){
+   const mp=parseFloat($('markup_percentage').value);   // B31: no enviar NaN si el campo está vacío/mal
+   if(!Number.isFinite(mp)||mp<0){ toast('Markup inválido (usa un número, p. ej. 15)',true); return; }
+   const b={ source_channel:$('source_channel').value, markup_percentage:mp,
    currency_symbols:$('currency_symbols').value, whatsapp_footer:$('whatsapp_footer').value, image_url:$('image_url').value,
-   strip_patterns:$('strip_patterns').value };
+   // M41: strip_patterns debe viajar como ARRAY (el backend lo lee como lista), no como string crudo.
+   strip_patterns:($('strip_patterns').value||'').split('\n').map(s=>s.trim()).filter(Boolean) };
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); toast('✓ Guardado'); loadCfg(); }
   catch(e){ toast('Error al guardar',true); } }
 async function uploadImg(){ const f=$('imgfile').files[0]; if(!f) return;
@@ -2760,7 +2784,7 @@ async function loadQueue(){
   try{ const q=await api('/api/queue'); $('q_b').textContent=q.broadcast; $('q_d').textContent=q.dlq; }catch(e){}
   try{ const r=await api('/api/plans'); let pend=0;
     (r.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running'){
-      pend += Math.max(0,(p.tg.batches|0)-(p.tg.next|0)) + Math.max(0,(p.wa.batches|0)-(p.wa.next|0)); }});
+      pend += Math.max(0,((p.tg&&p.tg.batches)|0)-((p.tg&&p.tg.next)|0)) + Math.max(0,((p.wa&&p.wa.batches)|0)-((p.wa&&p.wa.next)|0)); }});
     if($('q_p')) $('q_p').textContent=pend;
   }catch(e){ if($('q_p')) $('q_p').textContent='–'; }
 }
@@ -2896,9 +2920,9 @@ async function loadDashboard(){
   ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e=$(id); if(e) e.classList.add('kpi-load');});
   try{
     const [m,c,pl,q]=await Promise.all([api('/api/metrics'),api('/api/config'),api('/api/plans'),api('/api/queue')]);
-    if($('k_sent')) $('k_sent').textContent=m.enviados;
+    if($('k_sent')) $('k_sent').textContent=(m.enviados!=null?m.enviados:'–');
     if($('k_rate')) $('k_rate').textContent=(m.tasa_exito!=null?m.tasa_exito:100)+'%';
-    let pend=0; (pl.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running') pend+=Math.max(0,(p.tg.batches|0)-(p.tg.next|0))+Math.max(0,((p.wa&&p.wa.batches)|0)-((p.wa&&p.wa.next)|0)); });
+    let pend=0; (pl.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running') pend+=Math.max(0,((p.tg&&p.tg.batches)|0)-((p.tg&&p.tg.next)|0))+Math.max(0,((p.wa&&p.wa.batches)|0)-((p.wa&&p.wa.next)|0)); });
     if($('k_pend')) $('k_pend').textContent=pend;
     if($('k_dlq')) $('k_dlq').textContent=q.dlq;
     ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e=$(id); if(e) e.classList.remove('kpi-load');});
@@ -2996,7 +3020,7 @@ function renderLists(ch){ const cont=$(listsBox(ch)); cont.innerHTML='';
   if(!LISTS[ch].length){ cont.innerHTML='<div class="hint">Sin listas todavía.</div>'; }
   LISTS[ch].forEach((l,i)=>{ const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid #3A3A39';
-    row.innerHTML=`<label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin:0"><input type="checkbox" ${active.has(l.name)?'checked':''} style="width:auto" onchange="toggleListActive('${ch}',${i},this.checked)"> <b>${l.name}</b></label>`+
+    row.innerHTML=`<label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin:0"><input type="checkbox" ${active.has(l.name)?'checked':''} style="width:auto" onchange="toggleListActive('${ch}',${i},this.checked)"> <b>${bcEsc(l.name)}</b></label>`+
       `<span class="hint">${l.ids.length} miembros</span>`+
       `<button class="sec" onclick="addToList('${ch}',${i})">+ marcados</button>`+
       `<button class="ghost" onclick="removeFromList('${ch}',${i})">− marcados</button>`+
@@ -3265,16 +3289,16 @@ async function sendBroadcast(){
   let msg = body.scheduled_at ? ('¿Programar este envío para '+new Date(sv).toLocaleString('es')+'?') : '¿Enviar este mensaje ahora?';
   msg += '\n\nSe enviará por: '+chs+'.';
   if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
-  if(!await confirmModal(msg,{okText:'Enviar'})) return;
+  if(!await confirmModal(msg,{okText: body.scheduled_at ? 'Programar' : 'Enviar'})) return;
   const btn=$('bc_send'); btn.disabled=true; btn.classList.add('btn-loading'); $('bc_status').textContent='guardando...';
   try{
     await api('/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    // "programado" != "entregado": el envío se fracciona y la ENTREGA real se confirma abajo en Envíos.
-    toast(body.scheduled_at?'✓ Programado para más tarde':'✓ Programado — la entrega se confirma abajo en Envíos','info'); $('bc_status').textContent='';
+    // "enviando" != "entregado": el envío se fracciona y la ENTREGA real se confirma abajo en Envíos.
+    toast(body.scheduled_at?'✓ Programado para más tarde':'✓ Enviando — la entrega se confirma abajo en Envíos','info'); $('bc_status').textContent='';
     bcClear();
     showTab('envios');
     loadBroadcasts();
-  }catch(e){ const _m=e.message||'Error al programar'; $('bc_status').textContent=_m; toast(_m,true); }
+  }catch(e){ const _m=e.message||(body.scheduled_at?'No se pudo programar':'No se pudo enviar'); $('bc_status').textContent=_m; toast(_m,true); }
   finally{ btn.disabled=false; btn.classList.remove('btn-loading'); }
 }
 // Al abrir la pestaña Enviar: rellenar listas + previsualizar (hook aditivo sobre showTab).
@@ -3322,6 +3346,8 @@ async function sgCreate(){
     telegram:$('sg_telegram').checked, whatsapp:$('sg_whatsapp').checked,
     telegram_list:$('sg_tg_list').value, whatsapp_list:$('sg_wa_list').value, type:t };
   if(!body.text.trim()){ toast('El mensaje no puede estar vacío',true); return; }
+  if(!body.telegram && !body.whatsapp){ toast('Elige al menos un canal',true); return; }
+  if(body.whatsapp && !body.whatsapp_list){ toast('Elige una lista de WhatsApp (no se envía a toda la agenda)',true); const s=$('sg_wa_list'); if(s){ s.focus(); } return; }
   if(t==='once'){ const v=$('sg_run_at').value; if(!v){ toast('Elige fecha y hora',true); return; }
     body.run_at=Math.floor(new Date(v).getTime()/1000); }
   else { body.at=$('sg_at').value; if(t==='weekly') body.days=[...SG_DAYS]; }
@@ -3475,8 +3501,8 @@ function bcStartPolling(){
   else document.addEventListener('DOMContentLoaded', start);
 })();
 // ===== Programación: monitor de envíos fraccionados (GET /api/plans) =====
-const PL_ST={pending:'Pendiente',running:'En curso',done:'Completado',canceled:'Cancelado'};
-const PL_PILL={pending:'queued',running:'sending',done:'done',canceled:'failed'};
+const PL_ST={pending:'Pendiente',running:'En curso',done:'Completado',canceled:'Cancelado',failed:'Fallido',partial:'Parcial'};
+const PL_PILL={pending:'queued',running:'sending',done:'done',canceled:'failed',failed:'failed',partial:'partial'};
 function plBatchLine(e){
   const chName=e.ch==='wa'?(ICO_WA+' WhatsApp'):(ICO_TG+' Telegram');
   const n=e.n|0, env=e.enviados|0, pct=n?Math.round(env/n*100):0, full=env>=n;
