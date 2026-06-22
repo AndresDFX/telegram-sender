@@ -164,13 +164,11 @@ def _auth_bloqueado() -> bool:
 
 
 def _auth_fallo() -> None:
+    # M16: NO dormir el handler (bloquea el worker Lambda y se factura). El freno real es el
+    # lock 'locked_until' (devuelve 429 sin procesar) + el throttling de API Gateway.
     _AUTH["fails"] += 1
     if _AUTH["fails"] >= _AUTH_MAX_FAILS:
         _AUTH["locked_until"] = time.time() + _AUTH_LOCK_SECS
-    try:
-        time.sleep(min(_AUTH["fails"] * 0.5, 3))  # retardo creciente: frena la fuerza bruta
-    except Exception:
-        pass
 
 
 def _autorizado(event: dict[str, Any]) -> bool:
@@ -310,9 +308,21 @@ def _auth_forgot(body: dict) -> dict[str, Any]:
     try:
         u = (config.get_users() or {}).get(usuario)
         if u and u.get("email"):
-            code = auth_dom.gen_code(6)
             resets = config.get_resets() or {}
-            resets[usuario] = {"code_hash": auth_dom.hash_password(code), "exp": int(time.time()) + 900, "attempts": 0}
+            prev = resets.get(usuario) or {}
+            now = int(time.time())
+            # A5: rate-limit anti-abuso/fuerza-bruta. La regeneración ilimitada de códigos era el hueco
+            # (cada código da 5 intentos sobre 10^6). Tope: 1 código/60s y máx 3 por ventana de 15 min.
+            if prev and now - int(prev.get("sent_at", 0)) < 60:
+                return _json({"ok": True})  # genérico: ni revela ni reenvía (anti-spam)
+            if prev and now < int(prev.get("exp", 0)) and int(prev.get("sends", 0)) >= 3:
+                return _json({"ok": True})  # tope de códigos en la ventana vigente
+            sends = int(prev.get("sends", 0)) + 1 if (prev and now < int(prev.get("exp", 0))) else 1
+            code = auth_dom.gen_code(6)
+            resets[usuario] = {
+                "code_hash": auth_dom.hash_password(code), "exp": now + 900,
+                "attempts": 0, "sends": sends, "sent_at": now,
+            }
             config.set_resets(resets)
             _enviar_reset_email(str(u.get("email")), usuario, code)
     except Exception:
@@ -530,6 +540,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if sub == "/api/auth/reset" and method == "POST":
         return _auth_reset(_body(event))
 
+    # B12: si ya está bloqueado por intentos PREVIOS, 429 sin procesar (el front avisa "espera N min").
+    # Se evalúa ANTES de _autorizado: el intento que DISPARA el lock aún devuelve 401 (credencial mala);
+    # solo los intentos POSTERIORES, ya bloqueados, devuelven 429.
+    if _auth_bloqueado():
+        secs = max(1, int(_AUTH["locked_until"] - time.time()))
+        return _json({"error": f"Demasiados intentos. Espera ~{max(1, (secs + 59) // 60)} min."}, 429)
     if not _autorizado(event):
         return _json({"error": "unauthorized"}, 401)
 
@@ -2459,9 +2475,12 @@ function alertModal(message,opts){ opts=opts||{}; return dsModal({title:opts.tit
 function skelTable(id,cols,rows){ const t=$(id); if(!t) return; const r=rows||4, c=cols||3;
   t.innerHTML=Array.from({length:r},()=>'<tr class="skeleton">'+Array.from({length:c},()=>'<td><div class="sk-line"></div></td>').join('')+'</tr>').join(''); }
 async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':'+p);
-  try{ await fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{if(!r.ok)throw 0;}); sessionStorage.setItem('cred',CRED); sessionStorage.setItem('cred_ts',String(Date.now()));
+  try{ const r=await fetch(BASE+'/api/me',{headers:hdr()});
+    if(!r.ok){ const j=await r.json().catch(()=>({})); const er=new Error(j.error||''); er.status=r.status; throw er; }
+    sessionStorage.setItem('cred',CRED); sessionStorage.setItem('cred_ts',String(Date.now()));
     $('login').style.display='none'; $('app').style.display='block'; $('who').textContent=u; boot(); }
-  catch(e){ $('lerr').textContent='Usuario o contraseña incorrectos (tras varios intentos se bloquea unos minutos)'; } }
+  catch(e){ CRED='';
+    $('lerr').textContent = (e&&e.status===429&&e.message) ? e.message : 'Usuario o contraseña incorrectos (tras varios intentos se bloquea unos minutos)'; } }
 function logout(){ sessionStorage.removeItem('cred'); CRED='';
   // M39: detener TODOS los polls (si no, CONN_TIMER y otros siguen vivos tras salir).
   try{ [BC_TIMER,Q_TIMER,PL_TIMER,CONN_TIMER].forEach(t=>{ if(t) clearInterval(t); }); BC_TIMER=Q_TIMER=PL_TIMER=CONN_TIMER=null; }catch(e){}
@@ -2489,7 +2508,7 @@ let USR_ME='', IS_ADMIN=false;
 // Carga quién soy + mi rol; muestra/oculta la gestión de usuarios según sea admin.
 async function loadMe(){
   try{ const m=await api('/api/me'); USR_ME=m.user||USR_ME; IS_ADMIN=!!m.is_admin;
-    const w=$('who'); if(w) w.title=(IS_ADMIN?'Administrador':'Usuario')+' · '+(m.user||'');
+    const w=$('who'); if(w){ w.title=(IS_ADMIN?'Administrador':'Usuario')+' · '+(m.user||''); if(m.user) w.textContent=m.user; }  // B11: nombre visible también al recargar
     const badge=$('who_role'); if(badge){ badge.textContent=IS_ADMIN?'admin':'usuario'; badge.className='pill '+(IS_ADMIN?'active':'inactive'); badge.style.display='inline-block'; }
     const card=$('usr_card'); if(card) card.style.display=IS_ADMIN?'':'none';
     if(IS_ADMIN) loadUsers();

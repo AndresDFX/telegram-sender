@@ -209,11 +209,11 @@ class AdminTests(unittest.TestCase):
         admin._AUTH["locked_until"] = 0.0
         ev = _event("GET", "/admin/api/config", auth=False)
         ev["headers"]["authorization"] = "Basic " + base64.b64encode(b"admin:mala").decode()
-        with patch("entrypoints.admin.time.sleep"):  # sin retardos reales en el test
-            for _ in range(admin._AUTH_MAX_FAILS):
-                self.assertEqual(admin.lambda_handler(ev, None)["statusCode"], 401)
-            # ahora bloqueado: incluso con credenciales correctas, rechaza durante el cooldown
-            self.assertEqual(admin.lambda_handler(_event("GET", "/admin/api/config"), None)["statusCode"], 401)
+        for _ in range(admin._AUTH_MAX_FAILS):
+            self.assertEqual(admin.lambda_handler(ev, None)["statusCode"], 401)
+        # ahora bloqueado: incluso con credenciales correctas, rechaza durante el cooldown.
+        # Devuelve 429 (no 401) para que el front distinga "espera N min" de credencial inválida.
+        self.assertEqual(admin.lambda_handler(_event("GET", "/admin/api/config"), None)["statusCode"], 429)
         admin._AUTH["fails"] = 0
         admin._AUTH["locked_until"] = 0.0  # limpiar para no afectar otros tests
 
