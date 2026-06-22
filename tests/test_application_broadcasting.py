@@ -193,6 +193,42 @@ class BroadcastListTests(unittest.TestCase):
         BroadcastList(FakeSubs(["1", "2", "3"]), queue, cfg)("A $100.000")
         self.assertEqual(set(queue.calls[0][1]), {"1", "3"})  # "2" fuera (no está en la lista Auto)
 
+    def test_m25_auto_lista_inexistente_registra_error(self):
+        # M25: envío automático activo con lista elegida que ya NO existe (borrada/renombrada) →
+        # resuelve a 0 destinatarios; en vez de cerrar como 'enviado-vacío' en silencio, registra error.
+        class FakeBroadcasts:
+            def __init__(self): self.errores = []
+            def crear(self, broadcast_id, text, source, channels, tg_total=0): pass
+            def registrar_error(self, bid, msg): self.errores.append(msg)
+        store = FakeBroadcasts()
+        cfg = FakeConfig(telegram_lists=[{"name": "VIP", "ids": ["1"]}],
+                         auto_telegram_list="NoExiste", whatsapp_enabled=False)
+        BroadcastList(FakeSubs(["1", "2"]), FakeQueue(), cfg, broadcasts=store)("A $100.000")
+        self.assertTrue(any("automático" in e for e in store.errores))
+
+    def test_m6_fallo_encolar_cierra_whatsapp_y_relanza(self):
+        # M6: si encolar a SQS lanza, el canal WhatsApp NO debe quedar sin arrancar; se intenta WA y
+        # se re-lanza (para la compensación de dedup del receiver).
+        class FakeBroadcasts:
+            def __init__(self): self.errores = []
+            def crear(self, broadcast_id, text, source, channels, tg_total=0): pass
+            def registrar_error(self, bid, msg): self.errores.append(msg)
+            def marcar_whatsapp_fallido(self, bid): pass
+        class QueueBoom:
+            def encolar(self, *a, **k): raise RuntimeError("SQS caído")
+        class FakeWa:
+            def __init__(self): self.calls = []
+            def forward(self, *a, **k): self.calls.append(1); return {"accepted": True}
+        store, wa = FakeBroadcasts(), FakeWa()
+        cfg = FakeConfig(telegram_lists=[{"name": "T", "ids": ["1"]}], auto_telegram_list="T",
+                         whatsapp_enabled=True, whatsapp_lists=[{"name": "W", "ids": ["57300@s.whatsapp.net"]}],
+                         auto_whatsapp_list="W")
+        bl = BroadcastList(FakeSubs(["1"]), QueueBoom(), cfg, whatsapp=wa, broadcasts=store)
+        with self.assertRaises(RuntimeError):
+            bl("A $100.000")
+        self.assertEqual(len(wa.calls), 1)   # WhatsApp se intentó pese al fallo de Telegram
+        self.assertTrue(store.errores)        # error registrado en el job
+
     def test_a12_envio_activo_sin_lista_captura_no_difunde(self):
         # A12: envío automático ACTIVO pero sin auto_telegram_list ni auto_whatsapp_list → NO difunde
         # a 'todos'; se trata como captura (registra + preview) en vez de inundar la agenda.

@@ -110,6 +110,25 @@ class WorkerTests(unittest.TestCase):
         event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1"]})]}
         self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [{"itemIdentifier": "m1"}])
 
+    def test_b7_imagen_sin_firmar_sin_respaldo_reintenta(self):
+        # B7: si hay image_key pero la firma S3 falla y NO hay image_url de respaldo, el lote NO se
+        # entrega como texto-solo (que perdería la imagen marcándola como éxito): se reintenta (itemFailure).
+        worker.image_store = MagicMock()
+        worker.image_store.url_temporal.side_effect = RuntimeError("S3 caído")
+        worker.deliver = MagicMock(return_value=_stats(1, sent=1))
+        event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1"], "image_key": "images/x.jpg"})]}
+        self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [{"itemIdentifier": "m1"}])
+        worker.deliver.assert_not_called()  # no se entregó nada incompleto
+
+    def test_b7_imagen_sin_firmar_con_respaldo_usa_url_externa(self):
+        # Si hay image_url de respaldo, sí se usa (no se pierde el envío): degradación aceptable.
+        worker.image_store = MagicMock()
+        worker.image_store.url_temporal.side_effect = RuntimeError("S3 caído")
+        worker.deliver = MagicMock(return_value=_stats(1, sent=1))
+        event = {"Records": [_record("m1", {"text": "x", "chat_ids": ["1"], "image_key": "k", "image_url": "http://img"})]}
+        self.assertEqual(worker.lambda_handler(event, None)["batchItemFailures"], [])
+        worker.deliver.assert_called_once_with("x", ["1"], "http://img", batch_id=None)
+
     def test_body_malformado_reporta(self):
         worker.deliver = MagicMock()
         event = {"Records": [_record("m1", "no-json")]}

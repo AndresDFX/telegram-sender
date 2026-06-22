@@ -30,6 +30,23 @@ class SubscriberRepoTests(unittest.TestCase):
         self.assertIn("if_not_exists(createdAt", kw["UpdateExpression"])
 
     @unittest.skipUnless(HAS_BOTO, "requiere boto3")
+    def test_b6_marcar_inactivo_chat_inexistente_no_lanza(self):
+        # B6: si el chat no existe, la ConditionExpression falla con CCF; debe ser no-op silencioso
+        # (no propagar el stacktrace que ensuciaba los logs por un caso benigno).
+        table = MagicMock()
+        table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
+        repo = dynamodb.DynamoDbSubscriberRepository()
+        with patch.object(dynamodb, "_table", return_value=table):
+            repo.marcar_inactivo("999")  # no debe lanzar
+        # Otros errores SÍ se propagan.
+        table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ProvisionedThroughputExceededException"}}, "UpdateItem")
+        with patch.object(dynamodb, "_table", return_value=table):
+            with self.assertRaises(ClientError):
+                repo.marcar_inactivo("999")
+
+    @unittest.skipUnless(HAS_BOTO, "requiere boto3")
     def test_listar_activos_pagina_y_filtra(self):
         from boto3.dynamodb.conditions import Key
 

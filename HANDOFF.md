@@ -224,6 +224,10 @@ Lista accionable para no repetir fallos:
 - **`dispatch_log` acotado (M9):** la bitácora del plan se limita a las últimas 200 entradas con un `SET` (no `list_append` sin cota), evitando que el item meta crezca hacia 400 KB en planes con miles de lotes (abortaría el claim condicional → despacho atascado).
 - **Items de lote TG con TTL (M7):** los items `(pid, TG#…)` llevan el mismo `ttl` que el meta; antes no expiraban y quedaban huérfanos para siempre.
 - **`borrar terminados` no borra envíos en vuelo (M8):** se cruzan los broadcast_ids de planes `pending/running` (`PlanStore.activos()`) y se excluyen; antes la heurística por edad (`_EDAD_TERMINAL=1h`) daba por terminal un envío fraccionado largo y lo borraba mientras seguía despachando.
+- **Fallo de encolado no deja WhatsApp colgado (M6):** en el envío no programado, si `encolar()` lanza (p. ej. `PartialEnqueueError`), se registra el error, se intenta el forward de WhatsApp (independiente) y se re-lanza (para la compensación de dedup del receiver) — antes WhatsApp quedaba 'enviando' eterno.
+- **Imagen no firmable NO se entrega como texto-solo (B7):** si el lote trae `image_key`, la firma S3 falla y NO hay `image_url` de respaldo, el worker **reintenta** el lote (itemFailure → SQS → DLQ si persiste) en vez de entregar texto-sin-imagen marcándolo como éxito (perdía la foto en silencio).
+- **Auto-lista borrada/renombrada deja rastro (M25):** si el envío automático está activo pero la lista elegida resuelve a 0 destinatarios, se registra un error en el job en vez de cerrarlo como 'enviado-vacío' silencioso (`auto_<canal>_list` guarda el NOMBRE; borrar/renombrar la lista lo deja apuntando a la nada).
+- **`marcar_inactivo` de un chat inexistente es no-op (B6):** captura el `ConditionalCheckFailedException` benigno (chat nunca registrado / purgado) en vez de propagar un stacktrace que ensuciaba los logs.
 
 ### FloodWait de Telegram (Telethon)
 

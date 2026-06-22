@@ -70,14 +70,21 @@ class DynamoDbSubscriberRepository(SubscriberRepository):
 
     def marcar_inactivo(self, chat_id: str) -> None:
         from boto3.dynamodb.conditions import Attr
+        from botocore.exceptions import ClientError
 
-        self._t().update_item(
-            Key={"chatId": chat_id},
-            UpdateExpression="SET #s = :inactive, updatedAt = :now",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":inactive": INACTIVE, ":now": _now_iso()},
-            ConditionExpression=Attr("chatId").exists(),
-        )
+        try:
+            self._t().update_item(
+                Key={"chatId": chat_id},
+                UpdateExpression="SET #s = :inactive, updatedAt = :now",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":inactive": INACTIVE, ":now": _now_iso()},
+                ConditionExpression=Attr("chatId").exists(),
+            )
+        except ClientError as error:
+            # B6: el chat no existe (nunca registrado / ya purgado) → no-op silencioso, NO es un error
+            # (marcar inactivo a un desconocido es inocuo); evita el stacktrace que ensuciaba los logs.
+            if error.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
 
     def listar_todos(self) -> list[dict]:
         table = self._t()

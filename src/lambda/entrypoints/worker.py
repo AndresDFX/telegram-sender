@@ -65,6 +65,11 @@ def _resolver_imagen(body: dict) -> str | None:
             return image_store.url_temporal(key)
         except Exception:
             logger.exception("No se pudo generar URL temporal para %s", key)
+            # B7: si hay clave pero la firma falla y NO hay URL externa de respaldo, NO degradar a
+            # texto-sin-imagen marcándolo como éxito (la imagen se perdería en silencio): se relanza
+            # para que el lote REINTENTE con la firma (itemFailure → SQS reintenta → DLQ si persiste).
+            if not body.get("image_url"):
+                raise
     return body.get("image_url")
 
 

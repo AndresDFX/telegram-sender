@@ -302,6 +302,24 @@ class BroadcastList:
         wa_mode = wa_t.get("mode", "all") if wa_on else "all"
         wa_list_ids = ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_t) if wa_on else []
 
+        # M25: el envío automático de un canal está activo (lista elegida) pero la lista resolvió a 0
+        # destinatarios (borrada/renombrada/vacía): registrar la causa para que el job no se cierre como
+        # 'enviado-vacío' en silencio (status done por total==0) y el usuario sepa que su auto-lista ya
+        # no existe. auto_<canal>_list guarda el NOMBRE; si la lista se borró/renombró deja de resolver.
+        if self._broadcasts:
+            faltan = []
+            if tg_on and not clientes:
+                faltan.append("Telegram")
+            if wa_on and not wa_list_ids:
+                faltan.append("WhatsApp")
+            if faltan:
+                try:
+                    self._broadcasts.registrar_error(
+                        bid, " / ".join(faltan) + " — la lista del envío automático no existe o quedó "
+                        "vacía (revisa Ajustes → «Lista del envío automático»)")
+                except Exception:
+                    logger.exception("No se pudo registrar la auto-lista vacía del job %s", bid)
+
         if self._usar_scheduler(cfg):
             # Envío fraccionado: se crea el plan y el dispatcher gotea un lote a la vez.
             self._crear_plan(
@@ -316,13 +334,27 @@ class BroadcastList:
 
         lotes = 0
         if tg_on:
-            lotes = self._queue.encolar(
-                mensaje,
-                clientes,
-                image_url=cfg.get("image_url") or None,
-                image_key=cfg.get("image_key") or None,
-                broadcast_id=bid,
-            )
+            try:
+                lotes = self._queue.encolar(
+                    mensaje,
+                    clientes,
+                    image_url=cfg.get("image_url") or None,
+                    image_key=cfg.get("image_key") or None,
+                    broadcast_id=bid,
+                )
+            except Exception as exc:
+                # M6: si el encolado a SQS falla (p. ej. PartialEnqueueError: unos lotes sí y otros no),
+                # NO dejar el canal WhatsApp sin arrancar (el job quedaría 'enviando' eterno). Se registra
+                # el error, se intenta WhatsApp (es independiente de Telegram) y se RE-LANZA para que el
+                # caller (receiver) haga su compensación de dedup según error.enqueued.
+                if self._broadcasts:
+                    try:
+                        self._broadcasts.registrar_error(bid, f"Telegram — fallo al encolar el envío: {exc}")
+                    except Exception:
+                        logger.exception("No se pudo registrar el fallo de encolado del job %s", bid)
+                if wa_on:
+                    self._forward_whatsapp(cfg, mensaje, self._image_url_para_whatsapp(cfg), bid, wa_mode, wa_list_ids)
+                raise
         logger.info("Difusión %s: %d lotes para %d clientes", bid, lotes, len(clientes))
         if wa_on:
             self._forward_whatsapp(cfg, mensaje, self._image_url_para_whatsapp(cfg), bid, wa_mode, wa_list_ids)
