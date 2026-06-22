@@ -400,8 +400,10 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "${ProjectName}-${EnvironmentName}-broadcast"
-      # VisibilityTimeout > timeout del worker para no reentregar lotes en vuelo.
-      VisibilityTimeout: !Ref WorkerTimeoutSeconds
+      # M24: VisibilityTimeout debe ser ESTRICTAMENTE MAYOR que el timeout del worker (300s) para que
+      # SQS no reentregue un lote que aún se está procesando (CFN no permite aritmética sobre el Ref;
+      # si subes WorkerTimeoutSeconds por encima de 360, sube también este valor).
+      VisibilityTimeout: 360
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt BroadcastDLQ.Arn
         maxReceiveCount: 5
@@ -750,6 +752,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:PutItem # crear el job del envío (estado)
+                  - dynamodb:UpdateItem # cerrar canal WhatsApp / marcar fallido si scheduling_enabled=False (inline) (B13)
                 Resource:
                   - !GetAtt BroadcastsTable.Arn
               - Effect: Allow
@@ -860,6 +863,7 @@ Resources:
                 Action:
                   - dynamodb:GetItem # leer progreso del job (¿terminó el lote?)
                   - dynamodb:PutItem # crear job al materializar un mensaje programado
+                  - dynamodb:UpdateItem # marcar WhatsApp fallido / cerrar canal (si no, AccessDenied silencioso y el job queda 'enviando' eterno)
                 Resource:
                   - !GetAtt BroadcastsTable.Arn
               - Effect: Allow
@@ -968,9 +972,11 @@ Resources:
               - Effect: Allow
                 Action:
                   - dynamodb:Scan # listar suscriptores
+                  - dynamodb:Query # listar_activos (GSI StatusIndex) en envío/preview manual modo bot
                   - dynamodb:UpdateItem # activar/desactivar
                 Resource:
                   - !GetAtt SubscribersTable.Arn
+                  - !Sub "${SubscribersTable.Arn}/index/*"
               - Effect: Allow
                 Action:
                   - sqs:GetQueueAttributes # profundidad de cola/DLQ
@@ -985,6 +991,7 @@ Resources:
                 Action:
                   - dynamodb:PutItem # crear job de envío manual
                   - dynamodb:Scan # listar envíos (estados)
+                  - dynamodb:UpdateItem # cerrar canal WhatsApp / marcar fallido en envío manual inline (B13)
                   - dynamodb:DeleteItem # borrar definitivamente envíos de la tabla
                 Resource:
                   - !GetAtt BroadcastsTable.Arn
