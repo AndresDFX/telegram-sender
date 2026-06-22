@@ -2127,7 +2127,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button style="margin-top:8px" onclick="saveExclPatterns('telegram')">Guardar patrones</button>
    </div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
-     <button class="sec" onclick="toggleAll(true)">Marcar visibles</button>
+     <button class="sec" onclick="toggleAll(true)">Marcar página</button>
      <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
      <button onclick="bulk('excluir')">Excluir marcados</button>
      <button onclick="bulk('incluir')">Incluir marcados</button>
@@ -2178,10 +2178,12 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button style="margin-top:8px" onclick="saveExclPatterns('whatsapp')">Guardar patrones</button>
    </div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
-     <button class="sec" onclick="waToggleAll(true)">Marcar visibles</button>
+     <button class="sec" onclick="waToggleAll(true)">Marcar página</button>
      <button class="sec" onclick="waToggleAll(false)">Desmarcar</button>
      <button onclick="waBulk('excluir')">Excluir marcados</button>
      <button onclick="waBulk('incluir')">Incluir marcados</button>
+     <button class="ghost" onclick="waBulkFiltered('excluir')">Excluir filtrados</button>
+     <button class="ghost" onclick="waBulkFiltered('incluir')">Incluir filtrados</button>
      <button class="sec" onclick="createListFromGrid('whatsapp')">➕ Lista con marcados</button>
      <button class="sec" onclick="createListFromIncluded('whatsapp')">➕ Lista con incluidos</button>
    </div>
@@ -3058,12 +3060,52 @@ function renderLists(ch){ const cont=$(listsBox(ch)); cont.innerHTML='';
   LISTS[ch].forEach((l,i)=>{ const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid #3A3A39';
     row.innerHTML=`<label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin:0"><input type="checkbox" ${active.has(l.name)?'checked':''} style="width:auto" onchange="toggleListActive('${ch}',${i},this.checked)"> <b>${bcEsc(l.name)}</b></label>`+
-      `<span class="hint">${l.ids.length} miembros</span>`+
+      `<button class="ghost" style="padding:3px 9px" onclick="listMembers('${ch}',${i})" title="Ver/editar miembros">${l.ids.length} miembros ›</button>`+
       `<button class="sec" onclick="addToList('${ch}',${i})">+ marcados</button>`+
       `<button class="ghost" onclick="removeFromList('${ch}',${i})">− marcados</button>`+
       `<button class="ghost" onclick="delList('${ch}',${i})">🗑</button>`;
     cont.appendChild(row); });
   document.querySelectorAll(`input[name=mode_${ch}]`).forEach(r=>r.checked=(r.value===((TGT[ch]||{}).mode||'all'))); }
+// Persiste listas/targets SIN recargar (loadCfg reemplazaría los objetos LISTS y rompería referencias en modales abiertos).
+async function persistListsQuiet(ch){ const body=ch==='telegram'?{telegram_lists:LISTS.telegram,telegram_target:TGT.telegram}:{whatsapp_lists:LISTS.whatsapp,whatsapp_target:TGT.whatsapp};
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); return true; }catch(e){ toast('No se pudo guardar',true); return false; } }
+// B5: ver/editar los miembros de una lista (resuelve nombres contra los contactos; marca y limpia huérfanos).
+function listMembers(ch,i){
+  const l=(LISTS[ch]||[])[i]; if(!l) return;
+  const dest=(ch==='telegram'?DEST:WA_DEST)||[];
+  const stale=(ch==='telegram'?TG_STALE:WA_STALE);
+  const idOf=ch==='telegram'?(x=>String(x.chatId)):(x=>String(x.id||''));
+  const nameOf=ch==='telegram'?(x=>x.name||'(sin nombre)'):(x=>waName(x));
+  const numOf=ch==='telegram'?(x=>String(x.phone||x.chatId||'')):(x=>waNum(x));
+  const byId={}; dest.forEach(x=>{ byId[idOf(x)]=x; });
+  const ov=document.createElement('div'); ov.className='ds-overlay';
+  const d=document.createElement('div'); d.className='ds-modal'; d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true');
+  const head=()=>'Miembros de "'+bcEsc(l.name)+'" ('+(l.ids||[]).length+')';
+  const rows=()=> (l.ids||[]).length ? (l.ids||[]).map(id=>{ const sid=String(id); const c=byId[sid];
+      const nm = c ? bcEsc(nameOf(c)) : (bcEsc(sid)+(stale?'':' <span style="color:var(--bad)">(ya no en contactos)</span>'));
+      const num = c ? bcEsc(numOf(c)) : '';
+      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd)"><span style="flex:1;min-width:0">'+nm+(num?(' <span class="hint">📞 '+num+'</span>'):'')+'</span><button class="ghost" style="padding:3px 9px;flex:none" data-rm="'+bcEsc(sid)+'">quitar</button></div>'; }).join('')
+    : '<div class="hint">Lista vacía. Marca contactos arriba y pulsa «+ marcados».</div>';
+  d.innerHTML='<h3 id="lm_h">'+head()+'</h3>'+
+    (stale?'<div class="hint" style="margin-bottom:6px">Cuenta no sincronizada: se muestran los ids guardados (sin nombres).</div>':'')+
+    '<div class="ds-modal-body" id="lm_body">'+rows()+'</div>'+
+    '<div class="ds-modal-actions"><button class="ghost" data-a="orphan">Limpiar huérfanos</button><button data-a="close">Cerrar</button></div>';
+  ov.appendChild(d); document.body.appendChild(ov);
+  const refresh=()=>{ const b=$('lm_body'); if(b) b.innerHTML=rows(); const h=$('lm_h'); if(h) h.textContent=head(); renderLists(ch); };
+  const close=()=>{ document.removeEventListener('keydown',onKey); ov.remove(); };
+  function onKey(e){ if(e.key==='Escape') close(); }
+  document.addEventListener('keydown',onKey);
+  ov.addEventListener('mousedown',e=>{ if(e.target===ov) close(); });
+  d.addEventListener('click', async e=>{ const t=e.target;
+    const rm=t.getAttribute&&t.getAttribute('data-rm');
+    if(rm){ l.ids=(l.ids||[]).filter(x=>String(x)!==rm); refresh(); await persistListsQuiet(ch); return; }
+    const a=t.getAttribute&&t.getAttribute('data-a');
+    if(a==='close'){ close(); return; }
+    if(a==='orphan'){ if(stale){ toast('Conecta la cuenta para limpiar huérfanos',true); return; }
+      const before=(l.ids||[]).length; l.ids=(l.ids||[]).filter(id=>byId[String(id)]); const removed=before-l.ids.length;
+      if(removed){ refresh(); await persistListsQuiet(ch); toast('✓ '+removed+' huérfano(s) quitado(s)'); } else toast('No hay huérfanos'); }
+  });
+}
 function addList(ch){ const inp=$(ch==='telegram'?'tg_newlist':'wa_newlist'); const n=inp.value.trim(); if(!n)return;
   if(LISTS[ch].some(l=>l.name===n)){ toast('Ya existe una lista con ese nombre',true); return; }
   LISTS[ch].push({name:n,ids:[]}); inp.value=''; renderLists(ch); }
@@ -3190,6 +3232,11 @@ async function waBulk(accion){ const ids=waSelectedIds(); if(!ids.length){ toast
       if(c && nameMatchesPatterns(waName(c), WA_EXCL_PAT)) WA_EXCEPT.add(id); else WA_EXCEPT.delete(id); } // excepción al patrón
   });
   if(await persistWaExcluded()) toast('✓ '+ids.length+' '+(accion==='excluir'?'excluidos':'incluidos')); }
+// M7: opera sobre TODOS los contactos que coinciden con el filtro/búsqueda (no solo la página visible).
+async function waBulkFiltered(accion){ const ids=waFiltered().map(c=>String(c.id||'')).filter(Boolean); if(!ids.length){ toast('Sin contactos que coincidan',true); return; }
+  ids.forEach(id=>{ if(accion==='excluir'){ WA_EXCLUDED.add(id); WA_EXCEPT.delete(id); }
+    else { WA_EXCLUDED.delete(id); const c=WA_DEST.find(x=>String(x.id||'')===id); if(c && nameMatchesPatterns(waName(c), WA_EXCL_PAT)) WA_EXCEPT.add(id); else WA_EXCEPT.delete(id); } });
+  if(await persistWaExcluded()) toast('✓ '+ids.length+' filtrados '+(accion==='excluir'?'excluidos':'incluidos')); }
 function waPrev(){ WA_PAGE--; renderWa(); }
 function waNext(){ WA_PAGE++; renderWa(); }
 // Sub-navegación genérica (por pestaña): muestra solo las tarjetas con el data-sub elegido.
