@@ -190,7 +190,15 @@ class SqsQueueStats(QueueStats):
             return {"error": "sin DLQ"}
         client = self._client()
         arn = client.get_queue_attributes(QueueUrl=self._dlq, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
-        client.start_message_move_task(SourceArn=arn)
+        try:
+            client.start_message_move_task(SourceArn=arn)
+        except Exception as e:
+            # M24: SQS solo permite UNA tarea de move por cola; un segundo redrive (doble clic) falla.
+            # Devolver un mensaje claro en vez de propagar un error genérico.
+            msg = str(e)
+            if any(t in msg.lower() for t in ("already", "in progress", "inprogress", "running", "limit")):
+                return {"ok": True, "redrive": "en_progreso", "detalle": "Ya hay un reintento en curso; espera a que termine."}
+            raise
         return {"ok": True, "redrive": "iniciado"}
 
     def dlq_purgar(self) -> dict:

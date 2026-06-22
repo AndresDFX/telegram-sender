@@ -2848,7 +2848,7 @@ async function loadDlq(){
 }
 async function dlqRedrive(){
   if(!await confirmModal('¿Reintentar todos los fallidos? Volverán a la cola para procesarse.',{okText:'Reintentar'})) return;
-  try{ await api('/api/dlq/redrive',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ Reintento iniciado'); setTimeout(()=>{ loadDlq(); loadQueue(); if($('k_dlq')) loadDashboard(); },1500); }  // M21: refresca cola + KPI
+  try{ const r=await api('/api/dlq/redrive',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast(r&&r.detalle? ('ℹ '+r.detalle) : '✓ Reintento iniciado'); setTimeout(()=>{ loadDlq(); loadQueue(); if($('k_dlq')) loadDashboard(); },1500); }  // M21+M24
   catch(e){ toast(e.message||'No se pudo reintentar (¿ya hay un reintento en curso?)',true); }
 }
 async function dlqPurge(){
@@ -2971,7 +2971,11 @@ async function loadDashboard(){
     const s=(m.serie||[]).slice(-14); const max=Math.max(1,...s.map(d=>(d.sent|0)+(d.failed|0)));
     if($('dash_serie')) $('dash_serie').innerHTML='<div class="hint" style="margin-top:0">Días con actividad (de los últimos 30; cada barra es un día con envíos)</div>'+
       '<div style="display:flex;gap:3px;align-items:flex-end;height:56px;margin-top:6px">'+
-      (s.length? s.map(d=>`<div title="${d.dia}: ${d.sent} enviados, ${d.failed} fallidos" style="flex:1;background:linear-gradient(180deg,var(--ac),var(--ac2));height:${Math.round(((d.sent|0)+(d.failed|0))/max*100)}%;min-height:2px;border-radius:3px 3px 0 0"></div>`).join('') : '<div class="hint">sin actividad aún</div>')+'</div>';
+      (s.length? s.map(d=>{ const se=(d.sent|0), fa=(d.failed|0), tot=se+fa, h=Math.round(tot/max*100), fp=tot?Math.round(fa/tot*100):0;
+        return `<div title="${d.dia}: ${se} enviados, ${fa} fallidos" style="flex:1;height:${h}%;min-height:2px;display:flex;flex-direction:column;justify-content:flex-end;border-radius:3px 3px 0 0;overflow:hidden">`+
+          (fa?`<div style="height:${fp}%;background:var(--bad)"></div>`:'')+
+          `<div style="flex:1;background:linear-gradient(180deg,var(--ac),var(--ac2))"></div></div>`; }).join('') : '<div class="hint">sin actividad aún</div>')+'</div>'+
+      '<div class="hint" style="margin-top:4px;font-size:11px"><span style="color:var(--ac)">■</span> enviados · <span style="color:var(--bad)">■</span> fallidos</div>';
     try{ const last=((await api('/api/broadcasts')).broadcasts||[])[0];
       if($('dash_last')) $('dash_last').innerHTML = last? ('Último envío: <b>'+bcEsc((last.text||'(imagen)').slice(0,48))+'</b> — '+(BC_STATUS[last.status]||last.status)+' · '+bcFmtTime(last.created_at)) : 'Aún no hay envíos.'; }catch(e){}
   }catch(e){ if($('dash_estado')) $('dash_estado').textContent='no se pudo cargar el resumen';
@@ -3643,8 +3647,8 @@ function plBatchLine(e){
 function plCard(p){
   const txt=(p.text||'').trim()||'(solo imagen)';
   const st=String(p.status||'pending'); const lab=PL_ST[st]||st; const pill=PL_PILL[st]||'queued';
-  const tgI=(p.tg&&p.tg.total)?`${ICO_TG} ${p.tg.next|0}/${p.tg.batches|0} lotes`:'';
-  const waI=(p.wa&&p.wa.enabled)?`${ICO_WA} ${p.wa.next|0}/${p.wa.batches|0} lotes`+(!p.wa.resolved?' (resolviendo…)':''):'';
+  const tgI=(p.tg&&p.tg.total)?`${ICO_TG} ${p.tg.next|0}/${p.tg.batches|0} lotes despachados`:'';
+  const waI=(p.wa&&p.wa.enabled)?`${ICO_WA} ${p.wa.next|0}/${p.wa.batches|0} lotes despachados`+(!p.wa.resolved?' (resolviendo…)':''):'';
   const lines=(p.log||[]).map(plBatchLine).join('') || '<div class="hint" style="margin-top:6px">Aún sin lotes despachados (esperando ventana/turno).</div>';
   const activo=(st==='pending'||st==='running');
   const cancelBtn=activo?`<button class="danger" style="padding:6px 12px" onclick="cancelPlan('${p.pid}')">🛑 Cancelar este envío</button>`:'';
