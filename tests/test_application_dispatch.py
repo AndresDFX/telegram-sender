@@ -184,6 +184,22 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(res["diferido"], "fuera de ventana")
         self.assertEqual(plans.dispatched, [])
 
+    def test_manual_inmediato_salta_ventana_cerrada(self):
+        # "Enviar en el momento" (manual, not_before=0) IGNORA la ventana: sale aunque esté cerrada.
+        plans, queue = FakePlans(_plan(source="manual")), FakeQueue()
+        cfg = FakeConfig(window_enabled=True, window_start="08:00", window_end="20:00", window_tz=0)
+        res = _disp(plans, queue=queue, config=cfg, now=22 * 3600)()  # 22:00 UTC fuera de ventana
+        self.assertEqual(res.get("despachado"), "TG#0")  # sale igual
+        self.assertEqual(len(queue.calls), 1)
+
+    def test_manual_programado_respeta_ventana(self):
+        # Un manual PROGRAMADO (not_before>0, ya vencido) SÍ respeta la ventana (no es "en el momento").
+        plans = FakePlans(_plan(source="manual", not_before=1))
+        cfg = FakeConfig(window_enabled=True, window_start="08:00", window_end="20:00", window_tz=0)
+        res = _disp(plans, config=cfg, now=22 * 3600)()  # vencido pero fuera de ventana
+        self.assertEqual(res["diferido"], "fuera de ventana")
+        self.assertEqual(plans.dispatched, [])
+
     def test_ventana_tg_cerrada_no_frena_a_wa(self):
         # Horarios INDEPENDIENTES: TG fuera de su ventana, WA dentro -> se despacha WA igual.
         plans = FakePlans(_plan(wa_enabled=True, wa_resolved=True, wa_total=150, wa_batches=1))

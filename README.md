@@ -198,7 +198,9 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
   (`tg_window_*` / `wa_window_*`, con `window_tz` compartido; si falta, hereda la ventana global). El dispatcher
   evalúa la ventana **por canal**: una ventana cerrada en un canal NO frena al otro, y un WhatsApp caído (no
   resuelve su total) **no bloquea** los envíos de Telegram (Telegram se despacha primero, sin depender de WhatsApp).
-  Los delays anti-baneo también son por canal (`tg_delay_*` / `wa_delay_*`).
+  Los delays anti-baneo también son por canal (`tg_delay_*` / `wa_delay_*`). **El envío MANUAL INMEDIATO**
+  («Componer → Enviar en el momento», `source="manual"` y `not_before=0`) **salta la ventana** y sale al instante;
+  la ventana sigue aplicando a lo automático del canal y a los envíos manuales **programados**.
 - **Recopilación y envío SEPARADOS** (dos interruptores independientes):
   - **Recopilación** (`capture_enabled`): el poller lee `@iproparts` y, por cada lista nueva, la registra
     (visible en el panel como **📥 Capturada**) y se la **autoenvía a Mensajes Guardados** del userbot

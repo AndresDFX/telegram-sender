@@ -98,8 +98,12 @@ class DispatchCampaigns:
         # Ventanas horarias POR CANAL (independientes): el horario de Telegram y el de WhatsApp se
         # evalúan por separado, así una ventana cerrada en un canal NO frena al otro. Si un canal no
         # tiene horario propio configurado, hereda el global (compatibilidad).
-        tg_open = self._ventana_canal(cfg, "tg", now)
-        wa_open = self._ventana_canal(cfg, "wa", now)
+        # EXCEPCIÓN: el envío MANUAL INMEDIATO ("Componer → Enviar en el momento": source="manual" y
+        # sin hora programada, not_before=0) SALTA la ventana — el usuario pidió enviar YA. La ventana
+        # (anti-baneo) sigue aplicando a lo automático del canal y a los envíos manuales PROGRAMADOS.
+        salta_ventana = plan.get("source") == "manual" and int(plan.get("not_before", 0)) == 0
+        tg_open = salta_ventana or self._ventana_canal(cfg, "tg", now)
+        wa_open = salta_ventana or self._ventana_canal(cfg, "wa", now)
 
         # 2) Telegram: independiente de WhatsApp. Se despacha si tiene lotes pendientes y su ventana
         #    está abierta. NO se resuelve nada de WhatsApp antes, para que una caída de WhatsApp

@@ -1404,7 +1404,12 @@ input[type=file]::file-selector-button{
   background:#34322F;border:1px solid var(--bd2);color:var(--tx2);
   border-radius:8px;padding:7px 13px;margin-right:12px;cursor:pointer;font:inherit;font-weight:600}
 input[type=file]::file-selector-button:hover{background:#3F3D39}
-input[type=checkbox],input[type=radio]{accent-color:var(--ac);width:auto;cursor:pointer}
+/* Reset: los checkbox/radio NO deben heredar el padding/borde/fondo del input de texto (arriba),
+   que les pintaba una caja fea alrededor. Render nativo limpio con el acento de marca. */
+input[type=checkbox],input[type=radio]{
+  accent-color:var(--ac);width:auto;cursor:pointer;
+  padding:0;border:0;background:none;border-radius:0;box-shadow:none;margin:0;vertical-align:middle;flex:none;
+}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .row>*{min-width:0}
 
