@@ -2248,7 +2248,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
 
    <label style="margin-top:16px">Programar (opcional)</label>
    <input type="datetime-local" id="bc_sched" style="max-width:260px">
-   <div class="hint">Vacío = enviar ya (fraccionado). Con fecha/hora = se difiere hasta entonces y luego se gotea por lotes.</div>
+   <div class="hint">Vacío = enviar ya (fraccionado). Con fecha/hora = se difiere hasta entonces y luego se gotea por lotes. La hora se interpreta en la <b>zona horaria configurada</b> (Ajustes → Envío → Anti-baneo), no en la de tu navegador.</div>
 
    <div class="compose-actions">
      <button id="bc_send" onclick="sendBroadcast()">Enviar</button>
@@ -3287,6 +3287,12 @@ function bcValidate(){ const btn=$('bc_send'); if(!btn) return;
   else if(($('bc_text').value||'').length>4096) reason='El mensaje supera 4096 caracteres';
   else if(bcWaNoList()) reason='WhatsApp necesita una lista o contactos marcados';
   btn.disabled=!!reason; btn.title=reason||'Enviar'; }
+// M40/M3/M9: el datetime-local se interpreta en la ZONA CONFIGURADA (window_tz), no en la del
+// navegador, para que coincida con la ventana de envío del servidor. (Si navegador==zona, no cambia.)
+function schedTz(){ return parseInt(($('window_tz')&&$('window_tz').value)||'-300',10) || -300; }
+function schedTzLabel(){ const t=schedTz(), s=t<0?'-':'+', a=Math.abs(t); return 'UTC'+s+String(Math.floor(a/60)).padStart(2,'0')+':'+String(a%60).padStart(2,'0'); }
+function schedEpoch(sv){ const m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(sv||''); if(!m) return 0;
+  const utc=Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]); return Math.floor((utc - schedTz()*60000)/1000); }
 // --- selección de contactos (picker) en el compositor ---
 let BC_TG_SEL=new Set(), BC_WA_SEL=new Set();
 function bcSel(ch){ return ch==='tg'?BC_TG_SEL:BC_WA_SEL; }
@@ -3405,10 +3411,10 @@ async function sendBroadcast(){
   if(BC_IMG_KEY) body.image_key=BC_IMG_KEY;   // clave S3: el backend re-firma la imagen al despachar
   // Programación opcional: datetime-local -> epoch (s). Vacío = enviar ya.
   let ep=0; const sv=$('bc_sched')?$('bc_sched').value:'';
-  if(sv){ ep=Math.floor(new Date(sv).getTime()/1000); if(ep>Math.floor(Date.now()/1000)) body.scheduled_at=ep; else { toast('La fecha programada debe ser futura',true); return; } }
+  if(sv){ ep=schedEpoch(sv); if(ep>Math.floor(Date.now()/1000)) body.scheduled_at=ep; else { toast('La fecha programada debe ser futura',true); return; } }
   // Canales EXPLÍCITOS en la confirmación: que se vea si saldrá por Telegram, WhatsApp o ambos.
   const chs=[tg&&'Telegram', wa&&'WhatsApp'].filter(Boolean).join(' + ');
-  let msg = body.scheduled_at ? ('¿Programar este envío para '+new Date(sv).toLocaleString('es')+'?') : '¿Enviar este mensaje ahora?';
+  let msg = body.scheduled_at ? ('¿Programar este envío para '+sv.replace('T',' ')+' ('+schedTzLabel()+')?') : '¿Enviar este mensaje ahora?';
   msg += '\n\nSe enviará por: '+chs+'.';
   if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
   if(!await confirmModal(msg,{okText: body.scheduled_at ? 'Programar' : 'Enviar'})) return;
@@ -3472,7 +3478,7 @@ async function sgCreate(){
   if(!body.telegram && !body.whatsapp){ toast('Elige al menos un canal',true); return; }
   if(body.whatsapp && !body.whatsapp_list){ toast('Elige una lista de WhatsApp (no se envía a toda la agenda)',true); const s=$('sg_wa_list'); if(s){ s.focus(); } return; }
   if(t==='once'){ const v=$('sg_run_at').value; if(!v){ toast('Elige fecha y hora',true); return; }
-    body.run_at=Math.floor(new Date(v).getTime()/1000); }
+    body.run_at=schedEpoch(v); }  // M40: en la zona configurada, no la del navegador
   else { body.at=$('sg_at').value; if(t==='weekly') body.days=[...SG_DAYS]; }
   $('sg_create').disabled=true; $('sg_create').classList.add('btn-loading'); $('sg_status').textContent='Guardando…';
   try{
