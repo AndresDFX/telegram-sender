@@ -1971,9 +1971,9 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div id="dash_estado" class="callout">cargando…</div>
    <div class="stats" style="margin-top:14px">
      <div class="stat"><b id="k_sent">–</b><span>enviados (30 días)</span></div>
-     <div class="stat"><b id="k_rate">–</b><span>tasa de éxito</span></div>
+     <div class="stat"><b id="k_rate">–</b><span>tasa de éxito <span class="help" tabindex="0" data-tip="Histórica de los últimos 30 días, sobre los envíos contabilizados. No es el estado actual.">ⓘ</span></span></div>
      <div class="stat"><b id="k_pend">–</b><span>lotes pendientes</span></div>
-     <div class="stat"><b id="k_dlq">–</b><span>en DLQ</span></div>
+     <div class="stat"><b id="k_dlq">–</b><span>en DLQ <span class="help" tabindex="0" data-tip="Lotes atascados ahora mismo (cola de fallidos SQS). Es un conteo APROXIMADO: puede tardar unos segundos en actualizarse tras reintentar/descartar, y convivir con una tasa de éxito alta (la tasa es histórica).">ⓘ</span></span></div>
    </div>
    <div id="dash_serie" style="margin-top:16px"></div>
    <div id="dash_last" class="hint" style="margin-top:14px"></div>
@@ -2863,7 +2863,7 @@ async function loadBlocked(){
 async function clearBlocked(){
   if(!await confirmModal('¿Reincluir a TODOS los auto-excluidos? Volverán a recibir envíos.',{okText:'Reincluir'})) return;
   try{ await api('/api/whatsapp/blocked/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ Reincluidos'); loadBlocked(); }
-  catch(e){ toast('Error',true); }
+  catch(e){ toast('No se pudieron reincluir los contactos',true); }
 }
 // --- Auditoría (acciones del panel) ---
 async function loadAudit(){
@@ -3220,7 +3220,18 @@ let BC_IMG_URL = '';           // URL (solo preview) devuelta tras subir un arch
 let BC_IMG_KEY = '';           // clave S3 de la imagen subida (se re-firma al despachar)
 function bcCount(){ const n=$('bc_text').value.length, el=$('bc_count');
   el.textContent = n>4096 ? (n+' / 4096 · supera el límite de Telegram') : (n+(n===1?' carácter':' caracteres'));
-  el.dataset.near = (n>3600 && n<=4096) ? '1':'0'; el.dataset.over = n>4096 ? '1':'0'; }
+  el.dataset.near = (n>3600 && n<=4096) ? '1':'0'; el.dataset.over = n>4096 ? '1':'0'; bcValidate(); }
+// B1: habilita/inhabilita "Enviar" según el estado, con motivo en el title (antes solo durante la petición).
+function bcWaNoList(){ return $('bc_whatsapp').checked && !$('bc_wa_list').value && !BC_WA_SEL.size; }
+function bcValidate(){ const btn=$('bc_send'); if(!btn) return;
+  const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked;
+  const hasText=($('bc_text').value||'').trim().length>0, hasImg=!!bcEffectiveUrl();
+  let reason='';
+  if(!tg && !wa) reason='Elige al menos un canal (Telegram o WhatsApp)';
+  else if(!hasText && !hasImg) reason='Escribe un mensaje o añade una imagen';
+  else if(($('bc_text').value||'').length>4096) reason='El mensaje supera 4096 caracteres';
+  else if(bcWaNoList()) reason='WhatsApp necesita una lista o contactos marcados';
+  btn.disabled=!!reason; btn.title=reason||'Enviar'; }
 // --- selección de contactos (picker) en el compositor ---
 let BC_TG_SEL=new Set(), BC_WA_SEL=new Set();
 function bcSel(ch){ return ch==='tg'?BC_TG_SEL:BC_WA_SEL; }
@@ -3273,13 +3284,16 @@ function bcBody(extra){
 }
 let BC_PREV_T=null;
 async function bcPrev(){
-  clearTimeout(BC_PREV_T);
+  clearTimeout(BC_PREV_T); bcValidate();
   const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked, out=$('bc_preview');
-  if(!tg && !wa){ out.textContent='—'; return; }
+  // B3: sin canal elegido, guiar en vez de mostrar "—".
+  if(!tg && !wa){ out.innerHTML='<span class="hint">Elige Telegram o WhatsApp arriba para seleccionar destinatarios.</span>'; return; }
+  // M2: WhatsApp marcado sin lista ni contactos → avisar (no mostrar un conteo enorme tranquilizador).
+  const waWarn = bcWaNoList() ? (ICO_WA+' WhatsApp: <span style="color:var(--bad)">elige una lista (no se envía a toda la agenda)</span>') : null;
   const noSync='<span class="hint">(cuenta no conectada)</span>';  // no mostramos conteos del caché viejo
   // Si TODOS los canales elegidos están sin sincronizar, ni siquiera consultamos el conteo.
   if((!tg || TG_STALE) && (!wa || WA_STALE)){
-    const parts=[]; if(tg) parts.push(ICO_TG+' Telegram: '+noSync); if(wa) parts.push(ICO_WA+' WhatsApp: '+noSync);
+    const parts=[]; if(tg) parts.push(ICO_TG+' Telegram: '+noSync); if(wa) parts.push(waWarn || (ICO_WA+' WhatsApp: '+noSync));
     out.innerHTML=parts.join(' · '); return;
   }
   out.textContent='calculando destinatarios…';
@@ -3287,7 +3301,7 @@ async function bcPrev(){
     try{ const r=await api('/api/broadcast/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bcBody())});
       const parts=[];
       if(tg) parts.push(ICO_TG+' Telegram: '+(TG_STALE?noSync:('<b>'+(r.telegram??0)+'</b>')));
-      if(wa) parts.push(ICO_WA+' WhatsApp: '+(WA_STALE?noSync:('<b>'+(r.whatsapp??0)+'</b>')));
+      if(wa) parts.push(waWarn || (ICO_WA+' WhatsApp: '+(WA_STALE?noSync:('<b>'+(r.whatsapp??0)+'</b>'))));
       out.innerHTML='Se enviará a → '+parts.join(' · ');
     }catch(e){ out.textContent='no se pudo calcular la previsualización'; }
   }, 300);
@@ -3297,6 +3311,7 @@ function bcPreview(){
   const u=bcEffectiveUrl(), p=$('bc_imgprev');
   if(u){ p.onerror=()=>{ p.style.display='none'; toast('No se pudo cargar la imagen de esa URL',true); };  // B2: URL rota no deja un <img> roto
     p.src=u; p.style.display='block'; } else { p.onerror=null; p.style.display='none'; p.removeAttribute('src'); }
+  bcValidate();
 }
 async function bcUploadImg(){
   const f=$('bc_imgfile').files[0]; if(!f) return;
@@ -3452,9 +3467,9 @@ async function sgDeleteSelected(){ const sids=sgSelectedSids(); if(!sids.length)
 async function sgDeleteAll(){ if(!await confirmModal('¿Borrar TODOS los mensajes programados? No se puede deshacer.',{danger:true,okText:'Borrar todos'})) return;
   try{ const r=await api('/api/schedules/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({all:true})}); toast('✓ '+(r.deleted||0)+' borrados'); loadSchedules(); }
   catch(e){ toast('Error al borrar',true); } }
-async function sgToggle(sid,en){ try{ await api('/api/schedules/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid,enabled:en})}); loadSchedules(); }catch(e){ toast('Error',true); } }
+async function sgToggle(sid,en){ try{ await api('/api/schedules/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid,enabled:en})}); loadSchedules(); }catch(e){ toast('No se pudo cambiar el estado del programado',true); } }
 async function sgDelete(sid){ if(!await confirmModal('¿Borrar este mensaje programado?',{danger:true,okText:'Borrar'})) return;
-  try{ await api('/api/schedules/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid})}); toast('✓ Borrado'); loadSchedules(); }catch(e){ toast('Error',true); } }
+  try{ await api('/api/schedules/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid})}); toast('✓ Borrado'); loadSchedules(); }catch(e){ toast('No se pudo borrar el programado',true); } }
 function bcFmtTime(t){
   if(!t) return '';
   const d=new Date(typeof t==='number'? (t<1e12? t*1000 : t) : t);
