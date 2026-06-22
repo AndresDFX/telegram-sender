@@ -644,6 +644,21 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json(_config_publico())
         if sub == "/api/config" and method == "POST":
             cambios = _sanea_config(_body(event))
+            # A12: guardia de BACKEND (espejo de la del panel). Activar el ENVÍO automático exige tener
+            # elegida una LISTA por canal; si no, un post del canal se difundiría a TODOS los contactos.
+            # El front ya lo valida, pero una llamada directa a la API (o config heredada / lista borrada)
+            # lo saltaba. Se valida sobre la config EFECTIVA (actual + cambios de esta misma petición).
+            if cambios.get("sending_enabled") is True:
+                efectiva = {**config.get(), **cambios}
+                faltan = []
+                if not str(efectiva.get("auto_telegram_list") or "").strip():
+                    faltan.append("Telegram")
+                if efectiva.get("whatsapp_enabled") and not str(efectiva.get("auto_whatsapp_list") or "").strip():
+                    faltan.append("WhatsApp")
+                if faltan:
+                    return _json({"error": "Antes de activar el envío automático, elige una lista para: "
+                                  + " y ".join(faltan) + " (Ajustes → «Lista del envío automático»), "
+                                  "para no difundir a TODOS los contactos por error."}, 400)
             _audit("config", "campos: " + (", ".join(sorted(cambios.keys())) or "(ninguno)"))
             return _json(config.set(cambios))
         if sub == "/api/patterns" and method == "GET":

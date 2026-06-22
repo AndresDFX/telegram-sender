@@ -238,6 +238,7 @@ Lista accionable para no repetir fallos:
 - **Una URL S3 prefirmada solo es válida si el ROL que la firma tiene `s3:GetObject`.** El rol del **dispatcher** NO lo tenía → 403 al descargar (texto llegaba, imagen no). Fix: añadir `s3:GetObject` sobre `images/*` al dispatcher.
 - Checkbox Telegram nacía `checked` → mensajes por AMBOS canales. Fix: ningún canal preseleccionado + confirmación de canales.
 - WhatsApp manual exige el servicio CONFIGURADO (url+token), NO `whatsapp_enabled` (que es el auto-reenvío del canal).
+- **Envío automático SIEMPRE por lista elegida (A12):** el ENVÍO automático del canal difunde SOLO a la lista `auto_<canal>_list` elegida en Ajustes. Si un canal no tiene lista elegida NO difunde (antes caía a `<canal>_target`=`{mode:'all'}` → toda la agenda); si NINGÚN canal tiene lista, el post se trata como **captura** (registra + preview, no envía). En consecuencia el automático va siempre en modo `only` y NO aplica la auto-exclusión por patrón de nombre (esa solo actúa en envíos AMPLIOS/manuales). La guardia "elige lista antes de activar" se enforza también en el **backend**: `/api/config POST` rechaza con **400** activar `sending_enabled` sin `auto_telegram_list` (y sin `auto_whatsapp_list` si `whatsapp_enabled`), no solo en el front.
 
 ### Truncado de mensajes
 

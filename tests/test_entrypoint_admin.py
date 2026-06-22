@@ -163,6 +163,22 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(guardado["strip_patterns"], ["a", "b"])    # textarea -> lista
         self.assertNotIn("basura", guardado)                         # ignorado
 
+    def test_a12_activar_envio_sin_lista_rechaza_400(self):
+        # A12: activar sending_enabled sin auto_telegram_list se rechaza (400) y NO se guarda,
+        # para no difundir a TODOS los contactos por error (guardia de backend, no solo del front).
+        resp = admin.lambda_handler(_event("POST", "/admin/api/config", {"sending_enabled": True}), None)
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertIn("lista", json.loads(resp["body"])["error"].lower())
+        self.assertIsNone(admin.config.saved)  # no se persistió el cambio
+
+    def test_a12_activar_envio_con_lista_ok(self):
+        # Con la lista elegida en la misma petición, la activación se acepta.
+        body = {"sending_enabled": True, "auto_telegram_list": "VIP"}
+        resp = admin.lambda_handler(_event("POST", "/admin/api/config", body), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertTrue(admin.config.saved["sending_enabled"])
+        self.assertEqual(admin.config.saved["auto_telegram_list"], "VIP")
+
     def test_get_subscribers(self):
         resp = admin.lambda_handler(_event("GET", "/admin/api/subscribers"), None)
         subs = json.loads(resp["body"])["subscribers"]

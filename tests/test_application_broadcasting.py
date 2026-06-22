@@ -80,13 +80,24 @@ class FakePreview:
         return None
 
 
+def _auto(ids, **over):
+    """FakeConfig con una lista 'Auto' (= ids dados) elegida para el envío automático de Telegram.
+    A12: el envío automático exige una lista elegida; sin ella un post se trata como captura."""
+    over.setdefault("telegram_lists", [{"name": "Auto", "ids": [str(i) for i in ids]}])
+    over.setdefault("auto_telegram_list", "Auto")
+    return FakeConfig(**over)
+
+
 class ExclusionPatronTelegramTests(unittest.TestCase):
+    # NOTA (A12): el envío AUTOMÁTICO es siempre por LISTA elegida (modo 'only') y NO aplica el patrón
+    # de nombre. La auto-exclusión por patrón solo actúa en envíos AMPLIOS (manual sin lista / 'all'),
+    # por eso estos tests ejercen _destinatarios_telegram con target amplio (su entrada real ahora).
     def test_canal_excluye_por_patron_de_nombre(self):
-        queue = FakeQueue()
         subs = FakeSubs(["1", "2", "3"], names={"1": "FAM Juan", "2": "Cliente", "3": "María"})
         cfg = FakeConfig(currency_symbols="$💸💲", telegram_exclude_patterns=["fam"])
-        BroadcastList(subs, queue, cfg)("Hola $100.000")
-        self.assertEqual(set(queue.calls[0][1]), {"2", "3"})  # "FAM Juan" auto-excluido
+        bl = BroadcastList(subs, FakeQueue(), cfg)
+        dest = bl._destinatarios_telegram(cfg.get(), {"mode": "all", "lists": []})
+        self.assertEqual(set(dest), {"2", "3"})  # "FAM Juan" auto-excluido
 
     def test_ids_ad_hoc_ignoran_el_patron_seleccion_explicita(self):
         # Selección EXPLÍCITA por id/número: se envía a EXACTAMENTE esos contactos, AUNQUE su
@@ -117,26 +128,25 @@ class ExclusionPatronTelegramTests(unittest.TestCase):
         self.assertEqual(set(bl._destinatarios_telegram(cfg.get())), {"2"})  # "1" excluido en modo all
 
     def test_sin_patron_no_excluye(self):
-        queue = FakeQueue()
         subs = FakeSubs(["1", "2"], names={"1": "FAM Juan", "2": "Cliente"})
         cfg = FakeConfig(currency_symbols="$💸💲")
-        BroadcastList(subs, queue, cfg)("Hola $100.000")
-        self.assertEqual(set(queue.calls[0][1]), {"1", "2"})
+        bl = BroadcastList(subs, FakeQueue(), cfg)
+        self.assertEqual(set(bl._destinatarios_telegram(cfg.get(), {"mode": "all", "lists": []})), {"1", "2"})
 
     def test_excepcion_incluye_pese_al_patron(self):
         # "1" (FAM Juan) coincide con el patrón pero está exento -> se incluye
-        queue = FakeQueue()
         subs = FakeSubs(["1", "2", "3"], names={"1": "FAM Juan", "2": "Cliente", "3": "FAM Ana"})
         cfg = FakeConfig(currency_symbols="$💸💲", telegram_exclude_patterns=["fam"],
                          telegram_pattern_exceptions=["1"])
-        BroadcastList(subs, queue, cfg)("Hola $100.000")
-        self.assertEqual(set(queue.calls[0][1]), {"1", "2"})  # "3" (FAM Ana) sigue excluido
+        bl = BroadcastList(subs, FakeQueue(), cfg)
+        dest = bl._destinatarios_telegram(cfg.get(), {"mode": "all", "lists": []})
+        self.assertEqual(set(dest), {"1", "2"})  # "3" (FAM Ana) sigue excluido
 
 
 class BroadcastListTests(unittest.TestCase):
     def test_compone_quita_ubicacion_markup_y_footer(self):
         queue = FakeQueue()
-        bl = BroadcastList(FakeSubs(["1", "2"]), queue, FakeConfig())
+        bl = BroadcastList(FakeSubs(["1", "2"]), queue, _auto(["1", "2"]))
         res = bl("UBICADOS aqui\nA06 4-64GB $100.000")
 
         self.assertEqual(res["batches"], 1)
@@ -151,7 +161,7 @@ class BroadcastListTests(unittest.TestCase):
 
     def test_pasa_image_url_si_configurada(self):
         queue = FakeQueue()
-        BroadcastList(FakeSubs(["1"]), queue, FakeConfig(image_url="http://img/p.jpg"))("A $100.000")
+        BroadcastList(FakeSubs(["1"]), queue, _auto(["1"], image_url="http://img/p.jpg"))("A $100.000")
         self.assertEqual(queue.calls[0][2], "http://img/p.jpg")
 
     def test_envio_apagado_solo_captura_no_crea_plan_ni_envia(self):
@@ -183,14 +193,26 @@ class BroadcastListTests(unittest.TestCase):
         BroadcastList(FakeSubs(["1", "2", "3"]), queue, cfg)("A $100.000")
         self.assertEqual(set(queue.calls[0][1]), {"1", "3"})  # "2" fuera (no está en la lista Auto)
 
+    def test_a12_envio_activo_sin_lista_captura_no_difunde(self):
+        # A12: envío automático ACTIVO pero sin auto_telegram_list ni auto_whatsapp_list → NO difunde
+        # a 'todos'; se trata como captura (registra + preview) en vez de inundar la agenda.
+        queue, prev = FakeQueue(), FakePreview()
+        bl = BroadcastList(FakeSubs(["1", "2", "3"]), queue, FakeConfig(whatsapp_enabled=False), preview_sender=prev)
+        res = bl("A $100.000")
+        self.assertTrue(res.get("captured"))
+        self.assertTrue(res.get("sin_lista"))
+        self.assertEqual(queue.calls, [])           # NO difunde a nadie
+        self.assertEqual(len(prev.sent), 1)         # se previsualiza en Mensajes Guardados
+
     def test_excluye_ids(self):
         queue = FakeQueue()
-        BroadcastList(FakeSubs(["1", "2", "3"]), queue, FakeConfig(excluded_ids=["2"]))("A $100.000")
+        # excluded_ids aplica también en modo 'only' (auto-lista): "2" se cae aunque esté en la lista.
+        BroadcastList(FakeSubs(["1", "2", "3"]), queue, _auto(["1", "2", "3"], excluded_ids=["2"]))("A $100.000")
         self.assertEqual(queue.calls[0][1], ["1", "3"])  # 2 excluido
 
     def test_pasa_image_key(self):
         queue = FakeQueue()
-        BroadcastList(FakeSubs(["1"]), queue, FakeConfig(image_key="images/broadcast.jpg"))("A $100.000")
+        BroadcastList(FakeSubs(["1"]), queue, _auto(["1"], image_key="images/broadcast.jpg"))("A $100.000")
         self.assertEqual(queue.calls[0][3], "images/broadcast.jpg")
 
     def test_reenvia_a_whatsapp_si_activo(self):
@@ -203,7 +225,9 @@ class BroadcastListTests(unittest.TestCase):
                 return {"accepted": True}
 
         wa = FakeWa()
-        BroadcastList(FakeSubs(["1"]), FakeQueue(), FakeConfig(whatsapp_enabled=True, image_url="http://img"), whatsapp=wa)("A $100.000")
+        cfg = FakeConfig(whatsapp_enabled=True, image_url="http://img",
+                         whatsapp_lists=[{"name": "WA", "ids": ["57300@s.whatsapp.net"]}], auto_whatsapp_list="WA")
+        BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, whatsapp=wa)("A $100.000")
         self.assertEqual(len(wa.calls), 1)
         text, image_url, exclude, mode, list_ids = wa.calls[0]
         self.assertIn("$115.000", text)
@@ -211,21 +235,21 @@ class BroadcastListTests(unittest.TestCase):
 
     def test_telegram_whitelist_solo_envia_a_listas_activas(self):
         queue = FakeQueue()
+        # Envío automático por LISTA elegida (auto_telegram_list="VIP"): solo VIP ∩ contactos.
         cfg = FakeConfig(
             telegram_lists=[{"name": "VIP", "ids": ["1", "3"]}, {"name": "otros", "ids": ["2"]}],
-            telegram_target={"mode": "only", "lists": ["VIP"]},
+            auto_telegram_list="VIP",
         )
         BroadcastList(FakeSubs(["1", "2", "3", "4"]), queue, cfg)("A $100.000")
         self.assertEqual(queue.calls[0][1], ["1", "3"])  # solo VIP, intersecado con contactos
 
     def test_telegram_blacklist_excluye_listas_activas(self):
-        queue = FakeQueue()
-        cfg = FakeConfig(
-            telegram_lists=[{"name": "bloqueados", "ids": ["2", "4"]}],
-            telegram_target={"mode": "except", "lists": ["bloqueados"]},
-        )
-        BroadcastList(FakeSubs(["1", "2", "3", "4"]), queue, cfg)("A $100.000")
-        self.assertEqual(queue.calls[0][1], ["1", "3"])
+        # El modo 'except' (blacklist) es propio del envío AMPLIO (manual): el automático es por lista.
+        # Se ejercita _destinatarios_telegram con target except (su entrada real).
+        cfg = FakeConfig(telegram_lists=[{"name": "bloqueados", "ids": ["2", "4"]}])
+        bl = BroadcastList(FakeSubs(["1", "2", "3", "4"]), FakeQueue(), cfg)
+        dest = bl._destinatarios_telegram(cfg.get(), {"mode": "except", "lists": ["bloqueados"]})
+        self.assertEqual(sorted(dest), ["1", "3"])
 
     def test_whatsapp_recibe_modo_y_list_ids(self):
         class FakeWa:
@@ -240,7 +264,7 @@ class BroadcastListTests(unittest.TestCase):
         cfg = FakeConfig(
             whatsapp_enabled=True,
             whatsapp_lists=[{"name": "clientes", "ids": ["57300@s.whatsapp.net", "57301@s.whatsapp.net"]}],
-            whatsapp_target={"mode": "only", "lists": ["clientes"]},
+            auto_whatsapp_list="clientes",
         )
         BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, whatsapp=wa)("A $100.000")
         mode, list_ids = wa.calls[0]
@@ -341,7 +365,7 @@ class SchedulerPathTests(unittest.TestCase):
 
     def test_canal_crea_plan_fraccionado_y_no_encola(self):
         queue, plans = FakeQueue(), FakePlans()
-        cfg = FakeConfig(scheduling_enabled=True, batch_size=2)
+        cfg = _auto(["1", "2", "3"], scheduling_enabled=True, batch_size=2)
         bl = BroadcastList(FakeSubs(["1", "2", "3"]), queue, cfg, plans=plans)
         res = bl("A06 $100.000")
         self.assertTrue(res["scheduled"])
@@ -389,7 +413,7 @@ class SchedulerPathTests(unittest.TestCase):
 
     def test_canal_etiqueta_source_channel(self):
         plans = FakePlans()
-        cfg = FakeConfig(scheduling_enabled=True)
+        cfg = _auto(["1"], scheduling_enabled=True)
         bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, plans=plans)
         bl("A06 $100.000")
         self.assertEqual(plans.creados[0]["source"], "channel")
@@ -435,7 +459,7 @@ class SchedulerPathTests(unittest.TestCase):
     def test_fallback_legacy_si_no_hay_plans(self):
         # scheduling_enabled pero sin store de planes -> envío inmediato (compatibilidad)
         queue = FakeQueue()
-        bl = BroadcastList(FakeSubs(["1"]), queue, FakeConfig(scheduling_enabled=True), plans=None)
+        bl = BroadcastList(FakeSubs(["1"]), queue, _auto(["1"], scheduling_enabled=True), plans=None)
         bl("A $100.000")
         self.assertEqual(len(queue.calls), 1)
 

@@ -203,15 +203,18 @@ class BroadcastList:
             except Exception:
                 logger.exception("No se pudo marcar WhatsApp fallido en el job %s", broadcast_id)
 
-    def _auto_target(self, cfg: dict, canal: str) -> dict:
+    def _auto_target(self, cfg: dict, canal: str) -> dict | None:
         """Target del ENVÍO AUTOMÁTICO del canal para ``canal`` (telegram/whatsapp): la LISTA
-        elegida en el panel para ese canal (``auto_<canal>_list``). Si no se eligió ninguna,
-        cae al target configurado del canal (``<canal>_target``). El panel exige elegir una lista
-        antes de activar el envío para no difundir a 'todos' por error."""
+        elegida en el panel para ese canal (``auto_<canal>_list``).
+
+        A12: si NO se eligió lista para ese canal, devuelve ``None`` (ese canal NO difunde
+        automáticamente). ANTES caía a ``<canal>_target`` (default ``{mode:'all'}``) → un post del
+        canal se difundía a TODA la agenda por un descuido. Difundir a 'todos' por omisión es justo
+        el riesgo que el diseño evita; la guardia se enforza también en el backend (no solo el front)."""
         nombre = str(cfg.get(f"auto_{canal}_list") or "").strip()
         if nombre:
             return {"mode": "only", "lists": [nombre]}
-        return cfg.get(f"{canal}_target", {})
+        return None
 
     def _preview(self, mensaje: str) -> bool:
         """Autoenvía la lista capturada a Mensajes Guardados del userbot ('me') para verla en
@@ -271,37 +274,55 @@ class BroadcastList:
             )
             return {"captured": True, "broadcast_id": bid, "preview_sent": bool(enviado)}
 
-        # ENVÍO AUTOMÁTICO: difunde a la LISTA elegida por canal (auto_<canal>_list); si no hay
-        # lista elegida, cae al target configurado del canal.
-        clientes = self._destinatarios_telegram(cfg, self._auto_target(cfg, "telegram"))
-        wa_on = bool(self._whatsapp and cfg.get("whatsapp_enabled"))
-        channels = ["telegram"] + (["whatsapp"] if wa_on else [])
+        # ENVÍO AUTOMÁTICO: difunde SOLO a la LISTA elegida por canal (auto_<canal>_list). A12: un
+        # canal sin lista elegida NO difunde (no cae a 'todos'). El servicio WhatsApp además exige
+        # estar habilitado (whatsapp_enabled).
+        tg_t = self._auto_target(cfg, "telegram")
+        wa_t = self._auto_target(cfg, "whatsapp")
+        tg_on = tg_t is not None
+        wa_on = bool(self._whatsapp and cfg.get("whatsapp_enabled") and wa_t is not None)
+
+        # A12: envío activo pero SIN lista elegida en ningún canal → se trata como CAPTURA (registra +
+        # preview, NO difunde), en vez de inundar la agenda. Defensa de fondo a la guardia del panel.
+        if not tg_on and not wa_on:
+            bid = self._nuevo_id()
+            self._registrar(bid, mensaje, "capture", [], 0)
+            enviado = self._preview(mensaje)
+            logger.warning(
+                "Envío automático ACTIVO pero sin lista elegida para ningún canal; lista %s "
+                "capturada (NO difundida)%s", bid, " + preview OK" if enviado else "",
+            )
+            return {"captured": True, "broadcast_id": bid, "preview_sent": bool(enviado), "sin_lista": True}
+
+        clientes = self._destinatarios_telegram(cfg, tg_t) if tg_on else []
+        channels = (["telegram"] if tg_on else []) + (["whatsapp"] if wa_on else [])
         bid = self._nuevo_id()
         self._registrar(bid, mensaje, "channel", channels, len(clientes))
 
-        wa_t = self._auto_target(cfg, "whatsapp")
-        wa_mode = wa_t.get("mode", "all")
-        wa_list_ids = ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_t)
+        wa_mode = wa_t.get("mode", "all") if wa_on else "all"
+        wa_list_ids = ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_t) if wa_on else []
 
         if self._usar_scheduler(cfg):
             # Envío fraccionado: se crea el plan y el dispatcher gotea un lote a la vez.
             self._crear_plan(
                 bid, cfg=cfg, text=mensaje,
                 image_url=cfg.get("image_url") or None, image_key=cfg.get("image_key") or None,
-                clientes=clientes, tg_on=True, wa_on=wa_on, wa_mode=wa_mode, wa_list_ids=wa_list_ids,
+                clientes=clientes, tg_on=tg_on, wa_on=wa_on, wa_mode=wa_mode, wa_list_ids=wa_list_ids,
                 wa_text=mensaje, wa_image_url=self._image_url_para_whatsapp(cfg),
                 wa_image_key=cfg.get("image_key") or None,
             )
             logger.info("Difusión %s PROGRAMADA (fraccionada) para %d clientes", bid, len(clientes))
             return {"scheduled": True, "subscribers": len(clientes), "broadcast_id": bid}
 
-        lotes = self._queue.encolar(
-            mensaje,
-            clientes,
-            image_url=cfg.get("image_url") or None,
-            image_key=cfg.get("image_key") or None,
-            broadcast_id=bid,
-        )
+        lotes = 0
+        if tg_on:
+            lotes = self._queue.encolar(
+                mensaje,
+                clientes,
+                image_url=cfg.get("image_url") or None,
+                image_key=cfg.get("image_key") or None,
+                broadcast_id=bid,
+            )
         logger.info("Difusión %s: %d lotes para %d clientes", bid, lotes, len(clientes))
         if wa_on:
             self._forward_whatsapp(cfg, mensaje, self._image_url_para_whatsapp(cfg), bid, wa_mode, wa_list_ids)
