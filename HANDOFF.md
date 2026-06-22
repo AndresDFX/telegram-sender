@@ -1,0 +1,333 @@
+# Handoff — Replica
+
+**Replica** es una **plataforma de difusión y envío masivo** por **Telegram** y **WhatsApp**, operada desde un **panel web**. No es una simple réplica 1:1 de un canal: combina la **réplica automática** de un canal de precios de Telegram (con markup configurable, limpieza de ubicación y footer/imagen) con el **envío masivo manual** de mensajes propios (texto + imagen) a listas, audiencias o contactos elegidos, ya o programado, por uno o ambos canales. Todo sale **fraccionado y secuencial** con ritmo anti-baneo. Este documento entrega el proyecto completo (arquitectura, despliegue, credenciales, operación, errores aprendidos y pendientes) para que otra persona quede operativa.
+
+---
+
+## Visión y funcionalidades
+
+### Qué es hoy
+
+Replica funciona en **dos modos de primera clase**:
+
+- **Réplica automática de un canal:** mirrorea un canal de precios de Telegram, detecta cada lista publicada, le aplica un **markup configurable**, quita el bloque de ubicación, añade footer/imagen y la difunde.
+- **Envío masivo manual:** redactas tu **propio mensaje** (texto + imagen) y lo envías —ya o **programado**— a listas, audiencias o contactos elegidos, a uno o ambos canales. Funciona como herramienta de broadcasting general, independiente del canal fuente.
+
+Los canales de salida son **Telegram** (modo **bot** a suscriptores, o **userbot** Telethon desde tu cuenta a tus contactos) y **WhatsApp** (cuenta personal vía Baileys).
+
+### Funcionalidades principales
+
+- **Réplica de canal con markup:** sondeo del preview público `t.me/s/<canal>`, high-water mark por `message_id`; markup solo a precios (formato colombiano, redondeo al mil hacia arriba; no toca modelos como `A06 4-64GB`); limpia ubicación y añade footer/imagen.
+- **Envío manual, programado y fraccionado:** componer mensaje propio; enviar ya o programado (once/daily/weekly); entrega fraccionada y secuencial (un lote a la vez con jitter).
+- **Listas de distribución** por canal con tres modos: `all` (todos), `only` (whitelist) y `except` (blacklist). El envío manual a WhatsApp exige una lista (evita mandar a todos por error).
+- **Exclusión por patrón de nombre** (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`): excluye contactos cuyo nombre contenga un patrón (substring, sin distinguir mayúsculas), p. ej. `FAM`; admite excepciones.
+- **Resolución por NÚMERO/id, no por nombre:** listas y selecciones explícitas se validan por número/id; si un contacto cambia de nombre, igual recibe. El patrón de nombre solo auto-excluye en envíos amplios.
+- **Pausa solo de lo automático:** el interruptor maestro `sending_enabled` pausa réplica y difusión programada, pero el **envío manual siempre sale**. La captura del canal nunca se detiene (en pausa crea planes en espera que salen al reactivar).
+- **Imagen + texto en un solo mensaje** (composición unificada).
+- **Idempotencia / anti-duplicados:** dedup por lote y por destinatario (una reentrega salta los ya enviados y resume); cursor con lock optimista (sin doble despacho concurrente).
+- **Ventana horaria por canal:** Telegram y WhatsApp tienen horario y delays anti-baneo **independientes**; una ventana cerrada o un WhatsApp caído no bloquean al otro.
+- **Estados:** cada difusión es un job con progreso por canal (encolado → enviando → enviado/parcial/fallido), con contadores atómicos y estado derivado.
+- **Roles de usuario** (`admin` | `user`): el admin gestiona usuarios y hace todo; el usuario hace todo menos gestionar usuarios. El admin principal (bootstrap) no se degrada ni se borra.
+- **Recuperación de contraseña por correo:** vía **Resend**, con fallback a SNS.
+- **Info de destinatarios por usuario:** patrones, excepciones y exclusiones manuales se guardan en el registro del usuario; el efectivo para envíos es la unión de todos los usuarios.
+
+---
+
+## Arquitectura y componentes
+
+### Modelo: Clean Architecture con composition root
+
+El backend vive en `src/lambda/` y sigue **arquitectura limpia (hexagonal / puertos y adaptadores)** con la regla de dependencia apuntando hacia adentro, en cuatro capas:
+
+- **`domain/`** — Entidades y reglas de negocio puras, sin dependencias externas: objetos de valor (`Post`, `SendResult`, `BroadcastStats` en `models.py`), composición del mensaje (`message.py`: quitar ubicación/teléfono → markup de precios → footer), markup (`markup.py`), ventanas horarias y jitter anti-baneo (`scheduling.py`), horarios recurrentes (`schedules.py`), filtrado y exclusiones (`recipients.py`) y autenticación (`auth.py`).
+- **`application/`** — Casos de uso que orquestan el dominio. `ports.py` define las **interfaces abstractas** (puertos: `SubscriberRepository`, `BroadcastQueue`, `MessageSender`, `ChannelReader`, `WhatsAppForwarder`, `ImageStore`, `ConfigStore`, `DedupStore`, `HighWaterMarkStore`, `QueueStats`). Los casos de uso (`BroadcastList`, `DispatchCampaigns`, `DeliverBatch`, `PollChannel`, `MaterializeSchedules`, `HandleCommand`) dependen **solo de estas abstracciones**.
+- **`adapters/`** — Implementaciones concretas: `dynamodb.py` (stores de config, suscriptores, dedup, HWM, planes, broadcasts, auditoría, horarios), `sqs.py` (cola real e inline), `s3.py` (imágenes), `telegram.py` (bot HTTP), `telethon_user.py` / `telethon_login.py` (userbot), `tme.py` (lector del preview público), `whatsapp.py` (forwarder HTTP al servicio Node), `config.py` (entorno), `email_sender.py` (reseteo de clave).
+- **`entrypoints/`** — Controladores finos: los handlers de Lambda. Autentican, parsean, delegan en casos de uso y formatean respuesta; sin lógica de negocio.
+- **`wiring.py`** es el **composition root**: la única pieza que conoce todas las capas. Cablea adapters a casos de uso (`build_*`). Decide en runtime, leyendo la config de DynamoDB (con fallback a entorno), el **modo de envío** (`bot` → `TelegramSender` + suscriptores DynamoDB; `userbot` → `TelethonUserSender` + contactos Telethon) y conmuta cola **SQS real vs inline** según haya `BROADCAST_QUEUE_URL`. Las dependencias se cablean perezosamente (`_ensure()`), lo que permite inyectarlas en tests.
+
+### Los cinco Lambdas (entrypoints)
+
+1. **receiver** (`receiver.py`) — Webhook de Telegram (HTTP). Autentica por `secret_token` fail-closed (403 si falta/invalido), parsea de forma segura, **deduplica por `update_id`** (marca-antes con compensación), y enruta. Su trabajo vivo es el **onboarding** (comandos privados `/start`, `/stop` → `HandleCommand`).
+2. **poller** (`poller.py`) — Cron de EventBridge. Sondea el canal público (`PollChannel`) y difunde **solo lo nuevo** vía high-water mark por `message_id` (no re-difunde backlog; la primera corrida solo siembra el HWM). Respeta el interruptor maestro `sending_enabled`. En userbot, **refresca el caché de contactos** en DynamoDB (TTL 30 min para evitar `FloodWait`).
+3. **worker** (`worker.py`) — Consumidor de SQS. Entrega cada lote (`DeliverBatch`) y reporta fallos parciales con `batchItemFailures`. Resuelve imágenes (`image_key` → URL presigned justo antes de enviar). Tiene **idempotencia por lote y por destinatario**, honra cancelaciones en vuelo (`pid`), respeta la pausa (descarta automáticos, deja pasar manuales) y tiene **auto-pausa anti-baneo** (tras N lotes totalmente fallidos pone `sending_enabled=False`).
+4. **dispatcher** (`dispatcher.py`) — Cron de EventBridge cada minuto, con **concurrencia reservada = 1** lógica. Es el corazón del **envío fraccionado/secuencial**. Cada tick: (1) materializa mensajes programados vencidos (`MaterializeSchedules`, aislado); (2) despacha **como mucho un lote** del plan activo más antiguo (`DispatchCampaigns`), respetando ventanas horarias por canal y esperando a que el lote anterior termine.
+5. **admin** (`admin.py`) — Panel de administración: sirve la SPA (GET `/admin`) y expone toda la API REST (config, listas, patrones, imágenes, suscriptores, cola, DLQ, broadcasts, métricas, auditoría, planes, horarios, usuarios/roles, login y reseteo de clave, estado de Telegram/Telethon y WhatsApp, y el endpoint clave `POST /api/broadcast`).
+
+### El servicio Node de WhatsApp (`whatsapp-service/src/index.js`)
+
+Servicio portable basado en **Baileys** (WhatsApp Web). Mantiene la conexión (sesión persistida en DynamoDB vía `dynamoAuth.js`), expone QR / código de emparejamiento, lista contactos y **envía las listas reenviadas desde el backend**. Protegido por bearer token compartido (`WHATSAPP_TOKEN`). Endpoints: `/health` (público), `/status`, `/qr`, `/contacts`, `/blocked`, `/pair`, `/sync`, `/reconnect`, `/reset` y `/send`. El `/send` es **fire-and-forget** (responde 202), soporta **envío fraccionado** (resuelve el set con `resolverTargets` según modo `all`/`only`/`except` + patrones de exclusión y rebana `[offset, offset+limit)`), aplica **delay aleatorio** entre mensajes, tiene **opt-out automático** (excluye tras `BLOQUEO_UMBRAL` fallos seguidos), descarga la imagen una sola vez a un Buffer y **reporta progreso** a la tabla `-broadcasts`.
+
+### Flujo de un envío de extremo a extremo
+
+- **A) Captura automática del canal:** el poller lee el preview público (`TmePreviewChannelReader`), detecta posts nuevos por HWM y llama a `BroadcastList.__call__(text)`. Se **compone el mensaje** (quitar ubicación/teléfono, markup, footer), se resuelven destinatarios (con exclusiones por id y patrón) y se crea un **job** (`BroadcastStore`). La captura ocurre **siempre**, aunque los envíos estén pausados.
+- **B) Envío manual:** `POST /api/broadcast` → `BroadcastList.enviar_manual(...)`. El texto va tal cual (sin markup/footer). Destinatarios: contactos ad-hoc por número > lista elegida > target configurado. WhatsApp manual exige destinatarios concretos. **Sale aunque haya pausa** y permite programación a hora exacta (`scheduled_at`).
+- **C) El plan y el dispatcher:** si el scheduling está activo, ambos orígenes crean un **plan** en DynamoDB (texto, imagen/clave S3, lotes de Telegram por `batch_size`, config WhatsApp, `not_before`, `source`). El dispatcher toma el plan listo más antiguo y **gotea un lote por tick**: verifica si el anterior terminó/se estancó, comprueba la ventana horaria **por canal**, reclama el lote antes de encolar y libera el siguiente — Telegram primero (`encolar_uno` → SQS), luego WhatsApp (servicio Node con el slice `[offset, limit)`). **Re-firma las URLs de imagen S3** justo antes de enviar (caducan en 1h).
+- **D) La entrega:** el worker consume el lote de SQS y `DeliverBatch` envía mensaje a mensaje vía el `MessageSender` (bot o userbot), con delay aleatorio, idempotencia por destinatario, marcado de inactivos ante bloqueo (403) y reporte de progreso/errores. WhatsApp lo entrega el servicio Node en paralelo. Sin scheduler (inline, dev), `BroadcastList` entrega de inmediato.
+
+### El panel admin
+
+El frontend es una **SPA monolítica embebida** como un único string crudo `_PAGE` en `admin.py` (≈línea 1023 en adelante; archivo total ~3457 líneas). HTML + CSS + JS inline, autocontenido (sin CDN), servido en `GET /admin`. Incluye su **design system** (paleta naranja `#FD531E`, escala de grises cálida, colores semánticos), favicon SVG inline y la lógica JS que consume la API REST del mismo Lambda. La parte Python alrededor de `_PAGE` (líneas 109-1022) son helpers (`_ensure`, `_audit`, autorización por sesión/rol con `_autorizado`/`_es_admin`, reseteo por email, saneo de config) y el router `lambda_handler` (línea 510).
+
+### Archivos clave
+
+- `D:\Projects\Personal\TelegramSender\src\lambda\wiring.py` — composition root
+- `D:\Projects\Personal\TelegramSender\src\lambda\application\ports.py` — puertos/interfaces
+- `D:\Projects\Personal\TelegramSender\src\lambda\application\broadcasting.py` — difusión y envío manual
+- `D:\Projects\Personal\TelegramSender\src\lambda\application\dispatch.py` — despacho fraccionado/secuencial
+- `D:\Projects\Personal\TelegramSender\src\lambda\entrypoints\{receiver,poller,worker,dispatcher,admin}.py` — los cinco Lambdas
+- `D:\Projects\Personal\TelegramSender\whatsapp-service\src\index.js` — servicio Node WhatsApp
+
+---
+
+## Repositorios y servicios
+
+- **Repositorio GitHub (personal):** `git@github-personal:AndresDFX/telegram-sender.git`. El push usa el **alias SSH `github-personal`** (configurado en `~/.ssh/config` → `id_rsa_personal`) para forzar la clave personal. Ojo: la identidad git global quedó como la de trabajo (`julian.castano@siesa.com`).
+- **AWS:** stack CloudFormation `telegram-sync-dev`, región `us-east-1`, cuenta `438095550710`. Aloja los 5 Lambdas, 9 tablas DynamoDB, SQS + DLQ, API Gateway HTTP v2, EventBridge (poller + dispatcher), SNS + CloudWatch Alarms. El bucket S3 de código/imágenes (`telegram-sync-lambda-438095550710-us-east-1`) **NO lo crea el stack**.
+- **Servicio WhatsApp en Render** (plan Free): `https://telegram-sender-dm43.onrender.com`. Runtime Docker, **Root Directory `whatsapp-service`**, **auto-deploy en cada push** a la rama conectada. NO está en CloudFormation ni en el workflow de AWS. Alternativas equivalentes (mismo contenedor): Fly.io, Koyeb, Oracle Always Free.
+
+---
+
+## Despliegue paso a paso
+
+Todo el AWS se define en `infra/cloudformation/template.yaml`. El deploy del backend es **local (PowerShell)** o por CI.
+
+### 1) Empaquetar (build en Linux)
+
+```
+./scripts/package-lambda.ps1
+```
+Construye dentro de Docker `python:3.12-slim` ejecutando `scripts/_build_lambda_pkg.py`: `pip install -r src/lambda/requirements.txt -t .build/pkg`, copia el árbol `domain/application/adapters/entrypoints/wiring.py`, limpia `__pycache__` y genera `.build/telegram-broadcaster.zip`. **El empaquetado DEBE ser en Linux** (Docker o runner Linux de CI); `Compress-Archive` en Windows mete rutas con `\` y binarios `.pyd/.exe` que rompen en Lambda.
+
+### 2) Desplegar
+
+```
+./scripts/deploy.ps1
+```
+Lee `.env.aws` y `.env.deploy` (gitignored), exporta credenciales, calcula `account` con `aws sts get-caller-identity`, sube el zip a `s3://telegram-sync-lambda-<account>-<region>/lambda/telegram-broadcaster-<hash12>.zip` y ejecuta:
+```
+aws cloudformation deploy --stack-name telegram-sync-dev \
+  --template-file infra/cloudformation/template.yaml \
+  --parameter-overrides <todos los params> \
+  --capabilities CAPABILITY_NAMED_IAM --region $AWS_REGION
+```
+Al final imprime el `AdminUrl`. **La key del zip lleva hash de contenido** para que CloudFormation detecte el cambio de código.
+
+### 3) Verificar SHA
+
+Tras el deploy, confirma que el código activo corresponde al zip recién subido (la key con hash en S3 = la `LambdaCodeS3Key` aplicada al stack). Verifica también que las reglas EventBridge (poller, dispatcher) y el EventSourceMapping del worker siguen **ENABLED** (los cambios out-of-band no se revierten solos).
+
+### Parámetros del stack (los que pasa el deploy)
+
+`ProjectName=telegram-sync`, `EnvironmentName=dev`, `LambdaCodeS3Bucket`, `LambdaCodeS3Key` (hasheada), `WorkerReservedConcurrency=0`, `WorkerTimeoutSeconds=300`, `BroadcastBatchSize=150`, `AlertEmail`, `AdminUser=admin`, `SendMode=userbot`, y los secretos (solo por nombre): `TelegramBotToken`, `WebhookSecretToken`, `AdminPassword`, `TelethonApiId`, `TelethonApiHash`, `TelethonSession`. El resto usa sus Defaults del template.
+
+### Alternativa CI (`.github/workflows/deploy.yml`)
+
+En push a `main` (paths `src/lambda/`, `infra/cloudformation/`, `scripts/`, el workflow) o `workflow_dispatch`. Job `test` (unittest) → job `deploy` gated por la variable `DEPLOY_ENABLED == "true"`. En CI se empaqueta **nativo en runner Linux** (sin Docker) con `BUILD_ROOT=$GITHUB_WORKSPACE`, key `…-<sha256[:12]>.zip`, mismo `cloudformation deploy`. Secrets en GitHub Actions. Diferencia: `deploy.ps1` pasa `WorkerTimeoutSeconds=300` explícito; el CI no lo pasa (queda en el default del template, que también es 300).
+
+### Gotchas de despliegue
+
+- **Parámetros no pasados conservan el valor PREVIO del stack** (no el Default del template). Por eso `WorkerTimeoutSeconds=300` se pasa explícito (commit `9d1852e`). `deploy.ps1` pasa TODOS los params.
+- **`SendMode=userbot`**: sin Telethon ApiId/Hash/Session válidos, el worker no envía como tu cuenta.
+- **`WorkerReservedConcurrency=0`**: la cuenta tiene límite de concurrencia bajo (=10); reservar dejaría <10 sin reservar y AWS lo rechaza. La secuencialidad NO depende de esto (la garantizan el gate `in_flight` + un lote por tick + `BatchSize=1`).
+- **El bucket S3 NO lo crea el stack**: debe existir como `telegram-sync-lambda-<account>-<region>` o el deploy falla.
+- **No usar `--platform/--only-binary` en pip** (deps sdist-only como `pyaes` de Telethon romperían).
+- **Cambios out-of-band no se revierten solos**: si deshabilitas reglas EventBridge o el ESM del worker a mano, un `deploy` posterior NO los re-habilita salvo que el cambio toque ese recurso.
+- **Variables de entorno OBLIGATORIAS en el worker** (`CONFIG_TABLE`, `PROCESSED_UPDATES_TABLE`): si faltan, las stores caen a nombres por defecto → `AccessDenied`. Sin `CONFIG_TABLE`: ningún envío se entrega (fallo silencioso → DLQ). Sin `PROCESSED_UPDATES_TABLE`: se rompe la idempotencia → reentrega en bucle → mensajes DUPLICADOS.
+- **Secretos**: viven en `.env.aws`/`.env.deploy` (local, gitignored) y en GitHub Secrets (CI); el template los marca `NoEcho`. `WebhookSecretToken` y `AdminPassword` son fail-closed.
+
+### Despliegue del servicio WhatsApp (Render)
+
+New → Web Service → conectar repo → **Root Directory `whatsapp-service`** → Runtime **Docker** → auto-deploy en push. Variables: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`, `WHATSAPP_SESSION_ID` (default `default`), `AWS_ACCESS_KEY_ID/SECRET/REGION`, `SEND_DELAY_MS` (default 2000), `PORT` (default 8080). La sesión Baileys se persiste en la tabla DynamoDB `telegram-sync-dev-whatsapp-auth`, por eso sobrevive a reinicios sin re-escanear QR. Caveat: el plan Free hace spin-down a ~15 min; al despertar reutiliza la sesión (`POST /reconnect`). El build en Render requiere instalar `git`+`ca-certificates`, `npm install --legacy-peer-deps` y reescribir URLs git SSH→HTTPS (Baileys clona libsignal por SSH).
+
+---
+
+## Credenciales y accesos
+
+> REGLA: los **valores** de secretos NUNCA van al repo, PR, chat ni a este documento. Aquí solo se listan **nombres** y dónde viven.
+
+### Inventario
+
+- **`.env.aws` (GITIGNORED):** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` — usuario IAM (`andresdfx`, cuenta AWS `438095550710`, `us-east-1`) para AWS CLI / deploy. OJO: en `.env.aws` las líneas 2-3 llevan prefijo `$env:` (formato PowerShell mixto); parsear sin imprimir el valor.
+- **`.env.deploy` (GITIGNORED):** `STACK_NAME`, `LAMBDA_CODE_S3_BUCKET`, `WEBHOOK_SECRET_TOKEN` (secreto del webhook de Telegram), `TELEGRAM_BOT_TOKEN` (bot `@ipro_listas_bot`), `ADMIN_PASSWORD` (Basic Auth del panel `/admin`), `TELETHON_API_ID`, `TELETHON_API_HASH`, `TELETHON_SESSION` (⚠️ acceso TOTAL a la cuenta de Telegram userbot — máxima sensibilidad), `WHATSAPP_TOKEN` (bearer del servicio WhatsApp en Render), `WHATSAPP_AUTH_TABLE`, `SEND_DELAY_MS`, `AWS_REGION`.
+- **`.env.example` (SÍ versionado):** plantilla SIN secretos; documenta las variables.
+- **Acceso al panel:** usuario `admin` (`ADMIN_USER`, default `admin`) + `ADMIN_PASSWORD` (en `.env.deploy`); URL = `AdminUrl` del stack.
+- **GitHub:** push por alias SSH `github-personal` (clave `~/.ssh/config` → `id_rsa_personal`); URL `git@github-personal:AndresDFX/telegram-sender.git`.
+- **Servicio WhatsApp en Render:** la sesión de Baileys persiste en DynamoDB (tabla `whatsapp-auth`); se vincula escaneando QR desde IP residencial. `TELETHON_SESSION` y la sesión de WhatsApp = control de las cuentas; entregar con extremo cuidado.
+
+> NOTA: la sesión userbot **"viva"** está en la tabla `config` de DynamoDB (`telethon_session`, ~353 chars), no necesariamente en `.env.deploy` (ese valor pudo quedar REVOCADO). Los `api_id`/`api_hash` vienen del entorno del Lambda (= `.env.deploy`).
+
+### Cómo entregar los valores de forma SEGURA
+
+- Comparte los valores **solo por un gestor de contraseñas** (1Password, Bitwarden) o un **canal cifrado de un solo uso** (link que expira). **Nunca** los pegues en git, PR, issues, chat, correo plano ni en este documento.
+- Entrega `.env.aws` y `.env.deploy` como archivos completos por ese canal seguro; el receptor los coloca en la raíz del repo (ya están gitignored). Verifica que `.gitignore` los cubre antes de cualquier commit.
+- Trata `TELETHON_SESSION` y la sesión de WhatsApp como los secretos de **máxima** sensibilidad: dan control total de las cuentas personales. Limita quién los recibe.
+
+### Rotación básica por credencial
+
+- **AWS (`AWS_ACCESS_KEY_ID`/`SECRET`):** crear una nueva access key del usuario IAM `andresdfx` en IAM, actualizar `.env.aws` y GitHub Secrets, y **desactivar/borrar** la anterior.
+- **`ADMIN_PASSWORD`:** cambiar el valor en `.env.deploy` (y GitHub Secrets) y redeploy del stack; el cambio aplica vía el parámetro `AdminPassword`.
+- **`WEBHOOK_SECRET_TOKEN`:** rotar el valor, redeploy, y re-registrar el webhook de Telegram con el nuevo `secret_token`.
+- **`TELEGRAM_BOT_TOKEN`:** regenerar con @BotFather, actualizar secreto y re-registrar webhook.
+- **`TELETHON_SESSION`:** si se compromete, **cerrar la sesión** desde la app de Telegram (Dispositivos activos), generar una sesión nueva (login Telethon) y actualizar el `telethon_session` en la tabla `config` de DynamoDB (el valor vivo) además de `.env.deploy`. `api_id`/`api_hash` se regeneran en my.telegram.org si hace falta.
+- **`WHATSAPP_TOKEN`:** rotar el valor en `.env.deploy` y en las variables de entorno del servicio en Render (ambos deben coincidir).
+- **Sesión de WhatsApp (Baileys):** si se compromete, cerrar el dispositivo vinculado desde WhatsApp (Dispositivos vinculados) y/o `POST /reset`, luego re-vincular por QR/pairing desde IP residencial.
+
+---
+
+## Operación del panel
+
+Acceso por `AdminUrl` con HTTP Basic Auth (usuario `admin` + `ADMIN_PASSWORD`). El panel es un único HTML/CSS/JS embebido. Sobre todas las pestañas hay una **barra global de estado de envíos** siempre visible (ACTIVOS en verde / EN PAUSA en rojo) con acción directa para activar/pausar. El header muestra la identidad de Telegram que envía (en userbot, el teléfono con ✓ o "renovar" si caducó), el canal fuente (`📡 @canal`), el número de WhatsApp conectado y un badge con el rol del usuario.
+
+### Pestañas
+
+- **🏠 Inicio:** resumen, KPIs de 30 días (enviados, tasa, lotes pendientes, DLQ), mini-gráfico de actividad, primeros pasos y accesos rápidos.
+- **📋 Fuentes y listas** (sub-nav Fuente del canal / Telegram / WhatsApp): configurar canal fuente, markup, símbolos, footer, patrones de limpieza, imagen y "probar procesamiento"; gestionar **destinatarios** con filtro Todos / Incluidos / Excluidos y contador, **listas de distribución** (whitelist/blacklist) y **auto-exclusión por patrón de nombre**.
+- **📨 Envíos:** **Componer y enviar** (texto + imagen + canales + selector "Enviar a" + previsualización + contador con aviso de límite 4096); tabla de **Envíos** con estado, barras de progreso "en vivo", borrado individual/masivo y error clickeable; **Programar un mensaje** y **Mensajes programados** (once/daily/weekly); **Envíos fraccionados** (monitor de planes).
+- **⚙️ Ajustes y estado:** Cuenta de Telegram (bot/userbot), WhatsApp (reenvío), Correo de recuperación (Resend), cambio de contraseña, **interruptor maestro de envíos** (solo automáticos), anti-baneo (lote/delays), ventana horaria, cola/DLQ, auditoría y **usuarios del panel con roles** (gestión solo visible para administradores).
+
+### Operación típica
+
+- **Activar/pausar lo automático:** desde la barra global. Recuerda: la pausa solo frena réplica y programados; el **manual siempre sale**.
+- **Envío puntual:** Envíos → Componer → escribir texto + imagen → elegir canales (ninguno viene preseleccionado) → "Enviar a" (listas/audiencias/contactos) → previsualizar → enviar (ya o programar) → seguir el progreso en la tabla de Envíos y revisar errores/estados ahí mismo.
+- **Listas y exclusiones:** en Fuentes y listas, gestionar listas por canal (`all`/`only`/`except`) y patrones de auto-exclusión por nombre. El envío manual a WhatsApp **exige** una lista/destinatarios concretos.
+
+---
+
+## Errores y lecciones (gotchas)
+
+Lista accionable para no repetir fallos:
+
+### Lambdas y variables de entorno de tablas
+
+- **Toda Lambda que use un store DynamoDB NECESITA su env `*_TABLE`**; si no, cae al nombre por defecto → `AccessDeniedException` SILENCIOSO.
+  - El `worker` sin `CONFIG_TABLE` → default `"Config"` → AccessDenied antes del try/except → tumbaba el lote → reintentos → DLQ sin tocar contadores → job "queued" eterno leído como "enviado" (DM nunca llegaba).
+  - El `worker` sin `PROCESSED_UPDATES_TABLE` → **envío DUPLICADO** (un contacto recibió ~5 veces): `dedup.procesado()` es fail-open pero `dedup.marcar()` RE-LANZABA el AccessDenied → el lote ya entregado se reencolaba hasta `maxReceiveCount≈5`. Fix: añadir env + IAM y hacer `marcar()` **fail-open**.
+  - **Acción:** ante cualquier Lambda nueva que llame `build_*` o use un store, verificar que tenga TODAS las `*_TABLE` en env + el permiso IAM correspondiente.
+
+### Anti-duplicado (vectores y mitigaciones)
+
+- **Timeout a mitad de lote:** `WorkerTimeoutSeconds=120` no alcanzaba para 150 destinatarios × jitter → timeout → SQS reentregaba DESDE EL INICIO. Fix: idempotencia POR DESTINATARIO (`ProcessedUpdates` key `batch_id:chat_id`, resume sin duplicar) + subir timeout a **300**.
+- **`aws cloudformation deploy` reusa el valor PREVIO del stack** para params no pasados (no el default del template). Por eso `deploy.ps1` pasa `WorkerTimeoutSeconds=300` explícito.
+- **Dispatcher concurrente** (cron solapado): reserved-concurrency=0 no limita a 1 → **lock optimista** en `registrar_dispatch` (`ConditionExpression` sobre el cursor).
+- **Destinatarios repetidos** en un lote → `dict.fromkeys` al crear el plan.
+
+### FloodWait de Telegram (Telethon)
+
+- **NUNCA listar contactos con Telethon EN VIVO** (`GetContactsRequest`) desde el panel/preview: Telegram responde `FloodWaitError` (hasta ~1000s) y reventaba `enviar_manual`/`previsualizar` con HTTP 500. Fix: listar desde la **CACHÉ** (DynamoDB `__contacts__`); el envío real (`sendMessage`) no sufre ese FloodWait. El poller refresca la caché máx cada 30 min.
+
+### WhatsApp / Baileys
+
+- Los **contactos + nombres SOLO llegan en el VÍNCULO INICIAL** (`messaging-history.set`); reconexión, `syncFullHistory` y `resyncAppState` NO los re-entregan. Vincular UNA vez desde IP residencial, persistir en DynamoDB y que Render reuse la sesión.
+- **Linking desde IP de datacenter (Render) da "inténtalo más tarde".** Lo fiable: vincular localmente y que Render reuse la sesión de DynamoDB. Alternativa: `/pair` (código de 8 dígitos) + `Browsers.macOS('Desktop')`.
+- **Un solo host activo a la vez:** el ciclo de vida del socket se reescribió (mutex de arranque, un solo socket por `gen`, en 440/connectionReplaced CEDE en vez de reconectar) para acabar con la "guerra" local↔Render. `loggedOut` es seguro (no auto-borra). Timeout 8s en `fetchLatestBaileysVersion` (sin él colgaba `/pair`).
+- **Build en Render** requiere: `git`+`ca-certificates`, `npm install --legacy-peer-deps`, reescribir URLs git SSH→HTTPS. Hay ruta `/` informativa para evitar "Cannot GET /".
+- **Render Free duerme a los 15 min** → primer request da timeout; despertar con `/health` antes (el dispatcher hace keep-alive cuando hay planes activos).
+
+### Imagen en los envíos (fix crítico)
+
+- El compositor guardaba la **URL S3 PREFIRMADA** (caduca 1h) → en fraccionados/programados moría ("imagen no disponible"). Fix: la imagen viaja como `image_key` extremo a extremo y se **RE-FIRMA al despachar**; claves S3 únicas por subida (uuid).
+- **Una URL S3 prefirmada solo es válida si el ROL que la firma tiene `s3:GetObject`.** El rol del **dispatcher** NO lo tenía → 403 al descargar (texto llegaba, imagen no). Fix: añadir `s3:GetObject` sobre `images/*` al dispatcher.
+- Checkbox Telegram nacía `checked` → mensajes por AMBOS canales. Fix: ningún canal preseleccionado + confirmación de canales.
+- WhatsApp manual exige el servicio CONFIGURADO (url+token), NO `whatsapp_enabled` (que es el auto-reenvío del canal).
+
+### Truncado de mensajes
+
+- `DynamoDbPlanStore.crear` guardaba `text[:280]` y ESE texto se envía → DMs cortados a 280 chars. Subido a `[:4096]` (límite Telegram). `Broadcasts.text` (solo display) a 600.
+
+### Markup / limpieza de texto
+
+- El markup EXIGE un marcador de moneda adyacente (`$`/💸/💲/`COP`); números "pelados" NO se tocan (para no marcar teléfonos/fechas/modelos/specs). El canal usa los tres símbolos.
+- Redondeo al **mil hacia arriba** (decisión del usuario): `$325.000` +15% → `$374.000`.
+- Quitar teléfonos CO EXIGE una señal de teléfono (separador/paréntesis/`+57`/palabra de contacto); un número de 10 díg pegado y sin etiqueta NO se toca (evita borrar `REF 3001234567`).
+
+### Infra / drift / packaging
+
+- **`aws cloudformation deploy` NO corrige drift:** tras `aws events disable-rule` a mano, un redeploy NO re-habilita la regla. Re-habilitar con `aws events enable-rule`; el ESM del worker con `aws lambda update-event-source-mapping --uuid <> --enabled` (UUID worker ESM: `756b6f9e-c3ae-42be-8683-2c56be0ecb27`).
+- **Empaquetar DEBE hacerse en Linux** (`package-lambda.ps1` en `python:3.12-slim`); `Compress-Archive` en Windows generaba rutas con `\` y binarios que rompen. Si Docker está caído y el cambio es .py puro: refrescar los `.py` en `.build/pkg` y re-zipear con `zipfile` (arcnames forward-slash, `external_attr=(0o755)<<16`).
+- **`aws cloudformation deploy` resetea params no pasados a su default** → `deploy.ps1` pasa TODOS los params.
+- **Concurrencia Lambda de la cuenta = 10** → no se puede reservar; param `WorkerReservedConcurrency` con Condition (este deploy usó 0). Para prod, subir el límite y poner 1.
+- **`deploy.ps1` sube el zip con key hasheada por contenido** para que CFN detecte el cambio de código.
+
+### Estructura de código / tests
+
+- Añadir una clase nueva anclando entre dos métodos de otra clase dejó `PlanStore.listar` DENTRO de `AuditStore` → rompió `/api/plans` y `/api/audit`. **Al añadir una clase al final de un módulo, anclar en el ÚLTIMO método de la clase previa.** Hay test de regresión (`EstructuraStoresTests`).
+- Los fakes WhatsApp en tests necesitan `exclude_patterns=None`/`**kwargs` en `forward`/`contar`.
+- CI estaba en rojo: el job `test` no instalaba deps → `adapters/telegram.py` importa `requests` al cargarse → ModuleNotFoundError. Fix: `pip install -r src/lambda/requirements.txt`.
+
+### Falsa alarma "se borraron los patrones"
+
+- NO fue bug ni deploy (la config persiste en DynamoDB; los deploys no tocan la tabla). Fue un paso de "restaurar config" en pruebas en vivo que hacía `*_exclude_patterns:[]`. Llevó a mover los 6 campos de destinatarios a **POR USUARIO** (registro `__users__[user]`), fuera de `/api/config`.
+
+### Git / identidad y Local / Windows
+
+- La identidad git global es de trabajo (`julian.castano@siesa.com`) y quedó así en el primer commit. Push vía alias SSH `github-personal` con URL `git@github-personal:AndresDFX/...` para forzar la clave personal.
+- El proxy del sistema intercepta `localhost:8080` (404/timeout); el smoke-test del webhook local se hace dentro del contenedor (`telegram-sync-webhook`).
+- El script de vinculación WhatsApp es **solo ASCII** (PS5.1 corrompe UTF-8 sin BOM) y usa `ErrorActionPreference=Continue` (stderr de docker con Stop es fatal).
+
+---
+
+## Estado actual
+
+> Estas notas tienen 4-12 días; el último commit `c932b41` es posterior a varias. Verificar contra el código actual antes de afirmar como hecho.
+
+- **Interruptor maestro `sending_enabled = False`** → sistema **PAUSADO** (controlable desde el panel). La pausa hoy solo frena lo AUTOMÁTICO (canal + programado); el envío MANUAL (Componer → Enviar) SIEMPRE sale.
+- **Modo de envío Telegram: `userbot` (Telethon)** — envía como la cuenta del usuario a sus contactos (no como bot a suscriptores), aceptando riesgo de baneo. La sesión viva NO está en `.env.deploy` (esa está REVOCADA); la válida vive en DynamoDB config (`telethon_session`, ~353 chars); `api_id`/`api_hash` vienen del env del Lambda. El bot `getMe` responde `@ipro_listas_bot`.
+- **Fuente de ingesta: `@iproparts`** (público, ajeno) → ingesta por **poller** (sondea `https://t.me/s/iproparts` por cron, high-water mark del `message_id`); el webhook solo para onboarding `/start`·`/stop`.
+- **WhatsApp 100% operativo en producción**, desplegado en **Render** (`https://telegram-sender-dm43.onrender.com`, Docker, plan Free → duerme a 15 min). Conectado como número **573243198985**, ~2180-2307 contactos (2180 con nombre de agenda), sesión + contactos persistidos en DynamoDB. Resuelve `list_ids` como JIDs (no nombres de lista).
+- **Cuentas de PRUEBA (e2e):** `3188468892` → Telegram chat_id **6053071541** (nombre "Prueba"/"Andrés Castaño"); WhatsApp **573188468892@s.whatsapp.net**.
+- **Planes/backlog:** 0 planes pendientes, 0 schedules (todo el backlog viejo de iproparts —18 planes, ~24k envíos cada lote— fue CANCELADO y BORRADO; los registros de broadcast se conservan). `telegram_lists=[]`; en WhatsApp queda la lista "Test Whastsapp 2".
+- **Reglas EventBridge (poller, dispatcher) + ESM del worker: ENABLED.** DLQ: 0.
+- **AlertEmail SNS** (`castano.julian@correounivalle.edu.co`): suscripción quedó **PendingConfirmation** (el usuario debe confirmar el correo).
+- **Marca actual del producto: "Replica"** (tagline "Tu lista de precios, replicada y enviada en segundos."). README = documento de contexto canónico.
+- **~243 tests** pasando; 2 workflows CI (`tests.yml` + `deploy.yml`, deploy gated por `DEPLOY_ENABLED`).
+- **Infra clave:** stack `telegram-sync-dev` (cuenta `438095550710`, `us-east-1`). Tablas: subscribers, processed-updates, config, broadcasts, plans, schedules, audit, whatsapp-auth. Lambdas: receiver, poller, worker, dispatcher, admin. Panel admin: `.../dev/admin` (Basic Auth, usuario `admin`). Roles `admin`/`user` activos.
+
+---
+
+## Pendientes / roadmap
+
+### Antes de producción (críticos)
+
+- **Revisar/cancelar el backlog de "held plans" antes de reactivar `sending_enabled`**: activar drena TODO el backlog ready (modelo capturar-siempre de iproparts) → riesgo de inundar. La confirmación de "Activar envíos" debería mostrar el conteo de pendientes (ya se lista en el modal).
+- Subir el **límite de concurrencia Lambda** de la cuenta y poner `WorkerReservedConcurrency=1` (respeta 30 msg/s).
+- Migrar **secretos a SSM/Secrets Manager (SecureString)**: hoy la tabla `config` guarda secretos sin KMS.
+
+### Operación / always-on
+
+- **Host always-on para WhatsApp** (Render Free duerme; mitigado con keep-alive, pero ideal Fly/Koyeb/Oracle para socket estable). Riesgo de baneo del número por envío masivo.
+- Confirmar la **suscripción SNS de AlertEmail** (pendiente del usuario).
+- **Pegar la API key de Resend** en el panel (hoy sin configurar → recuperación de contraseña cae a SNS).
+
+### Roadmap / futuro
+
+- CI/CD auto-deploy en push a main (gated; ya hay workflows, falta habilitar deploy con secrets).
+- Dominio propio / HTTPS / WAF.
+- Logs estructurados.
+- Onboarding wizard.
+- "Top fallos" por razón.
+- Plantillas / personalización de mensajes.
+- Cambio de contraseña desde el panel.
+
+### Hallazgos diferidos (NO son bugs nuevos, no re-investigar)
+
+- El preview de WhatsApp en el panel cuenta solo `len(list_ids)` → NO refleja exclusiones del servicio (patrón/manual/fallos); es estimado, el envío real sí excluye.
+- Rate-limit del login es in-memory por contenedor (no distribuido); mitigado con throttling de API Gateway (20 rps/40 burst).
+- Sin CORS explícito en el panel.
+- `/api/auth/forgot|reset` son públicos (con anti-fuerza-bruta local).
+
+---
+
+## Checklist de handoff
+
+Pasos concretos para que el receptor quede operativo:
+
+1. **Clonar el repo** por SSH personal: configurar el alias `github-personal` en `~/.ssh/config` (apuntando a `id_rsa_personal`) y `git clone git@github-personal:AndresDFX/telegram-sender.git`.
+2. **Pedir los secretos por canal seguro:** solicitar `.env.aws` y `.env.deploy` completos por gestor de contraseñas / canal cifrado (nunca por chat/PR/correo plano). Colocarlos en la raíz del repo (están gitignored). Confirmar que `.gitignore` los cubre antes de cualquier commit.
+3. **Instalar herramientas:** AWS CLI (configurado con la cuenta `438095550710`, `us-east-1`) y Docker (necesario para empaquetar la Lambda en Linux).
+4. **Verificar acceso AWS:** `aws sts get-caller-identity` con las credenciales de `.env.aws` debe devolver la cuenta `438095550710`.
+5. **Build + deploy:** `./scripts/package-lambda.ps1` y luego `./scripts/deploy.ps1`. Tomar el `AdminUrl` que imprime al final. Verificar que la key del zip con hash es la aplicada al stack y que reglas EventBridge + ESM del worker siguen ENABLED.
+6. **Verificar el panel:** abrir el `AdminUrl`, entrar con usuario `admin` + `ADMIN_PASSWORD`, comprobar el header (identidad Telegram, canal fuente `@iproparts`, número de WhatsApp, badge de rol) y la barra global de estado (debe mostrar EN PAUSA, ya que `sending_enabled=False`).
+7. **Servicio WhatsApp en Render:** confirmar que `https://telegram-sender-dm43.onrender.com/health` responde; revisar las variables de entorno (`WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`, AWS, `SEND_DELAY_MS`, `PORT`). Si la sesión no está activa, **vincular por QR/pairing desde IP residencial** (`./scripts/vincular-whatsapp-local.ps1`, con `-Pair <número>` o `-Reset`) para que Render reutilice la sesión de DynamoDB.
+8. **Prueba de extremo a extremo controlada:** con las cuentas de prueba (Telegram chat_id `6053071541`, WhatsApp `573188468892@s.whatsapp.net`), hacer un envío manual (que sale aun en pausa) y seguir el progreso en la tabla de Envíos.
+9. **Tareas pendientes del receptor:** confirmar la suscripción SNS de AlertEmail; pegar la API key de Resend en el panel; **NO reactivar `sending_enabled`** hasta revisar/cancelar el backlog de planes en espera.
+10. **Rotación recomendada tras el traspaso:** rotar al menos `ADMIN_PASSWORD`, `WHATSAPP_TOKEN` y las access keys de AWS si el emisor anterior ya no debe tener acceso (ver sección "Rotación").
