@@ -180,6 +180,24 @@ class BroadcastListTests(unittest.TestCase):
         self.assertEqual(prev.sent[0][0], "me")
         self.assertIn("$115.000", prev.sent[0][1])  # markup aplicado en la preview
 
+    def test_b16_preview_fallido_se_registra_en_el_job(self):
+        # B16: si el preview de una captura NO se entrega (FloodWait/sesión), se deja constancia en el
+        # job (registrar_error) para que el panel lo muestre (antes solo quedaba en logs).
+        class FailPreview:
+            def enviar(self, chat_id, text):
+                return type("R", (), {"ok": False, "blocked": True})()
+            def desconectar(self): pass
+        class FakeBroadcasts:
+            def __init__(self): self.errores = []
+            def crear(self, broadcast_id, text, source, channels, tg_total=0): pass
+            def registrar_error(self, bid, msg): self.errores.append(msg)
+        store = FakeBroadcasts()
+        res = BroadcastList(FakeSubs(["1"]), FakeQueue(), FakeConfig(sending_enabled=False),
+                            broadcasts=store, preview_sender=FailPreview())("A $100.000")
+        self.assertTrue(res.get("captured"))
+        self.assertFalse(res.get("preview_sent"))
+        self.assertTrue(any("Preview" in e for e in store.errores))
+
     def test_envio_apagado_inline_no_envia_pero_captura(self):
         queue = FakeQueue()
         res = BroadcastList(FakeSubs(["1"]), queue, FakeConfig(sending_enabled=False))("A $100.000")

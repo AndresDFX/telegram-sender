@@ -228,6 +228,13 @@ Lista accionable para no repetir fallos:
 - **Imagen no firmable NO se entrega como texto-solo (B7):** si el lote trae `image_key`, la firma S3 falla y NO hay `image_url` de respaldo, el worker **reintenta** el lote (itemFailure → SQS → DLQ si persiste) en vez de entregar texto-sin-imagen marcándolo como éxito (perdía la foto en silencio).
 - **Auto-lista borrada/renombrada deja rastro (M25):** si el envío automático está activo pero la lista elegida resuelve a 0 destinatarios, se registra un error en el job en vez de cerrarlo como 'enviado-vacío' silencioso (`auto_<canal>_list` guarda el NOMBRE; borrar/renombrar la lista lo deja apuntando a la nada).
 - **`marcar_inactivo` de un chat inexistente es no-op (B6):** captura el `ConditionalCheckFailedException` benigno (chat nunca registrado / purgado) en vez de propagar un stacktrace que ensuciaba los logs.
+- **No-solape del dispatcher = lock optimista, NO concurrencia reservada (M28):** `DispatcherReservedConcurrency` default es 0; la no-duplicación la garantiza el `ConditionExpression` del cursor en `registrar_dispatch`. Dos ticks simultáneos podrían reclamar TG y WA del mismo plan a la vez (no duplica, pero rompe el ritmo "un lote a la vez"); para secuencialidad estricta, fijar `DispatcherReservedConcurrency=1` en el stack.
+- **Fallo de preview de captura visible (B16):** si el preview de una lista capturada no llega a Mensajes Guardados (FloodWait/sesión), se registra el error en el job (`registrar_error`) — el panel lo muestra; antes solo quedaba en logs y el HWM ya había avanzado.
+- **`AlertEmail` validado + recordatorio SNS (B14):** el parámetro lleva `NoEcho` y `AllowedPattern` de email. Recordar: una suscripción SNS por email **solo entrega tras confirmarla** desde el correo; si es el único canal de reseteo de contraseña (sin Resend), hay que confirmarla o el código no llega.
+
+### Trade-offs conocidos del diseño fail-open (NO son bugs nuevos)
+- **Doble-conteo / reenvío si `dedup.marcar()` cae por infra (M10/M30/B4):** `marcar()`/`procesado()` son fail-open a propósito (priorizan no-bloquear sobre no-duplicar; un re-lanzar reentregaría en bucle). Ante un fallo de infra REAL (no `ConditionalCheckFailed`) entre incrementar contadores y marcar, una reentrega SQS puede re-contar/re-enviar. Mitigación pendiente sugerida: métrica/alarma cuando `marcar()` cae al except de infra. Aceptado como trade-off.
+- **`paused`/strikes se leen una vez por invoke (B8):** correcto con `WorkerEventSourceMapping BatchSize=1` (invariante actual). Si se sube el BatchSize por throughput, habría que mover la lectura de pausa/strikes a por-record.
 
 ### FloodWait de Telegram (Telethon)
 

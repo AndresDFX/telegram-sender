@@ -216,6 +216,18 @@ class BroadcastList:
             return {"mode": "only", "lists": [nombre]}
         return None
 
+    def _preview_capture(self, bid: str, mensaje: str) -> bool:
+        """Preview de una lista CAPTURADA y, si NO se entregó, deja constancia en el job (B16): así
+        el panel muestra que esa captura no llegó a Mensajes Guardados (antes solo quedaba en logs y
+        el HWM ya había avanzado, sin forma de saberlo desde la interfaz)."""
+        enviado = self._preview(mensaje)
+        if not enviado and self._broadcasts:
+            try:
+                self._broadcasts.registrar_error(bid, "Preview a Mensajes Guardados NO entregado (¿FloodWait o sesión del userbot?)")
+            except Exception:
+                logger.exception("No se pudo registrar el fallo de preview del job %s", bid)
+        return enviado
+
     def _preview(self, mensaje: str) -> bool:
         """Autoenvía la lista capturada a Mensajes Guardados del userbot ('me') para verla en
         Telegram sin difundirla. Best-effort: nunca rompe la captura. Devuelve True si se envió.
@@ -267,7 +279,7 @@ class BroadcastList:
         if not bool(cfg.get("sending_enabled", True)):
             bid = self._nuevo_id()
             self._registrar(bid, mensaje, "capture", [], 0)
-            enviado = self._preview(mensaje)
+            enviado = self._preview_capture(bid, mensaje)
             logger.info(
                 "Lista capturada %s (envío apagado): registrada%s, NO difundida",
                 bid, " + preview a Mensajes Guardados OK" if enviado else " (preview NO enviado)",
@@ -287,7 +299,7 @@ class BroadcastList:
         if not tg_on and not wa_on:
             bid = self._nuevo_id()
             self._registrar(bid, mensaje, "capture", [], 0)
-            enviado = self._preview(mensaje)
+            enviado = self._preview_capture(bid, mensaje)
             logger.warning(
                 "Envío automático ACTIVO pero sin lista elegida para ningún canal; lista %s "
                 "capturada (NO difundida)%s", bid, " + preview OK" if enviado else "",

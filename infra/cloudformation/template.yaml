@@ -188,9 +188,15 @@ Parameters:
   AlertEmail:
     Type: String
     Default: ""
+    NoEcho: true
+    # B14: valida formato de email (o vacío). Evita suscripciones SNS malformadas que nunca entregan.
+    AllowedPattern: "^$|^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+    ConstraintDescription: Debe ser un email válido o quedar vacío.
     Description: >
       Email para recibir alarmas (DLQ no vacía, errores de Lambda). Vacío = no se suscribe nadie
-      (las alarmas y el tópico SNS se crean igual; puedes suscribir un endpoint luego).
+      (las alarmas y el tópico SNS se crean igual; puedes suscribir un endpoint luego). OJO: una
+      suscripción SNS por email solo entrega tras CONFIRMARLA desde el correo; si es el único canal
+      de reseteo de contraseña (sin Resend configurado), confírmala o el código no llegará (B14).
 
 Conditions:
   # Solo aplica concurrencia reservada al worker si es > 0 (ver WorkerReservedConcurrency).
