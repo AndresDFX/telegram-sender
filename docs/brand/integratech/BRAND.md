@@ -370,6 +370,22 @@ El **isotipo** son dos nodos enlazados por un trazo en "S" que sube y baja: repr
 
 Aplica a `logo.svg`, `isotipo.svg` y `banner-lista.svg`. Los SVG son la fuente vectorial; para Telegram/WhatsApp/email/redes se entrega **PNG**.
 
+### PNG ya generados (carpeta `png/`)
+
+Set oficial exportado (derivados; regenerar desde los SVG, no editar a mano):
+
+| Archivo | Tamaño | Fondo |
+|---|---|---|
+| `png/banner-lista.png` | 2160x1080 (2x) | sólido (azul de marca) |
+| `png/logo.png` | 600x144 (2x) | transparente (RGBA) |
+| `png/isotipo.png` | 512x512 | `#EFF4FF` (del SVG) |
+| `png/isotipo-256.png` | 256x256 | `#EFF4FF` |
+| `png/isotipo-64.png` | 64x64 | `#EFF4FF` |
+| `png/isotipo-32.png` | 32x32 | `#EFF4FF` |
+| `png/isotipo-16.png` | 16x16 | `#EFF4FF` |
+
+> Nota: el wordmark se exporta con la **pila de fallback** (Segoe UI / system-ui) cuando **Space Grotesk** no está instalada en la máquina que exporta. Para fidelidad tipográfica total, instalar Space Grotesk antes de exportar o convertir el `<text>` a outlines (ver 7.2).
+
 1. **Guarda el SVG** con un nombre claro (p. ej. `banner-lista-precios.svg`).
 2. **Inkscape** (recomendado, control de DPI):
    ```
@@ -388,6 +404,12 @@ Aplica a `logo.svg`, `isotipo.svg` y `banner-lista.svg`. Los SVG son la fuente v
    ```
    rsvg-convert -w 2160 -h 1080 banner-lista.svg -o banner.png
    ```
+6. **Navegador headless** (Edge/Chrome — útil cuando no hay Inkscape/ImageMagick/rsvg, p. ej. en Windows; es como se generó el set actual). Envuelve el SVG en un HTML que lo escala a `100vw/100vh` y captura al tamaño exacto, con fondo transparente:
+   ```
+   msedge --headless=new --disable-gpu --hide-scrollbars --default-background-color=00000000 \
+     --window-size=2160,1080 --screenshot=banner.png file:///ruta/wrapper.html
+   ```
+   El tamaño de salida = `--window-size` (el SVG escala vectorialmente, sin pérdida). Render fiel de gradientes/filtros (idéntico a la web).
 
 **Notas por asset:**
 - **Isotipo / favicon:** exportar cuadrado (p. ej. 512x512, 256x256, 64x64, 32x32, 16x16) desde `isotipo.svg`. Verificar legibilidad a 16x16.
@@ -404,6 +426,7 @@ Aplica a `logo.svg`, `isotipo.svg` y `banner-lista.svg`. Los SVG son la fuente v
 | Isotipo | `isotipo.svg` | Dos nodos + trazo en "S" (favicon/avatar) |
 | Banner de lista | `banner-lista.svg` | Banner 1080x540 para envios |
 | Tokens de diseño | `tokens.css` | `--it-color-*`, `--it-font-*`, `--it-radius-*` |
+| **PNG (derivados)** | `png/` | `banner-lista.png` (2160x1080), `logo.png` (600x144, transparente), `isotipo.png` (512) + favicons `isotipo-256/64/32/16.png`. Generados desde los SVG (ver 14). |
 
 **Reglas de gobernanza:**
 - **`tokens.css` es la fuente de verdad** de color, tipografia y radios. Cualquier valor de marca se cambia ahi primero; este documento se actualiza despues.
