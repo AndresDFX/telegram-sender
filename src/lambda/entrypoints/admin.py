@@ -1314,14 +1314,16 @@ _PAGE = r"""<!doctype html><html lang="es" data-theme="dark"><head><meta charset
 }
 
 :root{
-  --bg:#1A1917; --bg2:#111010;
-  --card:#2B2A27; --card2:#232220; --elev:#302E2B;
-  --bd:#3A3733; --bd2:#565049;
-  --tx:#FBFAF9; --tx2:#E4E1DB; --mut:#A39D93; --mut2:#787269;
+  /* M26: neutros SLATE fríos (antes cálidos marrón); el acento sigue siendo el naranja Replica.
+     Los grises de la UI derivan de estos tokens (literales sueltos mapeados a var(--bd)/--elev...). */
+  --bg:#0F1217; --bg2:#0A0C10;
+  --card:#161B22; --card2:#11151B; --elev:#1B212A;
+  --bd:#2A323D; --bd2:#3B4654;
+  --tx:#F3F6FA; --tx2:#CBD5E1; --mut:#93A1B2; --mut2:#647284;
   --ac:#FD531E; --ac-h:#FF6A3C; --ac2:#FF9166;
   --ok:#34d399; --warn:#fbbf24; --bad:#fb7185; --info:#60a5fa;
   --danger:#DC362E; --danger-h:#C02B24;   /* B18: rojo destructivo tokenizado en el runtime (mismos hex) */
-  --r:14px; --r-sm:10px;
+  --r:12px; --r-sm:8px;   /* B17: escala de radios consistente (lg 12 / md 8) */
   --sh:0 1px 0 rgba(255,255,255,.04) inset, 0 1px 2px rgba(0,0,0,.28), 0 24px 56px -28px rgba(0,0,0,.82);
   --glow:0 6px 22px -8px rgba(253,83,30,.55);
   --ring:0 0 0 3px rgba(253,83,30,.28);
@@ -1342,8 +1344,8 @@ body{
 }
 ::selection{background:rgba(253,83,30,.38);color:#fff}
 ::-webkit-scrollbar{width:10px;height:10px}
-::-webkit-scrollbar-thumb{background:#3A3733;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
-::-webkit-scrollbar-thumb:hover{background:#565049;background-clip:padding-box}
+::-webkit-scrollbar-thumb{background:var(--bd);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:var(--bd2);background-clip:padding-box}
 a{color:var(--ac2)}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
   background:var(--elev);border:1px solid var(--bd);padding:1px 6px;border-radius:6px;color:#E7E7E5}
@@ -1443,9 +1445,9 @@ select{appearance:none;-webkit-appearance:none;
   background-repeat:no-repeat;background-position:right 12px center;padding-right:36px;cursor:pointer}
 input[type=file]{padding:9px 12px;color:var(--mut);cursor:pointer}
 input[type=file]::file-selector-button{
-  background:#34322F;border:1px solid var(--bd2);color:var(--tx2);
+  background:var(--elev);border:1px solid var(--bd2);color:var(--tx2);
   border-radius:8px;padding:7px 13px;margin-right:12px;cursor:pointer;font:inherit;font-weight:600}
-input[type=file]::file-selector-button:hover{background:#3F3D39}
+input[type=file]::file-selector-button:hover{background:var(--bd2)}
 /* Reset: los checkbox/radio NO deben heredar el padding/borde/fondo del input de texto (arriba),
    que les pintaba una caja fea alrededor. Render nativo limpio con el acento de marca. */
 input[type=checkbox],input[type=radio]{
@@ -1465,8 +1467,8 @@ button:hover{filter:brightness(1.07);box-shadow:var(--glow)}
 button:active{transform:translateY(1px);filter:brightness(.97)}
 button:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(253,83,30,.4)}
 button:disabled{opacity:.5;cursor:not-allowed;transform:none;filter:none;box-shadow:none}
-button.sec{background:#34322F;color:var(--tx2);border-color:var(--bd2)}
-button.sec:hover{background:#3F3D39;filter:none;box-shadow:none}
+button.sec{background:var(--elev);color:var(--tx2);border-color:var(--bd2)}
+button.sec:hover{background:var(--bd2);filter:none;box-shadow:none}
 button.ghost{background:transparent;border:1px solid var(--bd2);color:var(--mut)}
 button.ghost:hover{background:rgba(255,255,255,.05);color:var(--tx2);filter:none;box-shadow:none}
 button.danger{background:var(--danger);color:#fff;border-color:transparent}
@@ -3062,7 +3064,7 @@ function renderLists(ch){ const cont=$(listsBox(ch)); cont.innerHTML='';
   const active=new Set((TGT[ch]||{}).lists||[]);
   if(!LISTS[ch].length){ cont.innerHTML='<div class="hint">Sin listas todavía.</div>'; }
   LISTS[ch].forEach((l,i)=>{ const row=document.createElement('div');
-    row.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid #3A3A39';
+    row.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--bd)';
     row.innerHTML=`<label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin:0"><input type="checkbox" ${active.has(l.name)?'checked':''} style="width:auto" onchange="toggleListActive('${ch}',${i},this.checked)"> <b>${bcEsc(l.name)}</b></label>`+
       `<button class="ghost" style="padding:3px 9px" onclick="listMembers('${ch}',${i})" title="Ver/editar miembros">${l.ids.length} miembros ›</button>`+
       `<button class="sec" onclick="addToList('${ch}',${i})">+ marcados</button>`+
