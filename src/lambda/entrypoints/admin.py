@@ -894,7 +894,30 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             _audit("schedule:toggle", f"{sid}={'on' if enabled else 'off'}")
             return _json({"ok": True})
         if sub == "/api/schedules/delete" and method == "POST":
-            sid = str(_body(event).get("sid", "")).strip()
+            cuerpo = _body(event)
+            if cuerpo.get("all"):  # borrar TODOS los programados
+                n = 0
+                try:
+                    for s in schedule_store.listar():
+                        try:
+                            schedule_store.borrar(str(s.get("sid"))); n += 1
+                        except Exception:
+                            pass
+                except Exception:
+                    logger.exception("No se pudieron listar los schedules para borrado masivo")
+                _audit("schedule:borrar", f"todos {n}")
+                return _json({"ok": True, "deleted": n})
+            sids = cuerpo.get("sids")
+            if isinstance(sids, list) and sids:  # borrar SELECCIONADOS
+                n = 0
+                for x in sids:
+                    try:
+                        schedule_store.borrar(str(x)); n += 1
+                    except Exception:
+                        pass
+                _audit("schedule:borrar", f"masivo {n}")
+                return _json({"ok": True, "deleted": n})
+            sid = str(cuerpo.get("sid", "")).strip()
             if not sid:
                 return _json({"error": "sid requerido"}, 400)
             schedule_store.borrar(sid)
@@ -2264,11 +2287,16 @@ th.selcol,td.selcol{width:34px;text-align:center}
   <div class="card" data-tab="envios" data-sub="programados"><h2>📅 Mensajes programados <span id="sg_n" class="hint"></span></h2>
    <div class="hint">Próximos envíos automáticos. Puedes pausarlos/activarlos o eliminarlos.</div>
    <div style="overflow-x:auto;margin-top:12px">
-     <table id="sg_table"><thead><tr><th>Mensaje</th><th>Canales</th><th>Cuándo</th><th>Próximo</th><th></th></tr></thead>
+     <table id="sg_table"><thead><tr><th class="selcol"><input type="checkbox" id="sg_selall" onchange="sgSelAll(this.checked)"></th><th>Mensaje</th><th>Canales</th><th>Cuándo</th><th>Próximo</th><th></th></tr></thead>
        <tbody id="sg_rows"></tbody></table>
    </div>
    <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Crea uno arriba para enviarlo automáticamente.</p></div>
-   <div style="margin-top:14px"><button class="sec" onclick="loadSchedules()">Refrescar</button></div>
+   <div class="tbl-toolbar">
+     <button class="danger" id="sg_delsel" onclick="sgDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
+     <button class="danger" onclick="sgDeleteAll()">🗑 Borrar todos</button>
+     <span class="grow"></span>
+     <button class="sec" onclick="loadSchedules()">Refrescar</button>
+   </div>
   </div>
   <div class="card accent" id="usr_card" data-tab="ajustes" data-sub="acceso" style="display:none"><h2>👥 Usuarios del panel <span id="usr_n" class="hint"></span></h2>
    <div class="hint">Cada usuario entra con sus propias credenciales (independientes). El correo se usa para recuperar la contraseña. Solo un <b>administrador</b> ve esta sección y gestiona usuarios; los usuarios normales pueden hacer todo lo demás.</div>
@@ -3323,6 +3351,7 @@ async function loadSchedules(){
     const msg=bcEsc((s.name||s.text||'').slice(0,48))||'(sin texto)';
     const tag=s.enabled?'<span class="pill done">activo</span>':'<span class="pill inactive">pausado</span>';
     return `<tr>
+      <td class="selcol"><input type="checkbox" class="sgsel" data-sid="${s.sid}" onchange="sgSelChanged()"></td>
       <td><b>${msg}</b><div class="hint" style="margin-top:2px">${tag}</div></td>
       <td>${sgChans(s)}</td>
       <td>${bcEsc(sgDesc(s))}</td>
@@ -3332,7 +3361,18 @@ async function loadSchedules(){
         <button class="danger" style="padding:5px 10px;margin-left:6px" onclick="sgDelete('${s.sid}')">Borrar</button>
       </td></tr>`;
   }).join('');
+  if($('sg_selall')) $('sg_selall').checked=false; sgSelChanged();
 }
+function sgSelAll(v){ document.querySelectorAll('.sgsel').forEach(c=>c.checked=v); sgSelChanged(); }
+function sgSelectedSids(){ return [...document.querySelectorAll('.sgsel:checked')].map(c=>c.getAttribute('data-sid')).filter(Boolean); }
+function sgSelChanged(){ const n=sgSelectedSids().length; const b=$('sg_delsel'); if(b){ b.disabled=!n; b.textContent='🗑 Borrar seleccionados'+(n?(' ('+n+')'):''); } }
+async function sgDeleteSelected(){ const sids=sgSelectedSids(); if(!sids.length){ toast('Marca al menos un mensaje',true); return; }
+  if(!await confirmModal('¿Borrar '+sids.length+' mensaje(s) programado(s)? No se puede deshacer.',{danger:true,okText:'Borrar'})) return;
+  try{ const r=await api('/api/schedules/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sids})}); toast('✓ '+(r.deleted||0)+' borrados'); loadSchedules(); }
+  catch(e){ toast('Error al borrar',true); } }
+async function sgDeleteAll(){ if(!await confirmModal('¿Borrar TODOS los mensajes programados? No se puede deshacer.',{danger:true,okText:'Borrar todos'})) return;
+  try{ const r=await api('/api/schedules/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({all:true})}); toast('✓ '+(r.deleted||0)+' borrados'); loadSchedules(); }
+  catch(e){ toast('Error al borrar',true); } }
 async function sgToggle(sid,en){ try{ await api('/api/schedules/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid,enabled:en})}); loadSchedules(); }catch(e){ toast('Error',true); } }
 async function sgDelete(sid){ if(!await confirmModal('¿Borrar este mensaje programado?',{danger:true,okText:'Borrar'})) return;
   try{ await api('/api/schedules/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid})}); toast('✓ Borrado'); loadSchedules(); }catch(e){ toast('Error',true); } }

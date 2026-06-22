@@ -155,9 +155,11 @@ Cuatro pestañas:
     auto-excluidos por fallos.
 - **📨 Envíos**: **Componer y enviar** (texto + imagen + canales + selector "Enviar a" + previsualización +
   contador con aviso de límite 4096); **Envíos** (tabla con estado + barras de progreso, "en vivo",
-  borrado individual/masivo, error de envío clickeable con el detalle); **Programar un mensaje** y
-  **Mensajes programados** (once/daily/weekly); **Envíos fraccionados** (monitor de planes con borrado
-  individual/masivo).
+  borrado individual/masivo, **clic en el mensaje → ver texto completo**, error de envío clickeable con el
+  detalle); **Programar un mensaje** y **Mensajes programados** (once/daily/weekly, con **borrado
+  individual/masivo**: seleccionar + «Borrar seleccionados»/«Borrar todos»); **Envíos fraccionados**
+  (monitor de planes con borrado individual/masivo). **Los tres flujos** (Envíos, Programados, Fraccionados)
+  tienen selección y borrado masivo consistente.
 - **⚙️ Ajustes y estado**: Cuenta de Telegram (bot/userbot), WhatsApp (reenvío), **Correo de recuperación**
   (Resend), cambio de contraseña, **interruptor maestro de envíos** (solo automáticos), anti-baneo (lote/delays),
   ventana horaria, cola/DLQ, auditoría y **usuarios del panel con roles** (gestión solo visible para administradores).
