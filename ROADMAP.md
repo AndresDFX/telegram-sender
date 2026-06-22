@@ -79,8 +79,8 @@ de bot/cuenta (bot o userbot) · panel admin moderno (Basic Auth). 163 tests.
 - ✅ **Audit log** — `DynamoDbAuditStore` (tabla `Audit`, TTL 90 d) registra acciones del panel
   (config, envíos, cancelaciones, DLQ); `GET /api/audit` + tarjeta "Auditoría" en Estado.
 - ✅ **CI/CD** — `.github/workflows/deploy.yml` (tests siempre; deploy a CFN gated por la variable
-  `DEPLOY_ENABLED`). *Acción tuya: añadir los secrets de AWS + `DEPLOY_ENABLED=true` para activar el
-  auto-deploy.*
+  `DEPLOY_ENABLED`). **Auto-deploy ACTIVADO y validado** (push a `main` → tests → deploy a CFN):
+  Secrets de AWS/app cargados y `DEPLOY_ENABLED=true` vía `scripts/set-github-secrets.ps1`.
 - 🔜 **[P1·M] HTTPS + dominio + WAF** (requiere registrar dominio) · **[P1·L] logs estructurados** ·
   staging/prod → ola 4.
 - ✅ **Alarmas por email** — suscripción de `castano.julian@correounivalle.edu.co` al tópico SNS

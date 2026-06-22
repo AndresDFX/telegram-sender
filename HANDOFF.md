@@ -300,7 +300,7 @@ Lista accionable para no repetir fallos:
 
 ### Roadmap / futuro
 
-- CI/CD auto-deploy en push a main (gated; ya hay workflows, falta habilitar deploy con secrets).
+- ✅ CI/CD auto-deploy en push a main: **ACTIVADO y validado** (Secrets de AWS/app + `DEPLOY_ENABLED=true` cargados con `scripts/set-github-secrets.ps1`; push a `main` corre tests y despliega a CFN). Nota: `set-github-secrets.ps1` sube los secrets con `gh secret set --body $val` (NO `--body -`, que gh toma como literal "-" y corrompe el secret → deploy falla con "security token invalid").
 - Dominio propio / HTTPS / WAF.
 - Logs estructurados.
 - Onboarding wizard.

@@ -36,7 +36,10 @@ if ($perm -ne "ADMIN") {
 $aws = Load-EnvFile (Join-Path $Root '.env.aws')
 $dep = Load-EnvFile (Join-Path $Root '.env.deploy')
 
-# (nombre en GitHub, valor) -> Secret cifrado. El valor va por stdin, nunca por argumentos/log.
+# (nombre en GitHub, valor) -> Secret cifrado. OJO: gh lee de stdin SOLO si se OMITE --body;
+# pasar `--body -` guarda el LITERAL "-" (no stdin) y corrompe el secret (deploy falla con
+# "security token invalid"). Usamos `--body $val` (forma documentada). gh cifra el valor con la
+# clave pública del repo antes de subirlo; en la máquina del dueño el riesgo de args/log es menor.
 $secrets = [ordered]@{
   AWS_ACCESS_KEY_ID    = $aws['AWS_ACCESS_KEY_ID']
   AWS_SECRET_ACCESS_KEY= $aws['AWS_SECRET_ACCESS_KEY']
@@ -50,7 +53,7 @@ $secrets = [ordered]@{
 foreach ($name in $secrets.Keys) {
   $val = $secrets[$name]
   if ([string]::IsNullOrEmpty($val)) { Write-Host "  - ${name}: OMITIDO (vacio en .env)"; continue }
-  $val | gh secret set $name --repo $Repo --body -   # --body - lee de stdin
+  gh secret set $name --repo $Repo --body $val   # valor EXACTO (no usar `--body -`: gh lo toma literal)
   Write-Host "  - secret ${name}: OK"
 }
 
