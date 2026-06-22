@@ -117,17 +117,31 @@ class DispatchCampaigns:
             if not self._plans.registrar_dispatch(pid, channel="tg", index=tg_next, n=len(ids), target=target, now=now):
                 logger.info("Plan %s cancelado en carrera; no se despacha TG#%d", pid, tg_next)
                 return {"plan": pid, "cancelado": True}
-            self._queue.encolar_uno(
-                plan.get("text", ""),
-                ids,
-                image_url=plan.get("image_url") or None,
-                image_key=plan.get("image_key") or None,
-                broadcast_id=bid,
-                batch_index=tg_next,
-                pid=pid,
-                # el worker lee este flag: en pausa entrega solo los lotes manuales (no los automáticos).
-                manual=(plan.get("source") == "manual"),
-            )
+            try:
+                self._queue.encolar_uno(
+                    plan.get("text", ""),
+                    ids,
+                    image_url=plan.get("image_url") or None,
+                    image_key=plan.get("image_key") or None,
+                    broadcast_id=bid,
+                    batch_index=tg_next,
+                    pid=pid,
+                    # el worker lee este flag: en pausa entrega solo los lotes manuales (no los automáticos).
+                    manual=(plan.get("source") == "manual"),
+                )
+            except Exception:
+                # A4: si el encolado falla DESPUÉS de reclamar el lote, no dejar el cursor 'en vuelo'
+                # colgado 900s; se libera el in_flight (el siguiente tick continúa) y se registra el
+                # fallo de forma VISIBLE en el job. NO se reencola aquí (un batch_id nuevo duplicaría
+                # si el send sí llegó); el operador puede reenviar ese lote.
+                logger.exception("Plan %s: fallo al encolar TG#%d; libero el cursor y marco el fallo", pid, tg_next)
+                if bid:
+                    try:
+                        self._broadcasts.registrar_error(bid, f"Telegram — no se pudo encolar el lote {tg_next} a la cola")
+                    except Exception:
+                        logger.exception("No se pudo registrar el error de encolado del plan %s", pid)
+                self._plans.limpiar_inflight(pid)
+                return {"plan": pid, "tg_encolar_fallido": True}
             logger.info("Plan %s: despachado TG#%d (%d destinatarios)", pid, tg_next, len(ids))
             return {"plan": pid, "despachado": f"TG#{tg_next}", "n": len(ids)}
 
@@ -169,24 +183,30 @@ class DispatchCampaigns:
                         wa_img = self._image_store.url_temporal(wa_key)
                     except Exception:
                         logger.exception("No se pudo re-firmar la imagen WhatsApp del plan %s", pid)
-                res = self._whatsapp.forward(
-                    plan.get("wa_text", "") or plan.get("text", ""),
-                    wa_img,
-                    plan.get("wa_exclude", []),
-                    mode=plan.get("wa_mode", "all"),
-                    list_ids=plan.get("wa_list_ids", []),
-                    broadcast_id=bid,
-                    broadcasts_table=self._broadcasts_table,
-                    offset=offset,
-                    limit=limit,
-                    bc_total=wa_total,
-                    delay_min_ms=int(cfg.get("wa_delay_min", 3000)),
-                    delay_max_ms=int(cfg.get("wa_delay_max", 9000)),
-                    exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
-                    pattern_exceptions=cfg.get("whatsapp_pattern_exceptions", []),
-                )
-                # RC-C: si el servicio NO aceptó (no conectado/URL/token), marcamos el job como
-                # fallido y registramos la causa, en vez de dejar el contador colgado en silencio.
+                try:
+                    res = self._whatsapp.forward(
+                        plan.get("wa_text", "") or plan.get("text", ""),
+                        wa_img,
+                        plan.get("wa_exclude", []),
+                        mode=plan.get("wa_mode", "all"),
+                        list_ids=plan.get("wa_list_ids", []),
+                        broadcast_id=bid,
+                        broadcasts_table=self._broadcasts_table,
+                        offset=offset,
+                        limit=limit,
+                        bc_total=wa_total,
+                        delay_min_ms=int(cfg.get("wa_delay_min", 3000)),
+                        delay_max_ms=int(cfg.get("wa_delay_max", 9000)),
+                        exclude_patterns=cfg.get("whatsapp_exclude_patterns", []),
+                        pattern_exceptions=cfg.get("whatsapp_pattern_exceptions", []),
+                    )
+                except Exception:
+                    # A13: una excepción de red al llamar al servicio (Render dormido/caído) NO debe
+                    # propagar y perder el slice en silencio; cae en la rama "no aceptado" de abajo.
+                    logger.exception("Plan %s: excepción en forward WhatsApp WA#%d", pid, wa_next)
+                    res = {}
+                # RC-C/A13: si el servicio NO aceptó (no conectado/URL/token/excepción), marcamos el job
+                # como fallido, registramos la causa y LIBERAMOS el in_flight (no colgar el cursor 900s).
                 if not (isinstance(res, dict) and res.get("accepted")):
                     logger.warning("Plan %s: WhatsApp no aceptó WA#%d (%s)", pid, wa_next, res)
                     if bid:
@@ -195,6 +215,7 @@ class DispatchCampaigns:
                             self._broadcasts.registrar_error(bid, "WhatsApp — el servicio no aceptó el envío (¿conectado/URL/token?)")
                         except Exception:
                             logger.exception("No se pudo marcar WhatsApp fallido del plan %s", pid)
+                    self._plans.limpiar_inflight(pid)
                     return {"plan": pid, "wa_no_aceptado": True}
                 logger.info("Plan %s: despachado WA#%d (offset %d, %d destinatarios)", pid, wa_next, offset, limit)
                 return {"plan": pid, "despachado": f"WA#{wa_next}", "n": limit}

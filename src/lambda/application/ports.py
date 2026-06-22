@@ -48,7 +48,18 @@ class QueueStats(ABC):
 class DedupStore(ABC):
     @abstractmethod
     def marcar(self, key: str) -> bool:
-        """Marca atómicamente; True si es la primera vez (procesar), False si ya existía."""
+        """Marca atómicamente; True si es la primera vez (procesar), False si ya existía.
+
+        Fail-open: ante un fallo de infra devuelve False (no re-lanza), pensado para el worker
+        (no reentregar un lote ya enviado). El receiver usa marcar_estricto (semántica opuesta)."""
+
+    def marcar_estricto(self, key: str) -> bool:
+        """Como marcar() pero PROPAGA los fallos de infra (no fail-open): así el receiver no
+        confunde un throttle/permiso con un duplicado real y no descarta updates legítimos.
+
+        Por defecto delega en marcar() (los fakes/implementaciones que no la sobreescriban
+        conservan la semántica antigua)."""
+        return self.marcar(key)
 
     @abstractmethod
     def borrar(self, key: str) -> None:

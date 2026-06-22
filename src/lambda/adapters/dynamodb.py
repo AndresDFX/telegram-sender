@@ -104,7 +104,14 @@ class DynamoDbDedupStore(DedupStore):
     def _t(self):
         return _table(self._name, self._endpoint)
 
-    def marcar(self, key: str) -> bool:
+    def marcar_estricto(self, key: str) -> bool:
+        """Marca atómicamente y PROPAGA los fallos de infra (no fail-open).
+
+        True = primera vez (procesar); False = ya existía (duplicado real). Ante un fallo de
+        infra (permiso/throttle/tabla) RELANZA, para que el llamador decida: el RECEIVER lo
+        trata como 'no pude confirmar → procesar igual' (A8), en vez de confundirlo con un
+        duplicado y descartar un update legítimo en silencio. El worker usa marcar() (fail-open).
+        """
         from botocore.exceptions import ClientError
 
         try:
@@ -116,13 +123,16 @@ class DynamoDbDedupStore(DedupStore):
         except ClientError as error:
             if error.response["Error"]["Code"] == "ConditionalCheckFailedException":
                 return False
+            raise  # fallo de infra: NO asumir duplicado; el llamador decide
+
+    def marcar(self, key: str) -> bool:
+        try:
+            return self.marcar_estricto(key)
+        except Exception:
             # Fallo de infra (permiso/tabla): NO re-lanzar. Simétrico con procesado() (fail-open).
             # Si re-lanzáramos, el worker reencolaría un lote YA ENTREGADO y lo RE-ENTREGARÍA en
             # bucle (duplicados). Mejor seguir sin marcar que duplicar el mensaje.
             logger.exception("dedup.marcar falló para %s; continúo sin marcar (evita reentrega-duplicado)", key)
-            return False
-        except Exception:
-            logger.exception("dedup.marcar error inesperado para %s; continúo sin marcar", key)
             return False
 
     def borrar(self, key: str) -> None:

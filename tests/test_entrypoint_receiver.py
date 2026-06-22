@@ -18,11 +18,17 @@ _ENV_VARS = ("WEBHOOK_SECRET_TOKEN", "ALLOW_INSECURE_WEBHOOK", "SOURCE_CHANNEL_I
 
 
 class FakeDedup:
-    def __init__(self, marca=True):
+    def __init__(self, marca=True, infra_error=False):
         self._marca = marca
+        self._infra_error = infra_error  # A8: simula fallo de infra (throttle/permiso)
         self.borrados = []
 
     def marcar(self, key):
+        return self._marca
+
+    def marcar_estricto(self, key):
+        if self._infra_error:
+            raise RuntimeError("ProvisionedThroughputExceeded")
         return self._marca
 
     def borrar(self, key):
@@ -86,6 +92,14 @@ class ReceiverTests(unittest.TestCase):
         resp = receiver.lambda_handler(_event({"update_id": 7, "channel_post": {"chat": {"id": -1}, "text": "x"}}), None)
         self.assertEqual(json.loads(resp["body"])["status"], "duplicate")
         receiver.broadcast.assert_not_called()
+
+    def test_a8_fallo_de_infra_del_dedup_no_descarta_como_duplicado(self):
+        # A8: si el dedup no puede confirmar (throttle/permiso), el receiver NO debe responder
+        # 'duplicate' y descartar el post; debe procesarlo igual (encolar el broadcast).
+        receiver.dedup = FakeDedup(infra_error=True)
+        resp = receiver.lambda_handler(_event({"update_id": 42, "channel_post": {"chat": {"id": -1}, "text": "x"}}), None)
+        self.assertEqual(json.loads(resp["body"])["status"], "queued")  # NO 'duplicate'
+        receiver.broadcast.assert_called_once_with("x")
 
     # --- ruteo ---
     def test_start_llama_handle_command(self):

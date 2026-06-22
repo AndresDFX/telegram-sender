@@ -125,9 +125,19 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         return _response(400, json.dumps({"status": "bad_request"}))
 
     update_id = body.get("update_id")
-    if update_id is not None and not dedup.marcar(str(update_id)):
-        logger.info("Update %s ya procesado; se omite (duplicado)", update_id)
-        return _response(body=json.dumps({"status": "duplicate"}))
+    if update_id is not None:
+        try:
+            nuevo = dedup.marcar_estricto(str(update_id))
+        except Exception:
+            # A8: el dedup NO pudo confirmar (throttle/permiso/tabla ausente). NO asumir 'duplicado'
+            # y descartar en silencio un update legítimo (post del canal u onboarding) que Telegram
+            # daría por entregado (200) sin reintentar. Se procesa igual: a lo sumo se reprocesa un
+            # duplicado raro (preferible a perder el update); la marca se reintenta en el camino feliz.
+            logger.exception("dedup no pudo confirmar el update %s; lo proceso igual (no asumir duplicado)", update_id)
+            nuevo = True
+        if not nuevo:
+            logger.info("Update %s ya procesado; se omite (duplicado)", update_id)
+            return _response(body=json.dumps({"status": "duplicate"}))
 
     try:
         return _enrutar(body)

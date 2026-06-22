@@ -216,6 +216,8 @@ Lista accionable para no repetir fallos:
 - **`aws cloudformation deploy` reusa el valor PREVIO del stack** para params no pasados (no el default del template). Por eso `deploy.ps1` pasa `WorkerTimeoutSeconds=300` explícito.
 - **Dispatcher concurrente** (cron solapado): reserved-concurrency=0 no limita a 1 → **lock optimista** en `registrar_dispatch` (`ConditionExpression` sobre el cursor).
 - **Destinatarios repetidos** en un lote → `dict.fromkeys` al crear el plan.
+- **Claim-then-enqueue (A4/A13):** `registrar_dispatch` avanza el cursor (reclama el lote) ANTES de encolar (TG) / llamar al servicio (WA). Si ese encolar/forward LANZA después del claim, el lote quedaba reclamado pero sin enviar → el `in_flight` colgaba ~900s y el lote se perdía en silencio. Fix: ambas llamadas van en `try/except` → liberan el `in_flight` (`limpiar_inflight`) y registran el fallo VISIBLE en el job (no re-encolan con un `batch_id` nuevo, que duplicaría si el envío sí salió; el operador reenvía ese lote).
+- **Dedup fail-open con semántica opuesta según el llamador (A8):** `DynamoDbDedupStore.marcar()` devolvía `False` tanto por duplicado real como por fallo de infra (throttle/permiso/tabla). El **worker** quiere ese fail-open (no reentregar un lote ya enviado), pero el **receiver** lo leía como "duplicado" y descartaba en silencio updates legítimos (post del canal / onboarding) que Telegram daba por entregados (200) sin reintentar. Fix: nuevo `marcar_estricto()` que **propaga** el fallo de infra; el receiver lo usa y, si no puede confirmar, **procesa igual** (no asume duplicado). `marcar()` sigue fail-open para worker/poller.
 
 ### FloodWait de Telegram (Telethon)
 
@@ -228,6 +230,7 @@ Lista accionable para no repetir fallos:
 - **Un solo host activo a la vez:** el ciclo de vida del socket se reescribió (mutex de arranque, un solo socket por `gen`, en 440/connectionReplaced CEDE en vez de reconectar) para acabar con la "guerra" local↔Render. `loggedOut` es seguro (no auto-borra). Timeout 8s en `fetchLatestBaileysVersion` (sin él colgaba `/pair`).
 - **Build en Render** requiere: `git`+`ca-certificates`, `npm install --legacy-peer-deps`, reescribir URLs git SSH→HTTPS. Hay ruta `/` informativa para evitar "Cannot GET /".
 - **Render Free duerme a los 15 min** → primer request da timeout; despertar con `/health` antes (el dispatcher hace keep-alive cuando hay planes activos).
+- **`enviarLote` usa el socket GLOBAL (A10):** el bucle de envío dura minutos (jitter); si un `/reset`, `/reconnect` o `scheduleReconnect` reemplaza el socket a mitad (`sock.end()`+`sock=null`, `gen++`), `sock.sendMessage` lanzaba `TypeError` (ventana `sock===null`) o enviaba sobre OTRA sesión, contando fallos espurios que **auto-excluían contactos válidos** (opt-out por `failures[jid]`). Fix: snapshot al entrar (`const s = sock; const myGen = gen`), usar `s.sendMessage`, y abortar limpio el resto del lote si `gen !== myGen || !connected` (sin marcar fallos).
 
 ### Imagen en los envíos (fix crítico)
 

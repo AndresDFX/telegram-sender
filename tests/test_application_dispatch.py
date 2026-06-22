@@ -258,6 +258,40 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(res["despachado"], "TG#0")  # TG sale aunque WhatsApp esté caído
         self.assertEqual(len(queue.calls), 1)
 
+    def test_a4_encolar_falla_libera_inflight_y_no_propaga(self):
+        # A4: si encolar_uno lanza DESPUÉS de reclamar el lote, NO debe propagar (perdería el lote
+        # en silencio y colgaría el cursor 900s). Se libera el in_flight y se registra el error.
+        class QueueBoom:
+            def encolar_uno(self, *a, **k):
+                raise RuntimeError("SQS caído")
+        class Broad(FakeBroadcasts):
+            def __init__(self): super().__init__(); self.error=None
+            def registrar_error(self, bid, msg): self.error=msg
+        plans = FakePlans(_plan())
+        b = Broad()
+        res = _disp(plans, broadcasts=b, queue=QueueBoom())()
+        self.assertTrue(res.get("tg_encolar_fallido"))
+        self.assertEqual(plans.cleared, 1)        # in_flight liberado (no cuelga 900s)
+        self.assertIsNotNone(b.error)             # error visible en el job
+
+    def test_a13_forward_excepcion_marca_fallido_y_libera(self):
+        # A13: si forward lanza (Render dormido/caído) tras reclamar el lote WA, NO debe propagar;
+        # cae en "no aceptado", marca el job WhatsApp fallido y libera el in_flight.
+        class WaBoom:
+            def ping(self): pass
+            def forward(self, *a, **k): raise RuntimeError("Render caído")
+        class Broad(FakeBroadcasts):
+            def __init__(self): super().__init__(); self.fallido=None; self.error=None
+            def marcar_whatsapp_fallido(self, bid): self.fallido=bid
+            def registrar_error(self, bid, msg): self.error=msg
+        plans = FakePlans(_plan(tg_next=2, tg_dispatched=300, wa_enabled=True, wa_resolved=True,
+                                wa_total=150, wa_batches=1))
+        b = Broad()
+        res = _disp(plans, broadcasts=b, wa=WaBoom())()
+        self.assertTrue(res.get("wa_no_aceptado"))
+        self.assertEqual(b.fallido, "b1")
+        self.assertEqual(plans.cleared, 1)        # in_flight liberado
+
     def test_finaliza_cuando_no_queda_nada(self):
         plans = FakePlans(_plan(status="running", tg_next=2, tg_dispatched=300))  # tg agotado, wa off
         res = _disp(plans)()

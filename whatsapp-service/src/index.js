@@ -517,6 +517,13 @@ async function bcIncr(table, id, sent, failed) {
 
 async function enviarLote(text, image_url, targets, track) {
   const { table, id, bcTotal, delayMin, delayMax } = track || {}
+  // A10: capturamos el socket y su GENERACIÓN al entrar. El bucle dura minutos (jitter anti-baneo);
+  // si un /reset, /reconnect o scheduleReconnect reemplaza el socket a mitad, doStart hace
+  // sock.end()+sock=null y crea otro (gen++). Sin snapshot, sock.sendMessage(...) lanzaría TypeError
+  // (ventana sock===null) o enviaría sobre OTRA sesión, contando fallos espurios que auto-excluirían
+  // contactos válidos. Usamos el snapshot 's' y abortamos limpio si cambia la generación.
+  const s = sock
+  const myGen = gen
   // En envío fraccionado, el total del JOB lo fija el llamador (bcTotal), no el del slice.
   await bcSetTotal(table, id, bcTotal != null ? bcTotal : targets.length)
   let sent = 0, failed = 0, sentDelta = 0, failedDelta = 0
@@ -536,13 +543,20 @@ async function enviarLote(text, image_url, targets, track) {
     }
   }
   for (const jid of targets) {
+    // A10: si el socket fue reemplazado (reset/reconnect) o se perdió la conexión a mitad del lote,
+    // abortamos el resto SIN contar fallos (no auto-excluir contactos válidos). Lo ya enviado cuenta;
+    // el resto del slice no se intenta (el dispatcher reintentará/avanzará según su propia lógica).
+    if (gen !== myGen || !connected || !s) {
+      log.warn({ id, sent, failed, pendientes: targets.length - sent - failed }, 'socket reemplazado/desconectado a mitad del lote; se aborta el resto sin marcar fallos')
+      break
+    }
     try {
       const hasText = !!(text && String(text).trim())
       if (imgBuffer) {
         // UN SOLO mensaje: imagen con el texto como caption (no dos mensajes separados).
-        await sock.sendMessage(jid, hasText ? { image: imgBuffer, caption: text } : { image: imgBuffer })
+        await s.sendMessage(jid, hasText ? { image: imgBuffer, caption: text } : { image: imgBuffer })
       } else if (hasText) {
-        await sock.sendMessage(jid, { text })
+        await s.sendMessage(jid, { text })
       } else {
         continue // nada que enviar (sin texto ni imagen): no cuenta como enviado ni fallido
       }
