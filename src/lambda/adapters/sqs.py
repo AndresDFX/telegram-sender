@@ -66,6 +66,9 @@ class SqsBroadcastQueue(BroadcastQueue):
                     "image_url": image_url,
                     "image_key": image_key,
                     "broadcast_id": broadcast_id,
+                    # A6: idempotencia por lote (igual que encolar_uno). Sin batch_id el worker no podía
+                    # deduplicar y una reentrega de SQS reenviaba el lote completo (DUPLICADOS).
+                    "batch_id": uuid.uuid4().hex,
                 }
             )
             attempt = 0

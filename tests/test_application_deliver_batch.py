@@ -124,6 +124,26 @@ class DeliverBatchTests(unittest.TestCase):
         self.assertEqual(sender.fotos, [("1", "http://img/p.jpg", "")])  # foto sin caption
         self.assertEqual([c[0] for c in sender.calls], ["1"])  # y el texto completo aparte
 
+    def test_a3_foto_no_se_reenvia_en_reentrega_si_el_texto_fallo(self):
+        # A3: imagen + texto largo (>1024) van en 2 mensajes. Si la foto se envió pero el texto
+        # falló/timeout, en la REENTREGA la foto NO debe reenviarse (sub-paso 'b1:1:photo' marcado).
+        largo = "x" * 1100
+        dd = FakeDedup()
+        # 1ª entrega: foto OK, texto FALLA.
+        s1 = FakeSender({"1": RuntimeError("timeout")})
+        DeliverBatch(s1, FakeSubscribers(), delay=0, dedup=dd)(largo, ["1"], image_url="http://img", batch_id="b1")
+        self.assertEqual(len(s1.fotos), 1)            # foto enviada
+        self.assertIn("b1:1:photo", dd.marcados)      # sub-paso foto marcado
+        self.assertNotIn("b1:1", dd.marcados)         # el destinatario NO completó (texto falló)
+        # 2ª entrega (reentrega): lo marcado ya es "procesado"; el texto ahora va bien.
+        dd.ya |= set(dd.marcados)
+        s2 = FakeSender()
+        stats = DeliverBatch(s2, FakeSubscribers(), delay=0, dedup=dd)(largo, ["1"], image_url="http://img", batch_id="b1")
+        self.assertEqual(len(s2.fotos), 0)            # ¡foto NO reenviada! (A3)
+        self.assertEqual([c[0] for c in s2.calls], ["1"])  # solo el texto
+        self.assertEqual(stats.sent, 1)
+        self.assertIn("b1:1", dd.marcados)            # ahora sí completa
+
     def test_fallo_al_inactivar_no_rompe(self):
         class BadSubs(FakeSubscribers):
             def marcar_inactivo(self, chat_id):

@@ -129,7 +129,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 if stats.sent > 0:
                     config_store.reset_ban_strikes()  # hubo entregas: reinicia el contador anti-baneo
             else:
-                _detectar_baneo()  # fallo total: cuenta strike y auto-pausa si procede
+                # A9: solo los lotes AUTOMÁTICOS (del canal) cuentan para la auto-pausa anti-baneo.
+                # Un envío MANUAL que falla por completo (p. ej. lista mala) NO debe apagar el envío
+                # automático; igual se reencola/va a DLQ como fallido.
+                if not body.get("manual"):
+                    _detectar_baneo()  # fallo total automático: cuenta strike y auto-pausa si procede
                 raise RuntimeError(f"Todos los envíos del lote {message_id} fallaron")
         except Exception:
             logger.exception("Fallo procesando el mensaje SQS %s", message_id)

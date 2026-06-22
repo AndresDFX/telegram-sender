@@ -60,18 +60,25 @@ class DeliverBatch:
                 # completo se envía aparte (no se puede meter >1024 en un caption).
                 cap_ok = bool(text) and len(text) <= 1024
                 if image_url:
-                    foto = self._sender.enviar_foto(chat_id, image_url, caption=(text if cap_ok else ""))
-                    if foto.blocked:
-                        stats.blocked += 1
-                        self._inactivar(chat_id)
-                        self._wait()
-                        continue
-                    if cap_ok or not text:
-                        stats.sent += 1  # el texto ya viajó como caption (o no hay texto): un solo mensaje
-                        self._marcar_dest(batch_id, chat_id)
-                        self._wait()
-                        continue
-                    self._wait()  # texto demasiado largo para caption → se envía aparte abajo
+                    # A3: sub-paso FOTO. Con texto largo la foto va aparte del texto; si la foto se
+                    # envió pero el texto falló/timeout, en la reentrega NO se reenvía la foto (se
+                    # marca un sub-id 'batch:chat:photo' y se salta si ya está).
+                    foto_key = f"{batch_id}:{chat_id}:photo" if usar_dedup else None
+                    if not (foto_key and self._procesado(foto_key)):
+                        foto = self._sender.enviar_foto(chat_id, image_url, caption=(text if cap_ok else ""))
+                        if foto.blocked:
+                            stats.blocked += 1
+                            self._inactivar(chat_id)
+                            self._wait()
+                            continue
+                        if cap_ok or not text:
+                            stats.sent += 1  # el texto ya viajó como caption (o no hay texto): un solo mensaje
+                            self._marcar_dest(batch_id, chat_id)
+                            self._wait()
+                            continue
+                        if foto_key:
+                            self._marcar(foto_key)  # foto entregada; el texto largo va aparte abajo
+                        self._wait()  # texto demasiado largo para caption → se envía aparte abajo
 
                 result = self._sender.enviar(chat_id, text)
                 if result.blocked:
@@ -96,10 +103,21 @@ class DeliverBatch:
     def _marcar_dest(self, batch_id: str | None, chat_id: str) -> None:
         """Marca que ESTE destinatario ya recibió ESTE lote (idempotencia por destinatario)."""
         if self._dedup and batch_id:
+            self._marcar(f"{batch_id}:{chat_id}")
+
+    def _marcar(self, key: str) -> None:
+        if self._dedup:
             try:
-                self._dedup.marcar(f"{batch_id}:{chat_id}")
+                self._dedup.marcar(key)
             except Exception:
-                logger.exception("dedup por destinatario falló al marcar %s", chat_id)
+                logger.exception("dedup falló al marcar %s", key)
+
+    def _procesado(self, key: str) -> bool:
+        try:
+            return bool(self._dedup and self._dedup.procesado(key))
+        except Exception:
+            logger.exception("dedup falló al leer %s; continúo (fail-open)", key)
+            return False
 
     def _inactivar(self, chat_id: str) -> None:
         try:

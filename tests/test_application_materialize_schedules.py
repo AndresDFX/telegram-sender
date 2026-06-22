@@ -108,12 +108,15 @@ class MaterializeTests(unittest.TestCase):
         self.assertEqual(b.calls, [])
         self.assertEqual(sch.updates, [])  # el 'once' NO se toca: dispara al reactivar
 
-    def test_error_al_enviar_no_avanza(self):
+    def test_error_al_enviar_igual_avanza(self):
+        # A2: ahora se AVANZA el horario antes de enviar. Si el envío falla, el horario YA avanzó,
+        # así NO se re-dispara cada minuto (a lo sumo se pierde esta ocurrencia, registrada como error).
         sch = FakeSchedules([_sched()])
         b = FakeBroadcasting(boom=True)
         res = _run(sch, b, FakeConfig())
         self.assertEqual(res["errores"], 1)
-        self.assertEqual(sch.updates, [])  # no avanza: reintenta en el próximo tick
+        self.assertEqual(len(sch.updates), 1)            # avanzó (no re-dispara en bucle)
+        self.assertIn("next_run", sch.updates[0][1])
 
 
 if __name__ == "__main__":

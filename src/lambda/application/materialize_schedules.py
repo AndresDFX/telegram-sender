@@ -43,6 +43,11 @@ class MaterializeSchedules:
         disparados = omitidos = errores = 0
         for s in vencidos:
             try:
+                # A2: AVANZAR el horario ANTES de enviar. Si _avanzar va bien pero el envío falla,
+                # el horario ya quedó avanzado y NO se re-dispara cada minuto (antes: enviar→avanzar,
+                # y un fallo de _avanzar tras un envío OK reenviaba el mismo horario en cada tick).
+                # A lo sumo se pierde UNA ocurrencia (registrada), en vez de duplicar en bucle.
+                self._avanzar(s, ahora, tz, salto=not activos)
                 if activos:
                     self._broadcasting.enviar_manual(
                         s.get("text", ""),
@@ -55,7 +60,6 @@ class MaterializeSchedules:
                     disparados += 1
                 else:
                     omitidos += 1
-                self._avanzar(s, ahora, tz, salto=not activos)
             except Exception:
                 errores += 1
                 logger.exception("No se pudo materializar el horario %s", s.get("sid"))
