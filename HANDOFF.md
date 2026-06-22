@@ -178,6 +178,12 @@ New → Web Service → conectar repo → **Root Directory `whatsapp-service`** 
 
 Acceso por `AdminUrl` con HTTP Basic Auth (usuario `admin` + `ADMIN_PASSWORD`). El panel es un único HTML/CSS/JS embebido. Sobre todas las pestañas hay una **barra global de estado de envíos** siempre visible (ACTIVOS en verde / EN PAUSA en rojo) con acción directa para activar/pausar. El header muestra la identidad de Telegram que envía (en userbot, el teléfono con ✓ o "renovar" si caducó), el canal fuente (`📡 @canal`), el número de WhatsApp conectado y un badge con el rol del usuario.
 
+> **Cambios de comportamiento tras la revisión UX/UI/a11y (junio 2026, 6 tandas):** dos que el operador debe conocer:
+> 1. **La sesión NO se persiste** (credencial solo en memoria): **al recargar la página hay que volver a iniciar sesión** (más seguro que dejarla en `sessionStorage`).
+> 2. **Las listas de distribución se guardan SOLAS** al activar/desactivar una lista, añadir/quitar contactos marcados o cambiar el modo (Todos/Solo/Excepto) — ya no hace falta pulsar "Guardar listas".
+>
+> Además: borrado masivo en los 3 flujos (Envíos/Programados/Fraccionados); clic en el mensaje del historial → texto completo; validaciones (HH:MM, lote 1–150, delays, lista de WhatsApp obligatoria al programar); bloqueo de login devuelve 429 con "espera N min"; rate-limit en recuperación de contraseña; y mejoras de accesibilidad/responsive. La marca **Replica** (naranja) se mantiene.
+
 ### Pestañas
 
 - **🏠 Inicio:** resumen, KPIs de 30 días (enviados, tasa, lotes pendientes, DLQ), mini-gráfico de actividad, primeros pasos y accesos rápidos.
