@@ -203,8 +203,10 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
   la ventana sigue aplicando a lo automático del canal y a los envíos manuales **programados**.
 - **Recopilación y envío SEPARADOS** (dos interruptores independientes):
   - **Recopilación** (`capture_enabled`): el poller lee `@iproparts` y, por cada lista nueva, la registra
-    (visible en el panel como **📥 Capturada**) y se la **autoenvía a Mensajes Guardados** del userbot
-    (`enviar("me", …)`) para verla. Es independiente del envío.
+    (visible en el panel como **📥 Capturada**; se guarda el **texto completo** y el historial de *Envíos*
+    permite **clic en el mensaje → ver el texto completo**) y se la **autoenvía a Mensajes Guardados** del userbot
+    (`enviar("me", …)`) para verla; el envío del preview se **loguea explícito** (éxito/fallo) y desconecta el
+    cliente para no chocar con el refresh de contactos. Es independiente del envío.
   - **Envío automático** (`sending_enabled`): cuando está **apagado**, las listas capturadas **solo se ven**
     (panel + Mensajes Guardados), NO se difunden, NO crean plan ni cola — activar **no** reenvía lo ya capturado.
     Cuando está **activo**, cada lista nueva se difunde **solo a la lista elegida por canal**

@@ -511,7 +511,8 @@ class DynamoDbBroadcastStore:
             Item={
                 "id": broadcast_id,
                 "created_at": now,
-                "text": (text or "")[:600],  # solo display (el envío usa el texto del plan)
+                "text": (text or "")[:600],  # preview corto para la tabla
+                "full_text": (text or "")[:4096],  # texto COMPLETO (para "ver mensaje completo" en el panel)
                 "source": source,
                 "channels": list(channels),
                 "tg_total": int(tg_total),
@@ -651,6 +652,7 @@ class DynamoDbBroadcastStore:
                     "id": j.get("id"),
                     "created_at": int(j.get("created_at", 0)),
                     "text": j.get("text", ""),
+                    "full_text": j.get("full_text") or j.get("text", ""),  # texto completo para el panel
                     "source": j.get("source", ""),
                     "channels": list(j.get("channels", [])),
                     "status": self._estado(j),

@@ -213,17 +213,33 @@ class BroadcastList:
             return {"mode": "only", "lists": [nombre]}
         return cfg.get(f"{canal}_target", {})
 
-    def _preview(self, mensaje: str) -> None:
-        """Autoenvía la lista capturada a Mensajes Guardados del userbot (verla en Telegram sin
-        difundirla). Best-effort: nunca debe romper la captura."""
+    def _preview(self, mensaje: str) -> bool:
+        """Autoenvía la lista capturada a Mensajes Guardados del userbot ('me') para verla en
+        Telegram sin difundirla. Best-effort: nunca rompe la captura. Devuelve True si se envió.
+        Registra éxito/fallo EXPLÍCITAMENTE (antes era silencioso y no se sabía si llegaba)."""
         if not self._preview_sender:
-            return
+            logger.info("Preview a Mensajes Guardados OMITIDO (sin preview_sender; modo bot)")
+            return False
         try:
-            self._preview_sender.enviar(
+            res = self._preview_sender.enviar(
                 "me", "📥 Lista capturada (envío automático apagado — NO enviada):\n\n" + mensaje
             )
+            ok = bool(getattr(res, "ok", True))
+            if ok:
+                logger.info("Preview ENVIADO a Mensajes Guardados (userbot 'me')")
+            else:
+                logger.warning("Preview a Mensajes Guardados rechazado (blocked=%s)", getattr(res, "blocked", None))
+            return ok
         except Exception:
-            logger.exception("No se pudo previsualizar la lista capturada en Mensajes Guardados")
+            logger.exception("FALLO al enviar el preview a Mensajes Guardados (userbot 'me')")
+            return False
+        finally:
+            # Cierra el cliente: evita mantener dos clientes Telethon con la misma sesión a la vez
+            # (preview + refresh de contactos del poller), que Telegram puede penalizar.
+            try:
+                self._preview_sender.desconectar()
+            except Exception:
+                pass
 
     # --- difusión desde el canal (con markup/footer) ---------------------------
 
@@ -243,9 +259,12 @@ class BroadcastList:
         if not bool(cfg.get("sending_enabled", True)):
             bid = self._nuevo_id()
             self._registrar(bid, mensaje, "capture", [], 0)
-            self._preview(mensaje)
-            logger.info("Lista capturada %s (envío automático apagado): registrada + previsualizada, NO enviada", bid)
-            return {"captured": True, "broadcast_id": bid}
+            enviado = self._preview(mensaje)
+            logger.info(
+                "Lista capturada %s (envío apagado): registrada%s, NO difundida",
+                bid, " + preview a Mensajes Guardados OK" if enviado else " (preview NO enviado)",
+            )
+            return {"captured": True, "broadcast_id": bid, "preview_sent": bool(enviado)}
 
         # ENVÍO AUTOMÁTICO: difunde a la LISTA elegida por canal (auto_<canal>_list); si no hay
         # lista elegida, cae al target configurado del canal.

@@ -40,6 +40,17 @@ class _TelethonBase:
             self._client.connect()
         return self._client
 
+    def desconectar(self) -> None:
+        """Cierra la conexión y resetea el cliente. Útil para no mantener DOS clientes con la MISMA
+        sesión conectados a la vez en un mismo invoke (p. ej. preview + refresh de contactos en el
+        poller), que Telegram puede penalizar/revocar. La próxima llamada reconecta limpio."""
+        if self._client is not None:
+            try:
+                self._client.disconnect()
+            except Exception:
+                pass
+            self._client = None
+
 
 class TelethonUserSender(_TelethonBase, MessageSender):
     def __init__(self, api_id=None, api_hash=None, session=None, sleep: Callable[[float], None] = time.sleep):

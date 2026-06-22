@@ -3360,7 +3360,7 @@ function bcRow(b){
   const tr=document.createElement('tr');
   tr.innerHTML=
     `<td class="selcol"><input type="checkbox" class="bcsel" data-id="${b.id}" onchange="bcSelChanged()"></td>`+
-    `<td class="bc-msg"><b title="${bcEsc(txt)}">${bcEsc(txt)}</b>`+
+    `<td class="bc-msg"><b role="button" tabindex="0" title="Ver mensaje completo" style="cursor:pointer" data-full="${bcEsc(b.full_text||txt)}" onclick="bcMsgDetail(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcMsgDetail(this)}">${bcEsc(txt)} ›</b>`+
       `<div class="bc-meta"><span class="bc-src">${bcEsc(b.source||'manual')}</span><span>${bcFmtTime(b.created_at)}</span></div></td>`+
     `<td><span class="pill ${st}">${bcEsc(label)}</span>${b.last_error?`<div class="bc-err" role="button" tabindex="0" onclick="bcErrDetail(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcErrDetail(this)}" data-err="${bcEsc((b.error_reasons||[]).join('\n')||b.last_error)}" title="Ver detalle del error">⚠ ${bcEsc(String(b.last_error).slice(0,72))} ›</div>`:''}</td>`+
     `<td><div class="chprog">${bcChanCell(false,b.telegram)}${bcChanCell(true,b.whatsapp)}</div></td>`+
@@ -3372,6 +3372,10 @@ function bcErrDetail(el){
   const lines=raw.split('\n').filter(Boolean);
   const body = lines.length>1 ? lines.map((l,i)=>(i+1)+'. '+l).join('\n') : (raw||'Sin detalle disponible.');
   alertModal(body,{title:'Detalle del error',danger:true});
+}
+function bcMsgDetail(el){
+  const full=(el.getAttribute('data-full')||'').trim();
+  alertModal(full||'(sin texto / solo imagen)',{title:'Mensaje completo'});
 }
 async function loadBroadcasts(){
   { const _b=$('bc_rows'); if(_b && !_b.children.length) skelTable('bc_rows',5,4); }
