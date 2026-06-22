@@ -1865,7 +1865,7 @@ tbody tr.sel-row td{background:rgba(253,83,30,.12)}
 .ds-modal{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--bd2);border-radius:16px;box-shadow:0 24px 60px -16px rgba(0,0,0,.7);padding:22px;max-width:440px;width:100%;animation:dsPop .16s ease}
 @keyframes dsPop{from{transform:translateY(10px) scale(.98);opacity:0}to{transform:none;opacity:1}}
 .ds-modal h3{margin:0 0 10px;font-size:17px}
-.ds-modal-body{color:var(--tx2);font-size:14px;line-height:1.55;white-space:pre-line;max-height:48vh;overflow:auto}
+.ds-modal-body{color:var(--tx2);font-size:14px;line-height:1.55;white-space:pre-line;max-height:48vh;overflow:auto;overflow-wrap:anywhere;word-break:break-word}
 .ds-modal input{width:100%;margin-top:14px}
 .ds-modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
 /* Accesibilidad: foco visible consistente por teclado en elementos interactivos */
@@ -1896,6 +1896,17 @@ a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visib
   .nav{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;justify-content:flex-start;-webkit-overflow-scrolling:touch}
   .nav button{flex:0 0 auto}
   .nav button.on::after{display:none}
+  /* B24: el mensaje vuelve a truncar con ellipsis (antes max-width:none lo desbordaba) */
+  .bc-msg{max-width:60vw}
+  /* B23: el banner global de estado se apila y los botones ocupan el ancho */
+  #send_banner{flex-direction:column;align-items:stretch}
+  #send_banner .sb-txt{min-width:0}
+  #send_banner .sb-go,#send_banner .sb-pause{width:100%}
+  /* M33: el header no desborda — se trunca el correo y se ocultan badges no esenciales */
+  header .u{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  header #conn_tg_src{display:none}
+  /* M32: el scroll interno de contactos no se 'pega' y deja respirar la página */
+  .tbl-scroll{max-height:60vh;overscroll-behavior:contain}
 }
 th.selcol,td.selcol{width:34px;text-align:center}
 </style></head><body>
@@ -3157,6 +3168,8 @@ function showSub(tab,s){
 function showTab(t){
   document.querySelectorAll('main>.card').forEach(c=>c.classList.toggle('show', c.dataset.tab===t));
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on', b.dataset.tab===t));
+  // B25: en móvil la nav es una tira scrolleable; centra la pestaña activa para que se vea.
+  try{ const _on=document.querySelector('.nav button.on'); if(_on&&_on.scrollIntoView) _on.scrollIntoView({inline:'center',block:'nearest'}); }catch(e){}
   try{ localStorage.setItem('tab',t); }catch(e){}
   if(t==='envios'){ sgFillLists(); sgChan(); sgType(); loadSchedules(); }
   if(SUB_DEFAULT[t]){ showSub(t, (function(){try{return localStorage.getItem('sub_'+t)}catch(e){return null}})()||SUB_DEFAULT[t]); }
