@@ -99,7 +99,11 @@ def _enrutar(body: dict[str, Any]) -> dict[str, Any]:
     if post:
         texto = post.get("text") or post.get("caption")
         if texto and _es_canal_fuente(post):
-            resultado = broadcast(texto)
+            # M18: pasamos el update_id como dedup_key → broadcast_id DETERMINISTA. Si crear el plan
+            # falla a mitad y Telegram reintenta el webhook (tras revertir el dedup), el reintento
+            # reusa el mismo id y sobrescribe el plan en vez de crear uno nuevo (no duplica la difusión).
+            uid = body.get("update_id")
+            resultado = broadcast(texto, dedup_key=str(uid) if uid is not None else None)
             return _response(body=json.dumps({"status": "queued", **resultado}))
     return _response()
 

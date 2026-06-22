@@ -99,7 +99,7 @@ class ReceiverTests(unittest.TestCase):
         receiver.dedup = FakeDedup(infra_error=True)
         resp = receiver.lambda_handler(_event({"update_id": 42, "channel_post": {"chat": {"id": -1}, "text": "x"}}), None)
         self.assertEqual(json.loads(resp["body"])["status"], "queued")  # NO 'duplicate'
-        receiver.broadcast.assert_called_once_with("x")
+        receiver.broadcast.assert_called_once_with("x", dedup_key="42")
 
     # --- ruteo ---
     def test_start_llama_handle_command(self):
@@ -115,11 +115,11 @@ class ReceiverTests(unittest.TestCase):
     def test_channel_post_llama_broadcast_con_texto_crudo(self):
         resp = receiver.lambda_handler(_event({"channel_post": {"chat": {"id": -1}, "text": "Lista $100.000"}}), None)
         self.assertEqual(json.loads(resp["body"])["status"], "queued")
-        receiver.broadcast.assert_called_once_with("Lista $100.000")  # el markup vive en el caso de uso
+        receiver.broadcast.assert_called_once_with("Lista $100.000", dedup_key=None)  # el markup vive en el caso de uso
 
     def test_caption_llama_broadcast(self):
         receiver.lambda_handler(_event({"channel_post": {"chat": {"id": -1}, "caption": "Foto $50.000"}}), None)
-        receiver.broadcast.assert_called_once_with("Foto $50.000")
+        receiver.broadcast.assert_called_once_with("Foto $50.000", dedup_key=None)
 
     # --- compensación del dedup ---
     def test_encolado_parcial_no_revierte(self):

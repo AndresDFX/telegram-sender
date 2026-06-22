@@ -211,6 +211,19 @@ class BroadcastListTests(unittest.TestCase):
         BroadcastList(FakeSubs(["1", "2", "3"]), queue, cfg)("A $100.000")
         self.assertEqual(set(queue.calls[0][1]), {"1", "3"})  # "2" fuera (no está en la lista Auto)
 
+    def test_m18_dedup_key_da_broadcast_id_determinista(self):
+        # M18: con dedup_key (update_id) el broadcast_id es DETERMINISTA → un reintento del webhook
+        # reusa el mismo id y sobrescribe el plan (no crea otro → no duplica la difusión).
+        cfg = FakeConfig(telegram_lists=[{"name": "T", "ids": ["1"]}], auto_telegram_list="T", whatsapp_enabled=False)
+        bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg)
+        r1 = bl("A $100.000", dedup_key="555")
+        r2 = bl("A $100.000", dedup_key="555")
+        self.assertEqual(r1["broadcast_id"], r2["broadcast_id"])  # mismo id en el reintento
+        # Sin dedup_key, ids distintos (aleatorios).
+        r3 = bl("A $100.000")
+        r4 = bl("A $100.000")
+        self.assertNotEqual(r3["broadcast_id"], r4["broadcast_id"])
+
     def test_m25_auto_lista_inexistente_registra_error(self):
         # M25: envío automático activo con lista elegida que ya NO existe (borrada/renombrada) →
         # resuelve a 0 destinatarios; en vez de cerrar como 'enviado-vacío' en silencio, registra error.

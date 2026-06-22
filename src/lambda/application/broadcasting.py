@@ -51,6 +51,16 @@ class BroadcastList:
     def _nuevo_id() -> str:
         return "b-" + uuid.uuid4().hex[:16]
 
+    def _bid(self, dedup_key: str | None) -> str:
+        """ID de difusión. M18: si se da ``dedup_key`` (el update_id del post), el id es DETERMINISTA,
+        de modo que un REINTENTO del webhook (p. ej. tras un fallo a mitad de crear el plan, que hace
+        que el receiver revierta el dedup y Telegram reintente) reuse el MISMO broadcast_id y
+        SOBRESCRIBA el plan en vez de crear uno nuevo → no duplica la difusión. Sin clave, aleatorio."""
+        if dedup_key:
+            import hashlib
+            return "b-" + hashlib.sha1(str(dedup_key).encode()).hexdigest()[:16]
+        return self._nuevo_id()
+
     @staticmethod
     def _chunk(items, size: int) -> list[list]:
         size = max(1, int(size))
@@ -258,7 +268,7 @@ class BroadcastList:
 
     # --- difusión desde el canal (con markup/footer) ---------------------------
 
-    def __call__(self, text: str) -> dict[str, int]:
+    def __call__(self, text: str, dedup_key: str | None = None) -> dict[str, int]:
         cfg = self._config.get()
         mensaje = componer_mensaje(
             text,
@@ -308,7 +318,9 @@ class BroadcastList:
 
         clientes = self._destinatarios_telegram(cfg, tg_t) if tg_on else []
         channels = (["telegram"] if tg_on else []) + (["whatsapp"] if wa_on else [])
-        bid = self._nuevo_id()
+        # M18: id DETERMINISTA en el camino de plan (scheduler). Si crear el plan falla a mitad y el
+        # webhook se reintenta, el id reusado sobrescribe el plan en vez de crear otro → no duplica.
+        bid = self._bid(dedup_key)
         self._registrar(bid, mensaje, "channel", channels, len(clientes))
 
         wa_mode = wa_t.get("mode", "all") if wa_on else "all"
