@@ -36,6 +36,7 @@ const failures = {}
 const BLOQUEO_UMBRAL = Number(process.env.BLOQUEO_UMBRAL || 3)
 let persistFailuresFn = null
 let failuresSaveTimer = null
+let failuresLoaded = false // M19: los fallos se cargan del store UNA vez (no en cada /reconnect)
 
 const log = pino({ level: 'info' })
 
@@ -90,6 +91,18 @@ function scheduleSaveFailures() {
       log.error({ err: String(e) }, 'persistir fallos falló')
     }
   }, 4000)
+}
+
+// M19: persiste los fallos AHORA (cancela el debounce pendiente). /blocked/clear lo usa para que un
+// /reconnect inmediato no recargue conteos viejos del store y reviva opt-outs ya limpiados.
+async function flushFailures() {
+  if (failuresSaveTimer) { clearTimeout(failuresSaveTimer); failuresSaveTimer = null }
+  if (!persistFailuresFn) return
+  try {
+    await persistFailuresFn({ ...failures })
+  } catch (e) {
+    log.error({ err: String(e) }, 'persistir fallos (flush) falló')
+  }
 }
 
 // (Re)arranca el socket de forma SERIALIZADA: si ya hay un arranque en curso, este se
@@ -150,10 +163,16 @@ async function doStart() {
     } catch (e) {
       log.error({ err: String(e) }, 'cargar contactos falló')
     }
-    try {
-      Object.assign(failures, await loadFailures())
-    } catch (e) {
-      log.error({ err: String(e) }, 'cargar fallos falló')
+    // M19: cargar los fallos (opt-out) UNA sola vez (primer arranque del proceso), NO en cada
+    // /reconnect: si no, un reconnect tras /blocked/clear recargaría los conteos viejos del store y
+    // re-bloquearía contactos. El estado en memoria es el autoritativo dentro del proceso.
+    if (!failuresLoaded) {
+      try {
+        Object.assign(failures, await loadFailures())
+        failuresLoaded = true
+      } catch (e) {
+        log.error({ err: String(e) }, 'cargar fallos falló')
+      }
     }
     // fetchLatestBaileysVersion es una llamada de red SIN timeout; si se cuelga, bloquearía
     // toda la cadena de arranques. La acotamos y caemos a la versión por defecto de Baileys.
@@ -430,9 +449,9 @@ app.get('/blocked', auth, (req, res) => {
 })
 
 // Reinicia el conteo de fallos (re-incluye a los auto-excluidos).
-app.post('/blocked/clear', auth, (req, res) => {
+app.post('/blocked/clear', auth, async (req, res) => {
   for (const k of Object.keys(failures)) delete failures[k]
-  scheduleSaveFailures()
+  await flushFailures()  // M19: persiste sincrónicamente; un /reconnect inmediato no revive los conteos
   res.json({ ok: true })
 })
 
@@ -516,7 +535,7 @@ async function bcIncr(table, id, sent, failed) {
 }
 
 async function enviarLote(text, image_url, targets, track) {
-  const { table, id, bcTotal, delayMin, delayMax } = track || {}
+  const { table, id, bcTotal, delayMin, delayMax, firstSlice = true } = track || {}
   // A10: capturamos el socket y su GENERACIÓN al entrar. El bucle dura minutos (jitter anti-baneo);
   // si un /reset, /reconnect o scheduleReconnect reemplaza el socket a mitad, doStart hace
   // sock.end()+sock=null y crea otro (gen++). Sin snapshot, sock.sendMessage(...) lanzaría TypeError
@@ -524,8 +543,10 @@ async function enviarLote(text, image_url, targets, track) {
   // contactos válidos. Usamos el snapshot 's' y abortamos limpio si cambia la generación.
   const s = sock
   const myGen = gen
-  // En envío fraccionado, el total del JOB lo fija el llamador (bcTotal), no el del slice.
-  await bcSetTotal(table, id, bcTotal != null ? bcTotal : targets.length)
+  // El total del JOB lo fija el llamador (bcTotal), no el del slice. M21: el SET de wa_total/wa_started
+  // SOLO en el PRIMER slice (offset 0); los demás solo ADD wa_sent/wa_failed (re-SETear en cada slice
+  // pisaba wa_started y arriesgaba carreras con bcIncr al solaparse slices fire-and-forget).
+  if (firstSlice) await bcSetTotal(table, id, bcTotal != null ? bcTotal : targets.length)
   let sent = 0, failed = 0, sentDelta = 0, failedDelta = 0
   // Descargamos la imagen UNA sola vez a un Buffer en lugar de pasar la URL a Baileys (que la
   // bajaría por CADA destinatario). Así evitamos el "esta imagen no está disponible" cuando la URL
@@ -542,7 +563,8 @@ async function enviarLote(text, image_url, targets, track) {
       imgBuffer = null
     }
   }
-  for (const jid of targets) {
+  for (let i = 0; i < targets.length; i++) {
+    const jid = targets[i]
     // A10: si el socket fue reemplazado (reset/reconnect) o se perdió la conexión a mitad del lote,
     // abortamos el resto SIN contar fallos (no auto-excluir contactos válidos). Lo ya enviado cuenta;
     // el resto del slice no se intenta (el dispatcher reintentará/avanzará según su propia lógica).
@@ -562,7 +584,9 @@ async function enviarLote(text, image_url, targets, track) {
       }
       sent++; sentDelta++
       if (failures[jid]) { delete failures[jid]; scheduleSaveFailures() } // envío OK -> limpia fallos
-      await new Promise((r) => setTimeout(r, delayAleatorio(delayMin, delayMax))) // anti-baneo (jitter)
+      // B10: jitter SOLO ENTRE mensajes; no tras el último (sería retraso muerto que alarga el job y
+      // la ventana en que un reset puede romper el lote).
+      if (i < targets.length - 1) await new Promise((r) => setTimeout(r, delayAleatorio(delayMin, delayMax)))
     } catch (e) {
       failed++; failedDelta++
       failures[jid] = (failures[jid] || 0) + 1; scheduleSaveFailures() // opt-out: cuenta el fallo
@@ -581,6 +605,15 @@ async function enviarLote(text, image_url, targets, track) {
 //
 // Soporta envío FRACCIONADO: el dispatcher resuelve el set completo aquí y pide solo el
 // slice [offset, offset+limit). count_only devuelve cuántos resolvería (para planificar).
+// M16: endpoint DEDICADO de solo-conteo. No envía NUNCA, así no dependemos de un flag count_only
+// sobre el mismo verbo+ruta que el envío real (si el flag se perdiera —proxy/regresión— /send
+// difundiría a todos). El adapter usa /count y cae a /send?count_only solo si /count no existe.
+app.post('/count', auth, (req, res) => {
+  const { mode = 'all', list_ids = [], exclude = [], exclude_patterns = [], pattern_exceptions = [] } = req.body || {}
+  const all = resolverTargets(mode, list_ids, exclude, exclude_patterns, pattern_exceptions)
+  res.json({ count: all.length, mode })
+})
+
 app.post('/send', auth, (req, res) => {
   const {
     text = '', image_url = null, exclude = [], mode = 'all', list_ids = [],
@@ -591,9 +624,15 @@ app.post('/send', auth, (req, res) => {
   const all = resolverTargets(mode, list_ids, exclude, exclude_patterns, pattern_exceptions) // orden estable
   if (count_only) return res.json({ count: all.length, mode })
   if (!connected || !sock) return res.status(409).json({ error: 'whatsapp_no_conectado' })
-  const off = Number(offset) || 0
-  const slice = offset != null || limit != null
-    ? all.slice(off, limit != null ? off + Number(limit) : undefined)
+  // M20: validar offset/limit. Un valor no numérico/negativo daba NaN → all.slice(off, NaN) = [] →
+  // se respondía 202 {targets:0} sin enviar a nadie EN SILENCIO (progreso colgado <100%). Falla 400.
+  const off = offset != null ? Number(offset) : 0
+  const lim = limit != null ? Number(limit) : null
+  if (!Number.isFinite(off) || off < 0 || (lim != null && (!Number.isFinite(lim) || lim < 0))) {
+    return res.status(400).json({ error: 'offset/limit inválidos' })
+  }
+  const slice = (offset != null || limit != null)
+    ? all.slice(off, lim != null ? off + lim : undefined)
     : all
   res.status(202).json({ accepted: true, targets: slice.length, total: all.length, mode })
   enviarLote(text, image_url, slice, {
@@ -602,6 +641,8 @@ app.post('/send', auth, (req, res) => {
     bcTotal: bc_total != null ? Number(bc_total) : null,
     delayMin: delay_min_ms != null ? Number(delay_min_ms) : null,
     delayMax: delay_max_ms != null ? Number(delay_max_ms) : null,
+    // M21: solo el primer slice (offset 0 o envío no fraccionado) hace el SET de wa_total/wa_started.
+    firstSlice: off === 0,
   }).catch((e) => log.error({ err: String(e) }, 'enviarLote falló'))
 })
 

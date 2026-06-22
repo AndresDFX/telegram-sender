@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import urllib.error
 import urllib.request
 
 from application.ports import WhatsAppForwarder
@@ -71,12 +72,19 @@ class HttpWhatsAppForwarder(WhatsAppForwarder):
         plan para saber en cuántos lotes fraccionar WhatsApp. Lanza si el servicio no responde."""
         if not self._url or not self._token:
             return 0
-        resp = self._post(
-            "/send",
-            {"mode": mode or "all", "list_ids": list(list_ids or []), "exclude": list(exclude or []),
-             "exclude_patterns": list(exclude_patterns or []), "pattern_exceptions": list(pattern_exceptions or []),
-             "count_only": True},
-        )
+        payload = {
+            "mode": mode or "all", "list_ids": list(list_ids or []), "exclude": list(exclude or []),
+            "exclude_patterns": list(exclude_patterns or []), "pattern_exceptions": list(pattern_exceptions or []),
+        }
+        # M16: usa el endpoint DEDICADO /count (nunca envía). Si el servicio es viejo y no lo tiene
+        # (404), cae al flag count_only de /send. Así un flag perdido no degrada un conteo a difusión.
+        try:
+            resp = self._post("/count", payload)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                resp = self._post("/send", {**payload, "count_only": True})
+            else:
+                raise
         return int(resp.get("count", 0))
 
     def ping(self) -> None:

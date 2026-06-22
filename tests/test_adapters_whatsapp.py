@@ -57,6 +57,26 @@ class WhatsAppForwarderTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "only")
         self.assertEqual(payload["list_ids"], ["57300@s.whatsapp.net"])
 
+    def test_contar_usa_endpoint_count_dedicado(self):
+        # M16: contar() pega a /count (solo cuenta, nunca envía), no a /send con un flag.
+        fwd = HttpWhatsAppForwarder("https://wa.example.com", "tok")
+        with patch("urllib.request.urlopen", return_value=FakeResp('{"count": 7, "mode": "all"}')) as op:
+            n = fwd.contar(mode="all")
+        self.assertEqual(n, 7)
+        self.assertEqual(op.call_args.args[0].full_url, "https://wa.example.com/count")
+        self.assertNotIn("count_only", json.loads(op.call_args.args[0].data.decode()))
+
+    def test_contar_cae_a_send_count_only_si_no_hay_count(self):
+        # Servicio viejo sin /count (404): cae al flag count_only de /send (compatibilidad).
+        import urllib.error
+        fwd = HttpWhatsAppForwarder("https://wa.example.com", "tok")
+        err = urllib.error.HTTPError("https://wa.example.com/count", 404, "Not Found", {}, None)
+        with patch("urllib.request.urlopen", side_effect=[err, FakeResp('{"count": 3}')]) as op:
+            n = fwd.contar(mode="all")
+        self.assertEqual(n, 3)
+        self.assertEqual(op.call_args_list[-1].args[0].full_url, "https://wa.example.com/send")
+        self.assertTrue(json.loads(op.call_args_list[-1].args[0].data.decode())["count_only"])
+
     def test_sin_config_no_postea(self):
         with patch("urllib.request.urlopen") as op:
             res = HttpWhatsAppForwarder("", "").forward("x", None, [])
