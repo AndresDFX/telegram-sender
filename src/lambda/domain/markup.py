@@ -77,6 +77,11 @@ def aplicar_markup(
     factor = Decimal("1") + (Decimal(str(porcentaje)) / Decimal("100"))
 
     def replacer(match: re.Match[str]) -> str:
+        # B3: si tras el número entero sigue una COMA + dígito (decimal CO ',50' o separador mixto
+        # ',000'), NO escalar: el patrón solo casa la parte entera y dejaría la fracción suelta,
+        # corrompiendo el precio ('$1.500,50' -> '$2.000,50'). Mejor no tocarlo que difundir basura.
+        if re.match(r",\d", match.string[match.end():]):
+            return match.group(0)
         num = match.group("num") or match.group("num2") or match.group("num3") or match.group("num4")
         pesos = _escalar(num, factor)
         if pesos is None:

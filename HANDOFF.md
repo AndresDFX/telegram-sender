@@ -258,6 +258,8 @@ Lista accionable para no repetir fallos:
 - El markup EXIGE un marcador de moneda adyacente (`$`/💸/💲/`COP`); números "pelados" NO se tocan (para no marcar teléfonos/fechas/modelos/specs). El canal usa los tres símbolos.
 - Redondeo al **mil hacia arriba** (decisión del usuario): `$325.000` +15% → `$374.000`.
 - Quitar teléfonos CO EXIGE una señal de teléfono (separador/paréntesis/`+57`/palabra de contacto); un número de 10 díg pegado y sin etiqueta NO se toca (evita borrar `REF 3001234567`).
+- **Teléfono se quita por COINCIDENCIA, no por línea (M3):** `quitar_telefonos` sustituye solo el match del teléfono dentro de la línea; si la línea queda sin contenido útil (era solo "Cel 300…") se descarta entera. Antes se borraba la línea completa → una línea mixta `A06 4-64GB 300 123 4567 $325.000` perdía el producto Y el precio. Los patrones se combinan en un único regex (una pasada) para que el etiquetado consuma keyword+número juntos y no deje la etiqueta huérfana.
+- **Markup NO toca precios con coma decimal/mixta (B3):** si tras el entero sigue `,<dígito>` (`$1.500,50`, `$1.150,000`) el precio se deja intacto en vez de escalar solo la parte entera y arrastrar la fracción suelta (que daba valores corruptos como `$2.000,50`).
 
 ### Infra / drift / packaging
 

@@ -57,7 +57,12 @@ def ids_excluidos_por_patron(contactos: Iterable[dict], patrones: Iterable[str])
         if not nombre:
             continue
         if any(p in nombre for p in pats):
-            cid = str(c.get("chatId") or c.get("id") or "")
+            # B2: distinguir PRESENCIA con 'is not None' (no por verdad lógica): un chatId 0 es falsy
+            # pero válido; con 'or' caería al 'id' o a '' y el contacto NO se auto-excluiría (recibiría).
+            cid = c.get("chatId")
+            if cid is None:
+                cid = c.get("id")
+            cid = str(cid) if cid is not None else ""
             if cid:
                 fuera.add(cid)
     return fuera

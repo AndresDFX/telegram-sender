@@ -75,6 +75,32 @@ def quitar_lineas(texto: str, patrones: Sequence[str]) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(conservadas)).strip()
 
 
+_ALFANUM = re.compile(r"[0-9A-Za-zÁÉÍÓÚáéíóúÑñ]")
+
+
+def quitar_telefonos(texto: str, patrones: Sequence[str]) -> str:
+    """Quita SOLO la coincidencia de teléfono de cada línea (no la línea entera).
+
+    M3: una línea de catálogo suele mezclar producto + precio + teléfono; borrar la línea entera
+    perdía el producto y su PRECIO. Aquí se sustituye solo el match del teléfono; si tras quitarlo la
+    línea queda sin contenido útil (sin letras ni dígitos, p. ej. era solo "Cel 300…"), se elimina."""
+    if not patrones:
+        return texto
+    # Un SOLO regex (una pasada izquierda-a-derecha): si se aplicaran por separado, el patrón del
+    # número "pelado" borraría el dígito antes que el patrón ETIQUETADO, dejando la etiqueta huérfana
+    # ("Pedidos:"). Combinados, en la posición de la etiqueta gana la alternativa que consume
+    # keyword+número juntos.
+    regex = re.compile("|".join(f"(?:{p})" for p in patrones), re.IGNORECASE)
+    salida = []
+    for ln in texto.splitlines():
+        limpia = regex.sub("", ln)
+        if limpia != ln and not _ALFANUM.search(limpia):
+            continue  # la línea era solo teléfono/etiqueta: se descarta entera
+        # Colapsa los espacios dobles que deja la sustitución dentro de la línea.
+        salida.append(re.sub(r"[ \t]{2,}", " ", limpia).rstrip())
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(salida)).strip()
+
+
 def componer_mensaje(
     texto: str,
     *,
@@ -84,7 +110,7 @@ def componer_mensaje(
     footer: str = "",
 ) -> str:
     limpio = quitar_lineas(texto, strip_patterns)
-    limpio = quitar_lineas(limpio, DEFAULT_PHONE_PATTERNS)  # quita líneas con teléfono CO (siempre)
+    limpio = quitar_telefonos(limpio, DEFAULT_PHONE_PATTERNS)  # M3: quita el teléfono, conserva producto/precio
     con_markup = aplicar_markup(limpio, markup_percentage, currency_symbols=currency_symbols)
     # M4: si la limpieza dejó el cuerpo vacío, NO componer (devolver solo el footer sería spam);
     # el llamador (captura del canal) salta los mensajes vacíos.

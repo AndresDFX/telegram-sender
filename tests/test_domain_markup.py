@@ -30,6 +30,12 @@ class MarkupTests(unittest.TestCase):
         for original in ("A37 5G 6-128GB", "REDMI PAD 2 8-256GB", "05/06/2026", "3218354891", "8:30AM"):
             self.assertEqual(aplicar_markup(original, 15), original)
 
+    def test_b3_no_corrompe_precio_con_coma_decimal_o_mixta(self):
+        # B3: con coma decimal CO (',50') o separadores mixtos (',000') el patrón solo casaba la parte
+        # entera y dejaba la fracción suelta, corrompiendo el precio. Ahora NO se toca (mejor que basura).
+        self.assertEqual(aplicar_markup("$1.500,50", 15), "$1.500,50")
+        self.assertEqual(aplicar_markup("$1.150,000", 15), "$1.150,000")
+
     def test_lista_multilinea(self):
         result = aplicar_markup("SAMSUNG\nA06 4-64GB $325.000\nA07 6-128GB $430.000", 15)
         self.assertIn("A06 4-64GB $374.000", result)

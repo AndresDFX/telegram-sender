@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import os
+import secrets
 
 _ALGO = "pbkdf2_sha256"
 _ITERS = 200_000
@@ -41,5 +42,8 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 def gen_code(n: int = 6) -> str:
-    """Código numérico aleatorio de n dígitos (para reseteo de contraseña)."""
-    return "".join(str(b % 10) for b in os.urandom(n))
+    """Código numérico aleatorio de n dígitos (para reseteo de contraseña).
+
+    B1: usa secrets.randbelow(10) por dígito (uniforme). Antes ``os.urandom % 10`` tenía sesgo de
+    módulo (256 no es múltiplo de 10): los dígitos 0-5 salían ~4% más que 6-9, restando entropía."""
+    return "".join(str(secrets.randbelow(10)) for _ in range(n))

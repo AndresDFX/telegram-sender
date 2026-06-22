@@ -119,6 +119,14 @@ class TelefonoTests(unittest.TestCase):
         self.assertIn("SAMSUNG", out)
         self.assertIn("A06 4-64GB $374.000", out)
 
+    def test_m3_telefono_en_linea_mixta_conserva_producto_y_precio(self):
+        # M3: una línea que mezcla producto + teléfono + precio conserva el producto y el precio
+        # (antes se borraba la línea entera con su precio). Solo se quita el número de teléfono.
+        out = componer_mensaje("A06 4-64GB 300 123 4567 $325.000", markup_percentage=15, footer="")
+        self.assertNotIn("300 123 4567", out)   # el teléfono se quita
+        self.assertIn("A06 4-64GB", out)         # el producto se conserva
+        self.assertIn("$374.000", out)           # y el precio (con markup) también
+
 
 class ComponerVacioTests(unittest.TestCase):
     def test_solo_ubicacion_no_difunde_solo_footer(self):
