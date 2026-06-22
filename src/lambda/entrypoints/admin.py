@@ -1776,6 +1776,7 @@ h2{align-items:center}
 h2::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;
   background:var(--ac2);box-shadow:0 0 0 3px var(--ac2-soft);margin-right:8px;flex:none}
 /* ACCESIBILIDAD: foco visible y areas de toque */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .nav button:focus-visible,
 .chan:focus-within,
 input[type=checkbox]:focus-visible,
@@ -1909,7 +1910,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
   <p style="text-align:center">Captura listas de precios y envíalas a tus contactos — Telegram y WhatsApp, al instante o programado.</p>
   <label>Usuario</label><input id="lu" autocomplete="username" placeholder="usuario o correo">
   <label>Contraseña</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
-  <div class="err" id="lerr"></div>
+  <div class="err" id="lerr" role="alert" aria-live="assertive"></div>
   <button style="width:100%;margin-top:8px" onclick="doLogin()">Entrar</button>
   <div style="text-align:center;margin-top:12px"><a href="#" onclick="fpToggle();return false" style="color:var(--ac);font-size:13px;text-decoration:none">¿Olvidaste tu contraseña?</a></div>
   <div id="fp_box" style="display:none;margin-top:14px;border-top:1px solid var(--bd);padding-top:14px">
@@ -2083,10 +2084,10 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <input id="subsearch" placeholder="🔎 Buscar por nombre o número..." oninput="onSearch()" style="margin-top:10px">
    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
      <span class="hint" style="margin:0">Mostrar:</span>
-     <div class="segf" id="seg_tg">
-       <button class="on" data-v="" onclick="setStateFilter('')">Todos</button>
-       <button data-v="inc" onclick="setStateFilter('inc')">✅ Incluidos</button>
-       <button data-v="exc" onclick="setStateFilter('exc')">⛔ Excluidos</button>
+     <div class="segf" id="seg_tg" role="group" aria-label="Filtrar destinatarios de Telegram">
+       <button class="on" data-v="" aria-pressed="true" onclick="setStateFilter('')">Todos</button>
+       <button data-v="inc" aria-pressed="false" onclick="setStateFilter('inc')">✅ Incluidos</button>
+       <button data-v="exc" aria-pressed="false" onclick="setStateFilter('exc')">⛔ Excluidos</button>
      </div>
    </div>
    <div class="excl-pat">
@@ -2134,10 +2135,10 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <input id="wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="renderWa()" style="margin-top:10px">
    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
      <span class="hint" style="margin:0">Mostrar:</span>
-     <div class="segf" id="seg_wa">
-       <button class="on" data-v="" onclick="setWaStateFilter('')">Todos</button>
-       <button data-v="inc" onclick="setWaStateFilter('inc')">✅ Incluidos</button>
-       <button data-v="exc" onclick="setWaStateFilter('exc')">⛔ Excluidos</button>
+     <div class="segf" id="seg_wa" role="group" aria-label="Filtrar destinatarios de WhatsApp">
+       <button class="on" data-v="" aria-pressed="true" onclick="setWaStateFilter('')">Todos</button>
+       <button data-v="inc" aria-pressed="false" onclick="setWaStateFilter('inc')">✅ Incluidos</button>
+       <button data-v="exc" aria-pressed="false" onclick="setWaStateFilter('exc')">⛔ Excluidos</button>
      </div>
    </div>
    <div class="excl-pat">
@@ -2954,7 +2955,7 @@ function filtered(){ let arr=DEST;
   else if(STATEF==='exc') arr=arr.filter(s=>isExcludedTg(s));
   return arr; }
 function setStateFilter(v){ STATEF=v; PAGE=0;
-  document.querySelectorAll('#seg_tg button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.classList.toggle('exc',on&&v==='exc'); });
+  document.querySelectorAll('#seg_tg button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.classList.toggle('exc',on&&v==='exc'); b.setAttribute('aria-pressed',on?'true':'false'); });
   render(); }
 function render(){
   // Si la cuenta de Telegram NO está sincronizada (userbot con sesión caída), NO mostramos
@@ -3111,7 +3112,7 @@ function waFiltered(){ let arr=WA_DEST; const q=($('wa_search').value||'').trim(
   else if(WA_STATEF==='exc') arr=arr.filter(c=>isExcludedWa(c));
   return arr; }
 function setWaStateFilter(v){ WA_STATEF=v; WA_PAGE=0;
-  document.querySelectorAll('#seg_wa button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.classList.toggle('exc',on&&v==='exc'); });
+  document.querySelectorAll('#seg_wa button').forEach(b=>{ const on=b.dataset.v===v; b.classList.toggle('on',on); b.classList.toggle('exc',on&&v==='exc'); b.setAttribute('aria-pressed',on?'true':'false'); });
   renderWa(); }
 function renderWa(){
   // Si WhatsApp NO está conectado/sincronizado, no mostramos contactos cacheados viejos
@@ -3159,8 +3160,17 @@ function showTab(t){
   try{ localStorage.setItem('tab',t); }catch(e){}
   if(t==='envios'){ sgFillLists(); sgChan(); sgType(); loadSchedules(); }
   if(SUB_DEFAULT[t]){ showSub(t, (function(){try{return localStorage.getItem('sub_'+t)}catch(e){return null}})()||SUB_DEFAULT[t]); }
+  const TAB_NAMES={inicio:'Inicio',fuentes:'Fuentes y listas',envios:'Envíos',ajustes:'Ajustes y estado'};
+  const _h=$('page_h1'); if(_h) _h.textContent=TAB_NAMES[t]||'Panel';  // B22: contexto de sección para lectores de pantalla
   window.scrollTo(0,0); }
-function boot(){ showTab((()=>{try{const s=localStorage.getItem('tab');return ['inicio','fuentes','envios','ajustes'].includes(s)?s:'inicio'}catch(e){return 'inicio'}})()); loadMe(); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
+// Mejora de accesibilidad aplicada una vez al arrancar (no cambia el aspecto visual).
+function a11yEnhance(){ try{
+  document.querySelectorAll('.help[data-tip]').forEach(e=>{ e.setAttribute('role','img'); if(!e.getAttribute('aria-label')) e.setAttribute('aria-label', e.getAttribute('data-tip')); });  // M27
+  document.querySelectorAll('label:not([for])').forEach(l=>{ if(l.querySelector('input,select,textarea')) return; const n=l.nextElementSibling; if(n && /^(INPUT|SELECT|TEXTAREA)$/.test(n.tagName) && n.id) l.htmlFor=n.id; });  // M28
+  ['tl_status','fp_status','cp_status','mail_save_status','bc_status','sg_status','wa_reset_out','wa_state','tg_state','sess_status','bot_status','mail_status'].forEach(id=>{ const e=$(id); if(e && !e.getAttribute('aria-live')) e.setAttribute('aria-live','polite'); });  // M30
+  const m=document.querySelector('main'); if(m && !$('page_h1')){ const h=document.createElement('h1'); h.id='page_h1'; h.className='sr-only'; h.textContent='Panel'; m.insertBefore(h,m.firstChild); }  // B22
+}catch(e){} }
+function boot(){ a11yEnhance(); showTab((()=>{try{const s=localStorage.getItem('tab');return ['inicio','fuentes','envios','ajustes'].includes(s)?s:'inicio'}catch(e){return 'inicio'}})()); loadMe(); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
 if(CRED && !sessionFresca()){ logout(); }
 else if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } else { logout(); } }).catch(()=>{}); }
 
@@ -3324,10 +3334,11 @@ function sgFillLists(){
   fill($('sg_tg_list'),(LISTS&&LISTS.telegram)||[],'(según configuración)');
   fill($('sg_wa_list'),(LISTS&&LISTS.whatsapp)||[],'— elige una lista —');
 }
+const SG_DAYFULL=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 function sgRenderDays(){ const box=$('sg_days'); if(!box||box.children.length) return;
-  box.innerHTML=SG_DAYNAMES.map((d,i)=>`<label class="chan${SG_DAYS.has(i)?' on':''}" data-d="${i}" onclick="sgToggleDay(${i})">${d}</label>`).join(''); }
+  box.innerHTML=SG_DAYNAMES.map((d,i)=>`<label class="chan${SG_DAYS.has(i)?' on':''}" data-d="${i}" role="checkbox" tabindex="0" aria-checked="${SG_DAYS.has(i)?'true':'false'}" aria-label="${SG_DAYFULL[i]}" onclick="sgToggleDay(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();sgToggleDay(${i})}">${d}</label>`).join(''); }
 function sgToggleDay(i){ SG_DAYS.has(i)?SG_DAYS.delete(i):SG_DAYS.add(i);
-  const el=document.querySelector('#sg_days [data-d="'+i+'"]'); if(el) el.classList.toggle('on',SG_DAYS.has(i)); }
+  const el=document.querySelector('#sg_days [data-d="'+i+'"]'); if(el){ el.classList.toggle('on',SG_DAYS.has(i)); el.setAttribute('aria-checked',SG_DAYS.has(i)?'true':'false'); } }
 function sgChan(){ const tg=$('sg_telegram').checked, wa=$('sg_whatsapp').checked;
   $('sg_chan_tg').classList.toggle('on',tg); $('sg_chan_wa').classList.toggle('on',wa);
   $('sg_tg_wrap').style.display=tg?'block':'none'; $('sg_wa_wrap').style.display=wa?'block':'none'; }
