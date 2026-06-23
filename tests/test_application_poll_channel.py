@@ -35,10 +35,18 @@ class FakeHwm:
 class FakeBroadcast:
     def __init__(self):
         self.textos = []
+        self.cerrado = 0
+        self._diferir_cierre_preview = False
+        self.diferido_durante_envio = []
 
     def __call__(self, text):
         self.textos.append(text)
+        # B15: durante el bucle del poller debe estar activo el modo diferido (reutilizar conexión).
+        self.diferido_durante_envio.append(self._diferir_cierre_preview)
         return {"batches": 1, "subscribers": 1}
+
+    def cerrar_preview(self):
+        self.cerrado += 1
 
 
 class FakeConfig:
@@ -71,6 +79,16 @@ class PollChannelTests(unittest.TestCase):
         self.assertEqual(res["new"], 1)
         self.assertEqual(bc.textos, ["B $100.000"])
         self.assertEqual(hwm.value, 1002)
+
+    def test_b15_difiere_cierre_de_preview_y_cierra_una_vez(self):
+        # B15: con varios posts nuevos, el preview se difiere durante el bucle (reutiliza conexión)
+        # y se cierra UNA sola vez al final; el modo diferido queda desactivado tras la corrida.
+        hwm, bc = FakeHwm(1000), FakeBroadcast()  # ambos posts (1001,1002) son nuevos
+        PollChannel(FakeReader(POSTS), hwm, bc, CFG)()
+        self.assertEqual(bc.textos, ["A $325.000", "B $100.000"])
+        self.assertTrue(all(bc.diferido_durante_envio))   # diferido activo en cada envío
+        self.assertEqual(bc.cerrado, 1)                    # cerrado exactamente una vez
+        self.assertFalse(bc._diferir_cierre_preview)       # desactivado al terminar
 
     def test_sin_nuevos(self):
         hwm, bc = FakeHwm(1002), FakeBroadcast()

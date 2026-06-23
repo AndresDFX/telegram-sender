@@ -44,9 +44,19 @@ class PollChannel:
             return {"checked": len(posts), "new": 0, "seeded": max_id}
 
         nuevos = sorted((p for p in posts if p.message_id > mark), key=lambda p: p.message_id)
-        for post in nuevos:
-            self._broadcast(post.text)
-            self._hwm.guardar(channel, post.message_id)
+        # B15: reutiliza UNA sola conexión Telethon del preview en todos los posts de esta corrida
+        # (en captura, cada post se previsualiza a Mensajes Guardados); se cierra una vez al final.
+        self._broadcast._diferir_cierre_preview = True
+        try:
+            for post in nuevos:
+                self._broadcast(post.text)
+                self._hwm.guardar(channel, post.message_id)
+        finally:
+            self._broadcast._diferir_cierre_preview = False
+            try:
+                self._broadcast.cerrar_preview()
+            except Exception:
+                logger.exception("No se pudo cerrar el cliente de preview tras la corrida")
 
         logger.info("Canal %s: %d revisados, %d nuevos difundidos", channel, len(posts), len(nuevos))
         return {"checked": len(posts), "new": len(nuevos)}

@@ -1,6 +1,6 @@
 // Estado de autenticación de Baileys persistido en DynamoDB (un item por clave),
 // para que la sesión de WhatsApp sobreviva reinicios/spin-down sin re-escanear el QR.
-import { DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand, ScanCommand } from '@aws-sdk/client-dynamodb'
+import { DynamoDBClient, GetItemCommand, PutItemCommand, ScanCommand, BatchWriteItemCommand } from '@aws-sdk/client-dynamodb'
 import { initAuthCreds, BufferJSON, proto } from '@whiskeysockets/baileys'
 
 export async function useDynamoAuthState(table, sessionId, region) {
@@ -18,14 +18,31 @@ export async function useDynamoAuthState(table, sessionId, region) {
       Item: { id: { S: pk(k) }, value: { S: JSON.stringify(v, BufferJSON.replacer) } },
     }))
   }
-  const remove = async (k) => {
-    await ddb.send(new DeleteItemCommand({ TableName: table, Key: { id: { S: pk(k) } } }))
+  // M22/B11: escribe/borra en LOTES de 25 (límite de BatchWriteItem) con reintento de
+  // UnprocessedItems (backoff lineal). Reemplaza los PutItem/DeleteItem sueltos en serie, que ante
+  // un fallo parcial dejaban la sesión inconsistente (unas claves escritas y otras no). Devuelve
+  // cuántos requests quedaron sin procesar tras los reintentos (0 = todo OK).
+  const batchWrite = async (requests) => {
+    let pendientes = 0
+    for (let i = 0; i < requests.length; i += 25) {
+      let lote = requests.slice(i, i + 25)
+      for (let intento = 0; intento < 4 && lote.length; intento++) {
+        const r = await ddb.send(new BatchWriteItemCommand({ RequestItems: { [table]: lote } }))
+        const un = (r.UnprocessedItems && r.UnprocessedItems[table]) || []
+        if (!un.length) { lote = []; break }
+        lote = un
+        await new Promise((res) => setTimeout(res, 100 * (intento + 1))) // backoff lineal entre reintentos
+      }
+      pendientes += lote.length
+    }
+    return pendientes
   }
 
   // Borra TODOS los items de esta sesión (creds + keys). Se usa al cerrar sesión
   // (loggedOut) para poder re-vincular sin borrar nada a mano en DynamoDB.
   const clearAll = async () => {
     const prefix = `${sessionId}::`
+    const requests = []
     let startKey
     do {
       const r = await ddb.send(new ScanCommand({
@@ -35,11 +52,13 @@ export async function useDynamoAuthState(table, sessionId, region) {
         ExpressionAttributeValues: { ':p': { S: prefix } },
         ExclusiveStartKey: startKey,
       }))
-      for (const it of r.Items || []) {
-        await ddb.send(new DeleteItemCommand({ TableName: table, Key: { id: it.id } }))
-      }
+      for (const it of r.Items || []) requests.push({ DeleteRequest: { Key: { id: it.id } } })
       startKey = r.LastEvaluatedKey
     } while (startKey)
+    // B11: si quedan ítems sin borrar tras los reintentos, LANZA: el caller (doStart) no debe dar
+    // por consumido el clearOnStart con un borrado a medias (re-vincular sobre creds inconsistentes).
+    const pendientes = await batchWrite(requests)
+    if (pendientes) throw new Error(`clearAll: ${pendientes} ítems de sesión no se pudieron borrar`)
   }
 
   const creds = (await read('creds')) || initAuthCreds()
@@ -75,15 +94,20 @@ export async function useDynamoAuthState(table, sessionId, region) {
           return data
         },
         set: async (data) => {
-          const tasks = []
+          // M22: persiste las claves de sesión en LOTE con reintento (no PutItem/DeleteItem sueltos
+          // en serie, que ante un fallo parcial dejaban unas escritas y otras no → sesión corrupta).
+          const requests = []
           for (const category in data) {
             for (const id in data[category]) {
               const value = data[category][id]
-              const key = `${category}-${id}`
-              tasks.push(value ? write(key, value) : remove(key))
+              const id_ = { S: pk(`${category}-${id}`) }
+              requests.push(value
+                ? { PutRequest: { Item: { id: id_, value: { S: JSON.stringify(value, BufferJSON.replacer) } } } }
+                : { DeleteRequest: { Key: { id: id_ } } })
             }
           }
-          await Promise.all(tasks)
+          const pendientes = await batchWrite(requests)
+          if (pendientes) throw new Error(`keys.set: ${pendientes} claves de sesión no se persistieron`)
         },
       },
     },

@@ -20,6 +20,7 @@ let currentQR = null
 let me = null
 let pairNumber = null // número para vincular por código (en vez de QR)
 let pairingCode = null // código de 8 dígitos generado
+let pairTimer = null // B12: timer del requestPairingCode pendiente (para cancelarlo al reemplazar el socket)
 let lastClose = null // último statusCode de cierre (diagnóstico)
 let loggedOut = false // sesión cerrada por WhatsApp; requiere re-vincular (/reset)
 let replaced = false // 440: otro host tomó la sesión; este cedió (usar /reconnect para retomar)
@@ -126,6 +127,12 @@ async function doStart() {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
   }
+  // B12: cancela un requestPairingCode pendiente del socket anterior, para que no se dispare sobre
+  // un socket que estamos a punto de reemplazar (generaría un código que el usuario nunca ve).
+  if (pairTimer) {
+    clearTimeout(pairTimer)
+    pairTimer = null
+  }
   // Teardown del socket anterior: quitamos sus listeners ANTES de cerrarlo para que su
   // 'close' no dispare otra reconexión (la causa de la tormenta de sockets/códigos).
   if (sock) {
@@ -142,12 +149,15 @@ async function doStart() {
   // Limpieza de sesión bajo la cadena (serializada), ANTES de leer creds: así nunca se
   // borran credenciales que un socket nuevo acaba de escribir.
   if (clearOnStart) {
-    clearOnStart = false
+    // B11: solo damos por consumido clearOnStart si clearAll TERMINÓ (no a medias). Si lanza
+    // (borrado parcial), lo dejamos en true para reintentar en el próximo arranque, en vez de
+    // re-vincular sobre una sesión inconsistente (creds viejas con keys a medio borrar).
     try {
       const prev = await useDynamoAuthState(TABLE, SESSION_ID)
       await prev.clearAll()
+      clearOnStart = false
     } catch (e) {
-      log.error({ err: String(e) }, 'clearAll falló')
+      log.error({ err: String(e) }, 'clearAll falló; se reintentará en el próximo arranque')
     }
     if (gen !== myGen) return // reemplazado mientras limpiábamos
   }
@@ -221,7 +231,8 @@ async function doStart() {
 
     // Vinculación por código (8 dígitos): una sola vez por socket si hay número y no está registrado.
     if (pairNumber && !s.authState.creds.registered) {
-      setTimeout(async () => {
+      pairTimer = setTimeout(async () => {
+        pairTimer = null // B12: el timer ya disparó; deja de estar pendiente
         if (gen !== myGen) return // socket reemplazado: no pidas código en uno viejo
         try {
           const code = await s.requestPairingCode(pairNumber)
@@ -396,7 +407,9 @@ app.post('/pair', auth, async (req, res) => {
   const detalle = lastPairError || 'no se generó el código a tiempo'
   pairNumber = null
   pairingCode = null
-  restart() // vuelve a modo QR (sin await)
+  // B12: AWAIT el restart (doStart cancela el pairTimer pendiente y crea un socket nuevo). Sin await,
+  // el restart podía solaparse con un /pair posterior y dejar un requestPairingCode colgado del socket viejo.
+  await restart() // vuelve a modo QR
   return res.status(504).json({ error: 'sin_codigo', detalle })
 })
 

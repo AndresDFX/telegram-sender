@@ -252,6 +252,9 @@ Lista accionable para no repetir fallos:
 - **Endpoint `/count` dedicado (M16):** el conteo previo al fraccionado usa `POST /count` (solo cuenta, NUNCA envía), no `/send` con `count_only`. Si el flag se perdiera (proxy/regresión), `/send` habría difundido a todos. El adapter cae a `/send?count_only` solo si `/count` responde 404 (servicio viejo). **Al desplegar el servicio Node hay que incluir esta versión** o el conteo usará el fallback.
 - **`/send` valida `offset`/`limit` (M20):** un valor no numérico/negativo daba `NaN` → `slice` vacío → 202 `{targets:0}` sin enviar a nadie en silencio. Ahora responde **400**. El `bcSetTotal` (wa_total/wa_started) se hace solo en el **primer slice** (`offset===0`) para no pisarlo ni correr carreras (M21). El jitter anti-baneo va solo ENTRE mensajes, no tras el último (B10).
 - **Opt-outs (`failures`) se cargan UNA vez (M19):** antes `doStart` re-fusionaba los conteos del store en cada `/reconnect`, resucitando opt-outs ya limpiados por `/blocked/clear`. Ahora se cargan solo en el primer arranque del proceso y `/blocked/clear` persiste **sincrónicamente** (flush del debounce) para que un reconnect inmediato no reviva los conteos.
+- **Persistencia de sesión por lotes (M22/B11):** `keys.set` y `clearAll` (`dynamoAuth.js`) usan `BatchWriteItem` (25/lote) con reintento de `UnprocessedItems`; antes eran `PutItem`/`DeleteItem` sueltos en serie → un fallo parcial dejaba la sesión inconsistente. `clearAll` lanza si no termina y `doStart` NO marca `clearOnStart` consumido hasta que el borrado completa (no re-vincular sobre creds a medio borrar).
+- **`/pair` cancela el pairing pendiente (B12):** el `setTimeout` de `requestPairingCode` se guarda en `pairTimer` y se cancela al reemplazar el socket; la vuelta a QR tras timeout es `await restart()`. Evita generar un código sobre un socket viejo y solapes con un `/pair` posterior.
+- **Preview reutiliza conexión por corrida (B15):** en captura, el poller activa `_diferir_cierre_preview` y cierra el cliente Telethon UNA vez al final (`cerrar_preview()`) en vez de conectar/desconectar por post — menos latencia y menos conexiones a la sesión.
 
 ### Imagen en los envíos (fix crítico)
 
@@ -348,15 +351,17 @@ Lista accionable para no repetir fallos:
 - Sin CORS explícito en el panel.
 - `/api/auth/forgot|reset` son públicos (con anti-fuerza-bruta local).
 
-### Hardening de backend pendiente (bug-hunt "otros errores", baja prioridad)
+### Hardening de backend (bug-hunt "otros errores") — RESUELTO
 
-Tras la ronda de revisión se cerraron todas las altas y la mayoría de medias/bajas (commits `fix(backend) Batch 4..10` / `fix(whatsapp-service) Batch 5`). Quedan, por bajo impacto o por tocar flujos sensibles no testeables aquí:
+Se cerraron todas las altas y todas las medias/bajas accionables (commits `fix(backend) Batch 4..10`, `fix(whatsapp-service) Batch 5`, `fix(backend) Batch 11`). Los últimos cerrados (sesión/vinculación Baileys + perf de captura):
 
-- **M22 / B11 (sesión Baileys, `whatsapp-service/src/dynamoAuth.js`):** `keys.set` persiste par a par sin atomicidad y `clearAll` borra ítem por ítem en serie (Scan+Delete) sin BatchWrite/reintento → un fallo parcial deja la sesión inconsistente. Solo se ejercita al vincular/`/reset` (raro). Fix: `BatchWriteItem(25)` con reintento de `UnprocessedItems` y no marcar `clearOnStart` consumido si el borrado no terminó.
-- **B12 (`/pair`, linking):** tras el timeout de 20s devuelve 504 pero el `requestPairingCode` pendiente puede generar un código sobre el socket viejo y el `restart()` corre sin `await`. Solo afecta el flujo de vinculación. Fix: `clearTimeout` del pairing pendiente + `await restart()`.
-- **B15 (perf captura):** el preview a Mensajes Guardados conecta/desconecta Telethon UNA vez por post capturado en una misma corrida del poller → riesgo de FloodWait si se capturan muchos a la vez. Fix: reutilizar una conexión por corrida.
-- **B18 (cosmético):** `registrar_error` es last-writer-wins para `last_error` (el set `error_reasons` sí conserva todas las razones).
-- **B9:** ya mitigado — `preview_sender` solo se construye en userbot y con conexión perezosa (no conecta al instanciar).
+- **M22 / B11 (sesión Baileys, `whatsapp-service/src/dynamoAuth.js`):** `keys.set` y `clearAll` ahora escriben/borran con `BatchWriteItem` (lotes de 25) + reintento de `UnprocessedItems` (backoff), en vez de `PutItem`/`DeleteItem` sueltos en serie. `clearAll` LANZA si quedan ítems sin borrar, y `doStart` solo da por consumido `clearOnStart` si `clearAll` terminó (no re-vincula sobre sesión a medio borrar).
+- **B12 (`/pair`):** el `setTimeout` del `requestPairingCode` se guarda en `pairTimer` y se cancela en el teardown de `doStart` (no genera un código sobre un socket que se va a reemplazar); el `restart()` de la rama de timeout ahora es `await`.
+- **B15 (perf captura):** el preview a Mensajes Guardados REUTILIZA una sola conexión Telethon en toda la corrida del poller (`_diferir_cierre_preview` + `cerrar_preview()`), en vez de conectar/desconectar por post.
+- **B18:** `registrar_error` separa el `ADD` al set (siempre) del `SET last_error` (condicional al timestamp), así `last_error` refleja el fallo más reciente y no un last-writer-wins ciego.
+- **B9:** ya estaba mitigado — `preview_sender` solo se construye en userbot y con conexión perezosa.
+
+Siguen como **trade-offs conscientes** (no bugs): M10/M30/B4 (doble-conteo posible si `marcar()` cae por infra — fail-open prioriza no-bloquear) y B8 (`paused`/strikes por-invoke, correcto con `BatchSize=1`). Ver sección "Trade-offs conocidos del diseño fail-open".
 
 ---
 

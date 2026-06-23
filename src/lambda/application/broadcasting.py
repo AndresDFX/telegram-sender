@@ -44,6 +44,10 @@ class BroadcastList:
         # Enviador para PREVISUALIZAR a Mensajes Guardados las listas capturadas cuando el envío
         # automático está apagado (userbot → "me"). None en modo bot o si no se inyecta.
         self._preview_sender = preview_sender
+        # B15: cuando el poller captura VARIOS posts en una corrida, difiere el cierre del cliente
+        # Telethon del preview para REUTILIZAR la conexión (conectar/desconectar por post añadía
+        # latencia y abría muchas conexiones). El poller activa el modo y cierra UNA vez al final.
+        self._diferir_cierre_preview = False
 
     # --- helpers ---------------------------------------------------------------
 
@@ -260,7 +264,19 @@ class BroadcastList:
             return False
         finally:
             # Cierra el cliente: evita mantener dos clientes Telethon con la misma sesión a la vez
-            # (preview + refresh de contactos del poller), que Telegram puede penalizar.
+            # (preview + refresh de contactos del poller), que Telegram puede penalizar. B15: si el
+            # poller pidió diferir el cierre (varios posts en una corrida), NO desconectamos aquí: se
+            # reutiliza la conexión y se cierra UNA vez al final con cerrar_preview().
+            if not self._diferir_cierre_preview:
+                try:
+                    self._preview_sender.desconectar()
+                except Exception:
+                    pass
+
+    def cerrar_preview(self) -> None:
+        """Cierra el cliente Telethon del preview (B15). Lo llama el poller al terminar la corrida,
+        tras haber diferido el cierre para reutilizar una sola conexión en todos los posts."""
+        if self._preview_sender:
             try:
                 self._preview_sender.desconectar()
             except Exception:

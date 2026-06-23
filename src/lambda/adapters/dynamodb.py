@@ -690,22 +690,44 @@ class DynamoDbBroadcastStore:
         return salida
 
     def registrar_error(self, broadcast_id: str, reason: str) -> None:
-        """Guarda la razón legible de un fallo del envío (auditoría). Atómico y acotado:
-        `error_reasons` es un String Set (dedupe) y `last_error` la más reciente. Idempotente
-        ante reintentos del lote (no infla nada). Best-effort: nunca rompe el envío."""
+        """Guarda la razón legible de un fallo del envío (auditoría). Acotado: `error_reasons` es un
+        String Set (dedupe) y `last_error` la más reciente. Best-effort: nunca rompe el envío.
+
+        B18: se hace en DOS escrituras para que `last_error` refleje el fallo MÁS RECIENTE y no un
+        last-writer-wins ciego (dos fallos desordenados): (1) ADD al set SIEMPRE; (2) SET last_error
+        solo si su timestamp es >= al guardado. Las llamadas son raras (solo en fallos), no hot-path."""
+        from botocore.exceptions import ClientError
+
         reason = str(reason or "")[:200]
         if not reason:
             return
+        log = __import__("logging").getLogger(__name__)
+        t = int(time.time())
         try:
+            # (1) La razón SIEMPRE entra al set (dedupe), pase lo que pase con el orden de last_error.
             self._t().update_item(
                 Key={"id": broadcast_id},
-                UpdateExpression="ADD error_reasons :r SET last_error = :le, last_error_at = :t",
-                ExpressionAttributeValues={":r": {reason}, ":le": reason, ":t": int(time.time())},
-                ConditionExpression="attribute_exists(id)",
+                UpdateExpression="ADD error_reasons :r",
+                ExpressionAttributeValues={":r": {reason}},
+                ConditionExpression="attribute_exists(id)",  # solo si el job existe (no upsert fantasma)
             )
         except Exception:
-            logger = __import__("logging").getLogger(__name__)
-            logger.exception("No se pudo registrar la razón de fallo del envío %s", broadcast_id)
+            log.exception("No se pudo registrar la razón de fallo del envío %s", broadcast_id)
+            return  # si el job no existe / falla, no tiene sentido intentar el SET de last_error
+        try:
+            # (2) last_error refleja el MÁS RECIENTE: condicional al timestamp (<= permite empate por seg).
+            self._t().update_item(
+                Key={"id": broadcast_id},
+                UpdateExpression="SET last_error = :le, last_error_at = :t",
+                ExpressionAttributeValues={":le": reason, ":t": t},
+                ConditionExpression="attribute_exists(id) AND (attribute_not_exists(last_error_at) OR last_error_at <= :t)",
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                log.exception("No se pudo actualizar last_error del envío %s", broadcast_id)
+            # CCF = ya hay un last_error más reciente: no es un error (B18).
+        except Exception:
+            log.exception("No se pudo actualizar last_error del envío %s", broadcast_id)
 
     def borrar(self, broadcast_id: str) -> None:
         """Borra DEFINITIVAMENTE un envío de la tabla (no solo a nivel visual)."""

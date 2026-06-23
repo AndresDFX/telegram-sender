@@ -59,6 +59,27 @@ class EstadoTests(unittest.TestCase):
         self.assertEqual(E(job(channels=["telegram"], tg_total=5, tg_failed=5, tg_sent=0)), "failed")
 
 
+class RegistrarErrorTests(unittest.TestCase):
+    def test_b18_dos_escrituras_add_siempre_y_last_error_condicional(self):
+        # B18: registrar_error hace (1) ADD error_reasons SIN condición de orden y (2) SET last_error
+        # condicional al timestamp (último gana por recencia, no last-writer-wins ciego).
+        store = DynamoDbBroadcastStore.__new__(DynamoDbBroadcastStore)
+        llamadas = []
+
+        class _T:
+            def update_item(self, **kw):
+                llamadas.append(kw)
+
+        store._t = lambda: _T()
+        store.registrar_error("b1", "Telegram — boom")
+        self.assertEqual(len(llamadas), 2)
+        add, set_le = llamadas
+        self.assertIn("ADD error_reasons", add["UpdateExpression"])
+        self.assertNotIn("last_error_at", add["ConditionExpression"])  # el ADD no depende del orden
+        self.assertIn("SET last_error", set_le["UpdateExpression"])
+        self.assertIn("last_error_at <= :t", set_le["ConditionExpression"])  # solo si es >= al guardado
+
+
 class BorrarTerminadosTests(unittest.TestCase):
     def _store(self, jobs):
         store = DynamoDbBroadcastStore.__new__(DynamoDbBroadcastStore)
