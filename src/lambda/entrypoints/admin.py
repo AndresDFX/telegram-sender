@@ -2094,9 +2094,27 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <div class="hint" id="bc_preview" style="margin-top:10px">—</div>
 
-   <label style="margin-top:16px">Programar (opcional)</label>
-   <input type="datetime-local" id="bc_sched" style="max-width:260px">
-   <div class="hint">Vacío = enviar ya (fraccionado). Con fecha/hora = se difiere hasta entonces y luego se gotea por lotes. Hora en <b class="tz-lbl">Colombia · Bogotá (UTC-5)</b> — <a href="javascript:void 0" onclick="goStep('ajustes','envio')">cambiar</a>.</div>
+   <label style="margin-top:16px">¿Cuándo se envía?</label>
+   <!-- UX-6: UN solo compositor con 3 modos; adiós al formulario duplicado de "Programar un mensaje". -->
+   <div class="chan-row">
+     <label class="chan on" id="bc_mode_now"><input type="radio" name="bc_mode" value="now" checked onchange="bcMode()" style="display:none">⚡ Ahora</label>
+     <label class="chan" id="bc_mode_once"><input type="radio" name="bc_mode" value="once" onchange="bcMode()" style="display:none">📅 Una vez el…</label>
+     <label class="chan" id="bc_mode_rec"><input type="radio" name="bc_mode" value="rec" onchange="bcMode()" style="display:none">🔁 Recurrente</label>
+   </div>
+   <div id="bc_once_box" style="display:none;margin-top:10px">
+     <input type="datetime-local" id="bc_sched" style="max-width:260px">
+     <div class="hint">Se difiere hasta entonces y luego se gotea por lotes. Hora en <b class="tz-lbl">Colombia · Bogotá (UTC-5)</b> — <a href="javascript:void 0" onclick="goStep('ajustes','envio')">cambiar</a>.</div>
+   </div>
+   <div id="bc_rec_box" style="display:none;margin-top:10px">
+     <div class="chan-row">
+       <label class="chan on" id="sg_freq_daily"><input type="radio" name="sg_type" value="daily" checked onchange="sgType()" style="display:none">Diario</label>
+       <label class="chan" id="sg_freq_weekly"><input type="radio" name="sg_type" value="weekly" onchange="sgType()" style="display:none">Semanal</label>
+     </div>
+     <div id="sg_time_box" style="margin-top:10px"><label style="margin-top:0">Hora</label><input type="time" id="sg_at" value="09:00" style="max-width:160px"></div>
+     <div id="sg_days_box" style="margin-top:10px;display:none"><label style="margin-top:0">Días</label><div class="chan-row" id="sg_days"></div></div>
+     <input id="sg_name" placeholder="Nombre (opcional), p. ej. Lista de la mañana" maxlength="80" style="margin-top:10px">
+     <div class="hint" style="margin-top:8px">Recurrente envía a la <b>lista elegida arriba</b> por canal (los contactos marcados a mano no aplican) y la imagen debe ser una <b>URL estable</b> (una imagen subida caduca en 1 h). Hora en <b class="tz-lbl">Colombia · Bogotá (UTC-5)</b>. Gestiona los creados en <b>📡 Actividad → Programados</b>.</div>
+   </div>
 
    <div class="compose-actions">
      <button id="bc_send" onclick="sendBroadcast()">Enviar</button>
@@ -2127,53 +2145,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="sec" onclick="loadBroadcasts()">Refrescar</button>
    </div>
   </div>
-  <div class="card accent" data-tab="envios" data-sub="programados"><h2>⏰ Programar un mensaje<span class="help" tabindex="0" data-tip="Crea un envío que sale a una fecha/hora exacta (una vez) o de forma recurrente (diario/semanal). Requiere que los envíos estén activos a esa hora.">ⓘ</span></h2>
-   <div class="hint">Crea mensajes que se envían solos a la hora indicada, por las conexiones existentes de Telegram y WhatsApp. Una vez, a diario o semanal. Respetan el ritmo anti-baneo, la ventana horaria y el interruptor maestro.</div>
-   <label>Nombre (opcional)</label>
-   <input id="sg_name" placeholder="p. ej. Lista de la mañana" maxlength="80">
-   <label>Mensaje <span id="sg_count" class="charcount">0 caracteres</span></label>
-   <textarea id="sg_text" style="min-height:110px" placeholder="Escribe el mensaje a programar..." oninput="sgCount()"></textarea>
-   <label>Imagen (opcional)</label>
-   <input id="sg_image_url" placeholder="…pega una URL https:// de imagen">
-   <label style="margin-top:16px">Canales</label>
-   <div class="chan-row">
-     <label class="chan tg on" id="sg_chan_tg"><span class="dot"></span><input type="checkbox" id="sg_telegram" checked onchange="sgChan()" style="display:none"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</label>
-     <label class="chan wa" id="sg_chan_wa"><span class="dot"></span><input type="checkbox" id="sg_whatsapp" onchange="sgChan()" style="display:none"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</label>
-   </div>
-   <div class="row">
-     <div id="sg_tg_wrap"><div class="hint" style="margin-top:0">Lista de Telegram</div>
-       <select id="sg_tg_list"><option value="">(según configuración)</option></select></div>
-     <div id="sg_wa_wrap" style="display:none"><div class="hint" style="margin-top:0">Lista de WhatsApp (obligatoria)</div>
-       <select id="sg_wa_list"><option value="">— elige una lista —</option></select></div>
-   </div>
-   <div class="hint">⚠️ WhatsApp exige una lista (evita mandar a toda la agenda por error).</div>
-   <label style="margin-top:16px">Frecuencia</label>
-   <div class="chan-row">
-     <label class="chan on" id="sg_freq_once"><input type="radio" name="sg_type" value="once" checked onchange="sgType()" style="display:none">Una vez</label>
-     <label class="chan" id="sg_freq_daily"><input type="radio" name="sg_type" value="daily" onchange="sgType()" style="display:none">Diario</label>
-     <label class="chan" id="sg_freq_weekly"><input type="radio" name="sg_type" value="weekly" onchange="sgType()" style="display:none">Semanal</label>
-   </div>
-   <div id="sg_once_box" style="margin-top:12px">
-     <label>Fecha y hora</label>
-     <input type="datetime-local" id="sg_run_at" style="max-width:260px">
-   </div>
-   <div id="sg_time_box" style="margin-top:12px;display:none">
-     <label>Hora</label>
-     <input type="time" id="sg_at" value="09:00" style="max-width:160px">
-   </div>
-   <div id="sg_days_box" style="margin-top:12px;display:none">
-     <label>Días</label>
-     <div class="chan-row" id="sg_days"></div>
-   </div>
-   <div class="hint" style="margin-top:8px">Hora en <b class="tz-lbl">Colombia · Bogotá (UTC-5)</b> — <a href="javascript:void 0" onclick="goStep('ajustes','envio')">cambiar</a>.</div>
-   <div class="compose-actions">
-     <button id="sg_create" onclick="sgCreate()">Programar</button>
-     <button class="ghost" onclick="sgClear()">Limpiar</button>
-     <span class="grow"></span>
-     <span id="sg_status" class="hint" style="margin-top:0"></span>
-   </div>
-  </div>
   <div class="card" data-tab="envios" data-sub="programados"><h2>📅 Mensajes programados <span id="sg_n" class="hint"></span></h2>
+   <div class="hint">Los mensajes recurrentes se crean desde <b>✍️ Enviar → 🔁 Recurrente</b>; aquí los pausas, reanudas o borras.</div>
    <div class="hint">Próximos envíos automáticos. Puedes pausarlos/activarlos o eliminarlos.</div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="sg_table"><thead><tr><th class="selcol"><input type="checkbox" id="sg_selall" onchange="sgSelAll(this.checked)"></th><th>Mensaje</th><th>Canales</th><th>Cuándo</th><th>Próximo</th><th></th></tr></thead>
@@ -3112,7 +3085,8 @@ function showTab(t){
   // B25: en móvil la nav es una tira scrolleable; centra la pestaña activa para que se vea.
   try{ const _on=document.querySelector('.nav button.on'); if(_on&&_on.scrollIntoView) _on.scrollIntoView({inline:'center',block:'nearest'}); }catch(e){}
   try{ localStorage.setItem('tab',t); }catch(e){}
-  if(t==='envios'){ sgFillLists(); sgChan(); sgType(); loadSchedules(); }
+  if(t==='envios'){ loadSchedules(); }
+  if(t==='enviar'){ try{ bcMode(); sgRenderDays(); }catch(e){} }
   if(SUB_DEFAULT[t]){ showSub(t, (function(){try{return localStorage.getItem('sub_'+t)}catch(e){return null}})()||SUB_DEFAULT[t]); }
   const TAB_NAMES={inicio:'Inicio',enviar:'Enviar',envios:'Actividad',fuentes:'Contactos',ajustes:'Ajustes'};
   const _h=$('page_h1'); if(_h) _h.textContent=TAB_NAMES[t]||'Panel';  // B22: contexto de sección para lectores de pantalla
@@ -3265,7 +3239,43 @@ function bcClear(){
   bcRenderPick('tg'); bcRenderPick('wa');
   $('bc_status').textContent=''; bcCount(); bcPrev();
 }
+// UX-6: modo del compositor (Ahora / Una vez / Recurrente).
+function bcCurMode(){ const r=document.querySelector('input[name="bc_mode"]:checked'); return r?r.value:'now'; }
+function bcMode(){ const m=bcCurMode();
+  $('bc_mode_now').classList.toggle('on',m==='now'); $('bc_mode_once').classList.toggle('on',m==='once'); $('bc_mode_rec').classList.toggle('on',m==='rec');
+  $('bc_once_box').style.display=m==='once'?'block':'none';
+  $('bc_rec_box').style.display=m==='rec'?'block':'none';
+  if(m==='rec'){ sgType(); }
+  const b=$('bc_send'); if(b) b.textContent=m==='now'?'Enviar':'Programar';
+}
+// UX-6: crea el RECURRENTE desde el compositor (mismo endpoint /api/schedules; sin cambio de contrato).
+async function bcCreateRecurring(){
+  const text=$('bc_text').value.trim();
+  const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked;
+  if(!text){ toast('El mensaje no puede estar vacío',true); return; }
+  if(!tg && !wa){ toast('Elige al menos un canal',true); return; }
+  if((BC_TG_SEL&&BC_TG_SEL.size)||(BC_WA_SEL&&BC_WA_SEL.size)){ toast('Recurrente envía a LISTAS: quita los contactos marcados a mano o guárdalos primero como lista',true); return; }
+  if(BC_IMG_KEY){ toast('En recurrentes usa una URL de imagen estable (una imagen subida caduca en 1 h)',true); return; }
+  const t=sgCurType()==='weekly'?'weekly':'daily';
+  const body={ name:($('sg_name')?$('sg_name').value.trim():''), text, image_url:($('bc_image_url').value||'').trim(),
+    telegram:tg, whatsapp:wa, telegram_list:$('bc_tg_list').value, whatsapp_list:$('bc_wa_list').value,
+    type:t, at:$('sg_at').value };
+  if(t==='weekly'){ if(!SG_DAYS.size){ toast('Elige al menos un día de la semana',true); return; } body.days=[...SG_DAYS]; }
+  if(wa && !body.whatsapp_list){ toast('Elige una lista de WhatsApp (no se envía a toda la agenda)',true); return; }
+  const chs=[tg&&'Telegram', wa&&'WhatsApp'].filter(Boolean).join(' + ');
+  if(!await confirmModal('¿Programar el envío RECURRENTE ('+(t==='daily'?'diario':'semanal')+' a las '+body.at+', '+tzLabel()+')?\n\nSe enviará por: '+chs+'.',{okText:'Programar recurrente'})) return;
+  const btn=$('bc_send'); btn.disabled=true; btn.classList.add('btn-loading');
+  try{
+    const r=await fetch(BASE+'/api/schedules',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify(body)});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.error||('error '+r.status));
+    toast('✓ Recurrente creado — gestiónalo en Actividad → Programados','info'); bcClear();
+    try{ loadSchedules(); }catch(e){}
+  }catch(e){ toast(e.message||'Error al programar',true); }
+  finally{ btn.disabled=false; btn.classList.remove('btn-loading'); }
+}
 async function sendBroadcast(){
+  if(bcCurMode()==='rec') return bcCreateRecurring();
   const text=$('bc_text').value.trim();
   const tg=$('bc_telegram').checked, wa=$('bc_whatsapp').checked;
   if(!text && !bcEffectiveUrl()){ toast('Escribe un mensaje o adjunta una imagen',true); return; }
@@ -3275,7 +3285,9 @@ async function sendBroadcast(){
   const url=bcEffectiveUrl(); if(url) body.image_url=url;
   if(BC_IMG_KEY) body.image_key=BC_IMG_KEY;   // clave S3: el backend re-firma la imagen al despachar
   // Programación opcional: datetime-local -> epoch (s). Vacío = enviar ya.
-  let ep=0; const sv=$('bc_sched')?$('bc_sched').value:'';
+  // UX-6: 'Una vez' EXIGE fecha futura; 'Ahora' ignora el campo aunque tenga valor residual.
+  let ep=0; const sv=(bcCurMode()==='once' && $('bc_sched'))?$('bc_sched').value:'';
+  if(bcCurMode()==='once' && !sv){ toast('Elige la fecha y hora del envío',true); return; }
   if(sv){ ep=schedEpoch(sv); if(ep>Math.floor(Date.now()/1000)) body.scheduled_at=ep; else { toast('La fecha programada debe ser futura',true); return; } }
   // UX-3: la confirmación SIEMPRE dice a CUÁNTOS contactos irá por canal (panel de armado);
   // si el conteo no se puede calcular, se dice explícitamente (nunca confirmar a ciegas).
@@ -3313,7 +3325,7 @@ function bcEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;
 // ===== Mensajes programados (módulo /api/schedules) =====
 const SG_DAYNAMES=['L','M','X','J','V','S','D'];  // 0=lunes .. 6=domingo
 let SG_DAYS=new Set();
-function sgCount(){ const n=$('sg_text').value.length, el=$('sg_count');
+function sgCount(){ if(!$('sg_text')) return; const n=$('sg_text').value.length, el=$('sg_count');
   el.textContent = n>4096 ? (n+' / 4096 · supera el límite de Telegram') : (n+(n===1?' carácter':' caracteres'));
   el.dataset.near = (n>3600 && n<=4096) ? '1':'0'; el.dataset.over = n>4096 ? '1':'0'; }
 function sgFillLists(){
@@ -3328,38 +3340,22 @@ function sgRenderDays(){ const box=$('sg_days'); if(!box||box.children.length) r
   box.innerHTML=SG_DAYNAMES.map((d,i)=>`<label class="chan${SG_DAYS.has(i)?' on':''}" data-d="${i}" role="checkbox" tabindex="0" aria-checked="${SG_DAYS.has(i)?'true':'false'}" aria-label="${SG_DAYFULL[i]}" onclick="sgToggleDay(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();sgToggleDay(${i})}">${d}</label>`).join(''); }
 function sgToggleDay(i){ SG_DAYS.has(i)?SG_DAYS.delete(i):SG_DAYS.add(i);
   const el=document.querySelector('#sg_days [data-d="'+i+'"]'); if(el){ el.classList.toggle('on',SG_DAYS.has(i)); el.setAttribute('aria-checked',SG_DAYS.has(i)?'true':'false'); } }
-function sgChan(){ const tg=$('sg_telegram').checked, wa=$('sg_whatsapp').checked;
+function sgChan(){ if(!$('sg_telegram')) return; const tg=$('sg_telegram').checked, wa=$('sg_whatsapp').checked;
   $('sg_chan_tg').classList.toggle('on',tg); $('sg_chan_wa').classList.toggle('on',wa);
   $('sg_tg_wrap').style.display=tg?'block':'none'; $('sg_wa_wrap').style.display=wa?'block':'none'; }
-function sgCurType(){ const r=document.querySelector('input[name="sg_type"]:checked'); return r?r.value:'once'; }
+function sgCurType(){ const r=document.querySelector('input[name="sg_type"]:checked'); return r?r.value:'daily'; }
 function sgType(){ const t=sgCurType();
-  $('sg_freq_once').classList.toggle('on',t==='once'); $('sg_freq_daily').classList.toggle('on',t==='daily'); $('sg_freq_weekly').classList.toggle('on',t==='weekly');
-  $('sg_once_box').style.display=t==='once'?'block':'none';
-  $('sg_time_box').style.display=t==='once'?'none':'block';
-  $('sg_days_box').style.display=t==='weekly'?'block':'none';
+  // UX-6: el recurrente vive dentro del compositor; solo hay daily/weekly (los null se saltan).
+  if($('sg_freq_once')) $('sg_freq_once').classList.toggle('on',t==='once');
+  if($('sg_freq_daily')) $('sg_freq_daily').classList.toggle('on',t==='daily');
+  if($('sg_freq_weekly')) $('sg_freq_weekly').classList.toggle('on',t==='weekly');
+  if($('sg_once_box')) $('sg_once_box').style.display=t==='once'?'block':'none';
+  if($('sg_time_box')) $('sg_time_box').style.display=t==='once'?'none':'block';
+  if($('sg_days_box')) $('sg_days_box').style.display=t==='weekly'?'block':'none';
   sgRenderDays(); }
-function sgClear(){ $('sg_name').value=''; $('sg_text').value=''; $('sg_image_url').value=''; $('sg_run_at').value='';
-  SG_DAYS.clear(); document.querySelectorAll('#sg_days .chan').forEach(e=>e.classList.remove('on')); sgCount(); $('sg_status').textContent=''; }
-async function sgCreate(){
-  const t=sgCurType();
-  const body={ name:$('sg_name').value.trim(), text:$('sg_text').value, image_url:$('sg_image_url').value.trim(),
-    telegram:$('sg_telegram').checked, whatsapp:$('sg_whatsapp').checked,
-    telegram_list:$('sg_tg_list').value, whatsapp_list:$('sg_wa_list').value, type:t };
-  if(!body.text.trim()){ toast('El mensaje no puede estar vacío',true); return; }
-  if(!body.telegram && !body.whatsapp){ toast('Elige al menos un canal',true); return; }
-  if(body.whatsapp && !body.whatsapp_list){ toast('Elige una lista de WhatsApp (no se envía a toda la agenda)',true); const s=$('sg_wa_list'); if(s){ s.focus(); } return; }
-  if(t==='once'){ const v=$('sg_run_at').value; if(!v){ toast('Elige fecha y hora',true); return; }
-    body.run_at=schedEpoch(v); }  // M40: en la zona configurada, no la del navegador
-  else { body.at=$('sg_at').value; if(t==='weekly') body.days=[...SG_DAYS]; }
-  $('sg_create').disabled=true; $('sg_create').classList.add('btn-loading'); $('sg_status').textContent='Guardando…';
-  try{
-    const r=await fetch(BASE+'/api/schedules',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify(body)});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(j.error||('error '+r.status));
-    toast('✓ Mensaje programado'); $('sg_status').textContent=''; sgClear(); loadSchedules();
-  }catch(e){ toast(e.message||'Error al programar',true); $('sg_status').textContent=e.message||''; }
-  finally{ $('sg_create').disabled=false; $('sg_create').classList.remove('btn-loading'); }
-}
+function sgClear(){ ['sg_name','sg_text','sg_image_url','sg_run_at'].forEach(id=>{ if($(id)) $(id).value=''; });
+  SG_DAYS.clear(); document.querySelectorAll('#sg_days .chan').forEach(e=>e.classList.remove('on')); sgCount(); if($('sg_status')) $('sg_status').textContent=''; }
+// (UX-6: sgCreate eliminado — el recurrente se crea desde el compositor con bcCreateRecurring.)
 function sgDesc(s){
   if(s.type==='daily') return 'Diario · '+s.at;
   if(s.type==='weekly') return 'Semanal · '+(s.days||[]).slice().sort((a,b)=>a-b).map(d=>SG_DAYNAMES[d]).join(',')+' · '+s.at;
