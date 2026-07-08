@@ -1215,13 +1215,15 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
 #send_banner[hidden]{display:none}
 #send_banner .sb-txt{flex:1;min-width:210px;font-size:13.5px;line-height:1.45}
 #send_banner .sb-dot{width:9px;height:9px;border-radius:50%;flex:none}
-#send_banner.paused{background:linear-gradient(180deg,rgba(251,113,133,.18),rgba(251,113,133,.07));border:1px solid rgba(251,113,133,.5);color:#FFE3E0;box-shadow:0 12px 32px -16px rgba(251,113,133,.55)}
-#send_banner.paused .sb-dot{background:var(--bad);box-shadow:0 0 0 4px rgba(251,113,133,.18);animation:pulseDot 1.4s ease-in-out infinite}
+/* UX-2: la PAUSA es un estado informativo (ámbar), no un fallo (rojo queda solo para errores). */
+#send_banner.paused{background:linear-gradient(180deg,rgba(251,191,36,.16),rgba(251,191,36,.06));border:1px solid rgba(251,191,36,.45);color:var(--warn-tint);box-shadow:0 12px 32px -16px rgba(251,191,36,.4)}
+#send_banner.paused .sb-dot{background:var(--warn);box-shadow:0 0 0 4px rgba(251,191,36,.16);animation:pulseDot 1.4s ease-in-out infinite}
 #send_banner.active{background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.26);color:var(--tx2);padding:10px 16px}
 #send_banner.active .sb-dot{background:var(--ok);box-shadow:0 0 0 4px rgba(52,211,153,.16)}
 #send_banner button{flex:none}
-#send_banner .sb-go{background:linear-gradient(180deg,#34d399,#10b981);border-color:rgba(255,255,255,.12);font-size:14px;padding:11px 22px;font-weight:700}
-#send_banner .sb-go:hover{filter:brightness(1.06);box-shadow:0 8px 24px -8px rgba(16,185,129,.6)}
+/* UX-2: el CTA de activar es un botón PRIMARIO estándar (naranja) — el verde queda solo para
+   estados confirmados, nunca para acciones. Hereda el estilo base de button. */
+#send_banner .sb-go{font-size:14px;padding:11px 22px;font-weight:700}
 #send_banner .sb-pause{background:transparent;border:1px solid rgba(255,255,255,.18);color:var(--mut);font-size:12.5px;padding:6px 13px}
 #send_banner .sb-pause:hover{background:rgba(255,255,255,.06);color:var(--tx2);filter:none;box-shadow:none}
 
@@ -1782,8 +1784,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="stats" style="margin-top:14px">
      <div class="stat"><b id="k_sent">–</b><span>enviados (30 días)</span></div>
      <div class="stat"><b id="k_rate">–</b><span>tasa de éxito <span class="help" tabindex="0" data-tip="Histórica de los últimos 30 días, sobre los envíos contabilizados. No es el estado actual.">ⓘ</span></span></div>
-     <div class="stat"><b id="k_pend">–</b><span>lotes pendientes</span></div>
-     <div class="stat"><b id="k_dlq">–</b><span>en DLQ <span class="help" tabindex="0" data-tip="Lotes atascados ahora mismo (cola de fallidos SQS). Es un conteo APROXIMADO: puede tardar unos segundos en actualizarse tras reintentar/descartar, y convivir con una tasa de éxito alta (la tasa es histórica).">ⓘ</span></span></div>
+     <div class="stat" role="button" tabindex="0" style="cursor:pointer" title="Ver los envíos en curso" onclick="showTab('envios');showSub('envios','historial')"><b id="k_pend">–</b><span>lotes pendientes</span></div>
+     <div class="stat" role="button" tabindex="0" style="cursor:pointer" title="Ver la cola y la DLQ" onclick="showTab('ajustes');showSub('ajustes','sistema')"><b id="k_dlq">–</b><span>en DLQ <span class="help" tabindex="0" data-tip="Lotes atascados ahora mismo (cola de fallidos SQS). Es un conteo APROXIMADO: puede tardar unos segundos en actualizarse tras reintentar/descartar, y convivir con una tasa de éxito alta (la tasa es histórica).">ⓘ</span></span></div>
    </div>
    <div id="dash_serie" style="margin-top:16px"></div>
    <div id="dash_last" class="hint" style="margin-top:14px"></div>
@@ -1798,11 +1800,6 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div id="dash_steps" style="margin-top:10px">cargando…</div>
   </div>
   <div class="card" data-tab="fuentes" style="padding:14px 18px"><div class="subnav" data-subnav="fuentes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="fuente" onclick="showSub('fuentes','fuente')">📡 Fuente del canal</button><button data-sub="tg" onclick="showSub('fuentes','tg')"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</button><button data-sub="wa" onclick="showSub('fuentes','wa')"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</button></div></div>
-  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Aumento (markup)<span class="help" tabindex="0" data-tip="Sube un % los precios detectados antes de difundir. Solo afecta números con símbolo de moneda ($, 💸, COP); no toca modelos ni especificaciones. Redondea al mil hacia arriba.">ⓘ</span></h2>
-   <div class="markup"><input id="markup_percentage" type="number" step="0.1"><div>
-     <div style="font-size:13px">% que se suma a cada precio</div>
-     <div class="hint">Ej: $325.000 + 15% → $374.000 (redondeo al mil ↑)</div></div></div>
-  </div>
   <div class="card" data-tab="ajustes" style="padding:14px 18px"><div class="subnav" data-subnav="ajustes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="telegram" onclick="showSub('ajustes','telegram')"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</button><button data-sub="whatsapp" onclick="showSub('ajustes','whatsapp')"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</button><button data-sub="acceso" onclick="showSub('ajustes','acceso')">👤 Acceso</button><button data-sub="envio" onclick="showSub('ajustes','envio')">📤 Envío</button><button data-sub="sistema" onclick="showSub('ajustes','sistema')">🛠️ Sistema</button></div></div>
   <div class="card accent" data-tab="ajustes" data-sub="telegram"><h2><svg class="ico"><use href="#i-tg"></use></svg> Cuenta de Telegram<span class="help" tabindex="0" data-tip="Dos modos: Bot (envía a quienes te dan /start) o Userbot (envía desde TU cuenta a tus contactos, vía Telethon). El userbot llega a más gente pero tiene más riesgo de baneo.">ⓘ</span></h2>
    <label>Modo de envío</label>
@@ -1837,9 +1834,11 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button id="tl_confirm" onclick="tlSignIn()" style="margin-top:8px">Confirmar y conectar</button>
      <span id="tl_status" class="hint" style="margin-left:10px"></span>
    </div>
-   <div class="section-label" style="margin-top:14px">Avanzado: pegar StringSession</div>
-   <input id="telethon_session" type="password" placeholder="(pega para unir/cambiar la cuenta)">
-   <div class="hint">Alternativa manual: genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a esa cuenta: trátala como secreto.</div>
+   <details style="margin-top:14px">
+     <summary class="hint" style="cursor:pointer;font-weight:700">Avanzado: pegar StringSession</summary>
+     <input id="telethon_session" type="password" placeholder="(pega para unir/cambiar la cuenta)" style="margin-top:8px">
+     <div class="hint">Alternativa manual: genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a esa cuenta: trátala como secreto.</div>
+   </details>
    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
      <button onclick="saveAccount()">Guardar cuenta</button>
      <button class="danger" onclick="tlLogout()">🗑 Limpiar sesión userbot</button>
@@ -1873,7 +1872,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <div style="margin-top:10px"><button class="danger" onclick="waReset()">🗑 Limpiar sesión de WhatsApp</button> <span class="hint" id="wa_reset_out" style="margin-left:6px"></span></div>
      <div class="hint" style="margin-top:10px">💡 Lo más fiable si Render bloquea el linking: vincula <b>localmente</b> (corre el servicio en tu PC con las mismas credenciales AWS) y Render reusará la sesión guardada en DynamoDB.</div>
    </div>
-   <div class="callout warn">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza con listas pequeñas. Las <b>exclusiones</b> se gestionan por nombre abajo, en <b>Destinatarios WhatsApp</b>.</div>
+   <div class="callout warn">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza con listas pequeñas. <a href="javascript:void 0" onclick="goStep('fuentes','wa')">Gestionar exclusiones de WhatsApp →</a></div>
   </div>
   <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Canal y mensaje<span class="help" tabindex="0" data-tip="Canal público de Telegram que se sondea (t.me/s/canal) y la limpieza del mensaje: líneas a quitar (ubicación/teléfono), símbolos de moneda y footer de WhatsApp.">ⓘ</span></h2>
    <div class="hint" style="margin-top:-4px">La <b>recopilación</b> del canal y el <b>envío</b> a tus contactos son interruptores <b>separados</b> en «Ajustes y estado → Envío». Con la recopilación activa se guarda y se ve cada lista publicada (en «Envíos»); el envío automático se controla aparte.</div>
@@ -1883,12 +1882,11 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>Patrones a quitar (ubicación), uno por línea</label><textarea id="strip_patterns"></textarea>
    <button onclick="saveCfg()">Guardar cambios</button>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Probar procesamiento del mensaje<span class="help" tabindex="0" data-tip="Pega un texto de ejemplo del canal y mira cómo quedaría YA procesado (markup, limpieza y footer) sin enviar nada.">ⓘ</span></h2>
-   <div class="hint">Pega un mensaje tal como lo publica el canal y mira cómo quedará <b>ya procesado</b> (markup aplicado, sin ubicación/marca/teléfonos, con footer). Así verificas las reglas antes de enviar.</div>
-   <textarea id="pp_in" style="min-height:90px;margin-top:10px" placeholder="Pega aquí el texto original del canal..."></textarea>
-   <button class="sec" style="margin-top:8px" onclick="probarProcesado()">Procesar</button>
-   <div class="hint" style="margin-top:10px">Resultado (lo que se enviaría):</div>
-   <div id="pp_out" style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-top:4px;min-height:40px;font-size:13px;color:var(--tx2)">—</div>
+  <!-- UX-2: orden narrativo del sub Fuente: Canal → Aumento → Imagen → Probar (antes el markup iba primero, sin contexto). -->
+  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Aumento (markup)<span class="help" tabindex="0" data-tip="Sube un % los precios detectados antes de difundir. Solo afecta números con símbolo de moneda ($, 💸, COP); no toca modelos ni especificaciones. Redondea al mil hacia arriba.">ⓘ</span></h2>
+   <div class="markup"><input id="markup_percentage" type="number" step="0.1"><div>
+     <div style="font-size:13px">% que se suma a cada precio</div>
+     <div class="hint">Ej: $325.000 + 15% → $374.000 (redondeo al mil ↑)</div></div></div>
   </div>
   <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Imagen de la lista</h2>
    <div class="hint">Se envía como foto antes de cada lista. Sube un archivo o pega una URL.</div>
@@ -1896,6 +1894,13 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <img id="imgprev" class="preview" style="display:none">
    <label>…o URL externa</label><input id="image_url" placeholder="https://...">
    <button class="sec" onclick="saveCfg()">Guardar URL</button>
+  </div>
+  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Probar procesamiento del mensaje<span class="help" tabindex="0" data-tip="Pega un texto de ejemplo del canal y mira cómo quedaría YA procesado (markup, limpieza y footer) sin enviar nada.">ⓘ</span></h2>
+   <div class="hint">Pega un mensaje tal como lo publica el canal y mira cómo quedará <b>ya procesado</b> (markup aplicado, sin ubicación/marca/teléfonos, con footer). Así verificas las reglas antes de enviar.</div>
+   <textarea id="pp_in" style="min-height:90px;margin-top:10px" placeholder="Pega aquí el texto original del canal..."></textarea>
+   <button class="sec" style="margin-top:8px" onclick="probarProcesado()">Procesar</button>
+   <div class="hint" style="margin-top:10px">Resultado (lo que se enviaría):</div>
+   <div id="pp_out" style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-top:4px;min-height:40px;font-size:13px;color:var(--tx2)">—</div>
   </div>
   <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Cola de mensajes</h2>
    <div class="stats"><div class="stat"><b id="q_p">–</b><span>lotes programados pendientes</span></div>
@@ -2323,7 +2328,7 @@ let USR_ME='', IS_ADMIN=false;
 async function loadMe(){
   try{ const m=await api('/api/me'); USR_ME=m.user||USR_ME; IS_ADMIN=!!m.is_admin;
     const w=$('who'); if(w){ w.title=(IS_ADMIN?'Administrador':'Usuario')+' · '+(m.user||''); if(m.user) w.textContent=m.user; }  // B11: nombre visible también al recargar
-    const badge=$('who_role'); if(badge){ badge.textContent=IS_ADMIN?'admin':'usuario'; badge.className='pill '+(IS_ADMIN?'active':'inactive'); badge.style.display='inline-block'; }
+    const badge=$('who_role'); if(badge){ badge.textContent=IS_ADMIN?'admin':'usuario'; badge.className='pill '+(IS_ADMIN?'active':'neutral'); badge.style.display='inline-block'; }  // UX-2: rol=etiqueta neutral, no advertencia
     const card=$('usr_card'); if(card) card.style.display=IS_ADMIN?'':'none';
     if(IS_ADMIN) loadUsers();
   }catch(e){}
@@ -2420,7 +2425,7 @@ async function saveAutoList(){
   catch(e){ toast('Error al guardar',true); } }
 function renderCaptureState(on){
   if($('capture_enabled')) $('capture_enabled').checked = on;
-  const b=$('cap_badge'); if(b){ b.className='pill '+(on?'active':'failed'); b.textContent = on?'ACTIVA':'PAUSADA'; } }
+  const b=$('cap_badge'); if(b){ b.className='pill '+(on?'active':'paused'); b.textContent = on?'ACTIVA':'PAUSADA'; } }  // UX-2: pausa=ámbar (rojo solo fallos)
 async function setCapture(on){
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({capture_enabled:on})});
     renderCaptureState(on); toast(on?'✓ Recopilación ACTIVADA':'⏸ Recopilación PAUSADA — no se leerán listas nuevas', on?'info':'warn'); }
@@ -2454,7 +2459,7 @@ async function saveEmail(){ const b={ mail_from:($('mail_from').value||'').trim(
   catch(e){ $('mail_save_status').textContent=''; toast('Error al guardar',true); } }
 function renderSendingState(on){
   if($('sending_enabled')) $('sending_enabled').checked = on;
-  const badge=$('sys_badge'); if(badge){ badge.className='pill '+(on?'active':'failed'); badge.textContent = on?'ACTIVOS':'PAUSADOS'; }
+  const badge=$('sys_badge'); if(badge){ badge.className='pill '+(on?'active':'paused'); badge.textContent = on?'ACTIVOS':'PAUSADOS'; }  // UX-2: pausa=ámbar
   const hb=$('hdr_badge'); if(hb){
     if(on){ hb.style.display='none'; hb.onclick=null; }
     else { hb.style.display='inline-block'; hb.className='pill failed'; hb.style.cursor='pointer';
@@ -2485,8 +2490,11 @@ async function setSending(on){
     if(!c.auto_telegram_list) faltan.push('✈️ Telegram');
     if(c.whatsapp_enabled && !c.auto_whatsapp_list) faltan.push('🟢 WhatsApp');
     if(faltan.length){
-      await confirmModal('Antes de activar el ENVÍO automático, elige una LISTA para: '+faltan.join(' y ')+'.\n\nVe a Ajustes → «Lista del envío automático» y elige una lista por canal (así no se envía a TODOS por error).',{okText:'Entendido',noCancel:true});
-      renderSendingState(false); return;
+      // UX-2: el botón NAVEGA directo a elegir la lista (antes daba instrucciones de texto).
+      const ir=await confirmModal('Antes de activar el ENVÍO automático, elige una LISTA para: '+faltan.join(' y ')+'.\n\nAsí no se envía a TODOS los contactos por error.',{okText:'Elegir lista ahora →',cancelText:'Ahora no'});
+      renderSendingState(false);
+      if(ir) goStep('ajustes','envio');
+      return;
     }
     const ps=await pendingSummary();
     const {waOk}=await ensureContactsLoaded();
@@ -2709,7 +2717,7 @@ async function refreshConn(){
         else if(a.connected===false){ tg.className='pill failed'; tg.style.cursor='pointer'; tg.innerHTML=ICO_TG+' Telegram: renovar ✕';
           tg.title='La sesión de Telegram caducó o se revocó — clic para volver a conectar la cuenta (Ajustes → Cuenta de Telegram)';
           tg.onclick=irCuenta; }
-        else { tg.className='pill inactive'; tg.innerHTML=ICO_TG+' Telegram ?'; tg.title='No se pudo verificar la sesión de Telegram ahora mismo'; }
+        else { tg.className='pill neutral'; tg.innerHTML=ICO_TG+' Telegram ?'; tg.title='No se pudo verificar la sesión de Telegram ahora mismo'; }  // UX-2: desconocido=neutral (ámbar es advertencia real)
       } else {
         const me=a.me||{}; const uname=me.username?('@'+me.username):'bot'; const id=me.id?(' · '+me.id):'';
         if(a.connected){ tg.className='pill active'; tg.innerHTML=ICO_TG+' '+bcEsc(uname+id);
@@ -2723,8 +2731,12 @@ async function refreshConn(){
     WA_STALE = !ok;  // WhatsApp no conectado => sus contactos cacheados están viejos (no sincronizado)
     if(wa){ const num=(ok&&s.me&&s.me.id)?('+'+String(s.me.id).split('@')[0].split(':')[0]):'';
       wa.className='pill '+(ok?'active':'failed'); wa.innerHTML=ok?(ICO_WA+' '+bcEsc(num||'WhatsApp')):(ICO_WA+' WA ✕');
-      wa.title=ok?((num?('WhatsApp '+num):'WhatsApp conectado')+(s.contacts?(' · '+s.contacts+' contactos'):'')):('desconectado'+(s.lastCloseMsg?(' · '+s.lastCloseMsg):'')); } }
-  catch(e){ WA_STALE=true; if(wa){ wa.className='pill inactive'; wa.innerHTML=ICO_WA+' WA ?'; wa.title='servicio no configurado o inaccesible'; } }
+      // UX-2: la pill de WhatsApp caído NAVEGA a su vinculación (espejo del patrón de Telegram).
+      wa.onclick=ok?null:()=>{ showTab('ajustes'); try{ showSub('ajustes','whatsapp'); }catch(e){} };
+      wa.style.cursor=ok?'':'pointer';
+      wa.title=ok?((num?('WhatsApp '+num):'WhatsApp conectado')+(s.contacts?(' · '+s.contacts+' contactos'):'')):('desconectado — clic para vincular'+(s.lastCloseMsg?(' · '+s.lastCloseMsg):'')); } }
+  catch(e){ WA_STALE=true; if(wa){ wa.className='pill neutral'; wa.innerHTML=ICO_WA+' WA ?'; wa.title='servicio no configurado o inaccesible — clic para configurar';
+      wa.onclick=()=>{ showTab('ajustes'); try{ showSub('ajustes','whatsapp'); }catch(e){} }; wa.style.cursor='pointer'; } }
   syncReRender();  // refleja el estado de sincronización en las pantallas de contactos
 }
 let CONN_TIMER=null;
@@ -3054,7 +3066,7 @@ async function waBulkFiltered(accion){ const ids=waFiltered().map(c=>String(c.id
 function waPrev(){ WA_PAGE--; renderWa(); }
 function waNext(){ WA_PAGE++; renderWa(); }
 // Sub-navegación genérica (por pestaña): muestra solo las tarjetas con el data-sub elegido.
-const SUB_DEFAULT={fuentes:'tg', envios:'componer', ajustes:'telegram'};
+const SUB_DEFAULT={fuentes:'fuente', envios:'componer', ajustes:'telegram'};  // UX-2: cada pestaña abre en su PRIMER sub visible
 function showSub(tab,s){
   document.querySelectorAll('main>.card[data-tab="'+tab+'"][data-sub]').forEach(c=>c.classList.toggle('subhide', c.dataset.sub!==s));
   document.querySelectorAll('.subnav[data-subnav="'+tab+'"] button').forEach(b=>b.classList.toggle('on', b.dataset.sub===s));
