@@ -1102,18 +1102,35 @@ _PAGE = r"""<!doctype html><html lang="es" data-theme="dark"><head><meta charset
    usaba; la marca documental vive en docs/brand/integratech/tokens.css.) */
 
 :root{
-  /* M26: neutros SLATE fríos (antes cálidos marrón); el acento sigue siendo el naranja Replica.
-     Los grises de la UI derivan de estos tokens (literales sueltos mapeados a var(--bd)/--elev...). */
+  /* UX-1: paleta ÚNICA del panel (fusiona el :root de runtime y la capa de refinamiento).
+     Neutros slate fríos + naranja Replica. Reglas de uso: NARANJA = acción/selección/foco;
+     VERDE = estado confirmado (jamás botones); ÁMBAR = pausas/advertencias; ROJO = solo fallos;
+     CANAL es un eje aparte (--tg azul Telegram, --wa verde WhatsApp), independiente del estado. */
   --bg:#0F1217; --bg2:#0A0C10;
   --card:#161B22; --card2:#11151B; --elev:#1B212A;
-  --bd:#2A323D; --bd2:#3B4654;
-  --tx:#F3F6FA; --tx2:#CBD5E1; --mut:#93A1B2; --mut2:#647284;
+  /* Bordes en 3 niveles: separadores / contenedores·hover / CONTROLES interactivos (más claro,
+     ≈3:1 sobre --elev — el fix literal de "opciones muy embedidas": lo tocable se VE). */
+  --bd:#313B48; --bd2:#46536A; --bd-int:#5D6D82;
+  --tx:#E8EDF3; --tx2:#C6CFDA; --mut:#93A1B2; --mut2:#647284;
   --ac:#FD531E; --ac-h:#FF6A3C; --ac2:#FF9166; --ac-rgb:253,83,30;   /* B19: el naranja en UN solo lugar (rgba(var(--ac-rgb),X)) */
+  --ac-tint:#FFE0D3;   /* texto sobre fondos naranjas suaves; anillo de foco sobre rellenos naranja/danger */
+  --ac-ink:#201008;    /* texto de TODO botón primario (5.7:1 sobre --ac; el blanco daba 3.26:1 y fallaba AA) */
   --font-display:'Space Grotesk','Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;   /* B20: display de marca (fallback a Inter) */
-  --ok:#34d399; --warn:#fbbf24; --bad:#fb7185; --info:#60a5fa;
+  /* Identidad de CANAL (chips, dots y barras usan SIEMPRE su color; no cambian al completar). */
+  --tg:#2AABEE; --wa:#25D366;
+  /* Estados en tríos hue/tint/ink (toasts y callouts: fondo = -ink, texto = -tint). */
+  --ok:#34d399;  --ok-tint:#A9F0D4;  --ok-ink:#11331F;
+  --warn:#fbbf24; --warn-tint:#FCE7B0; --warn-ink:#33270A;
+  --bad:#fb7185;  --bad-tint:#FFC0C8; --bad-ink:#38120F;
+  --info:#60a5fa; --info-tint:#BCD6FF; --info-ink:#0F2440;
   --danger:#DC362E; --danger-h:#C02B24;   /* B18: rojo destructivo tokenizado en el runtime (mismos hex) */
-  --r:12px; --r-sm:8px;   /* B17: escala de radios consistente (lg 12 / md 8) */
+  --ac-soft:rgba(var(--ac-rgb),.14);
+  --ok-soft:rgba(52,211,153,.12);
+  --warn-soft:rgba(251,191,36,.12);
+  --bad-soft:rgba(251,113,133,.12);
+  --r:12px; --r-sm:8px; --r-lg:18px;   /* B17: escala de radios consistente */
   --sh:0 1px 0 rgba(255,255,255,.04) inset, 0 1px 2px rgba(0,0,0,.28), 0 24px 56px -28px rgba(0,0,0,.82);
+  --sh-sm:0 6px 18px -10px rgba(0,0,0,.6);
   --glow:0 6px 22px -8px rgba(var(--ac-rgb),.55);
   --ring:0 0 0 3px rgba(var(--ac-rgb),.28);
   --fs:13px;
@@ -1137,7 +1154,7 @@ body{
 ::-webkit-scrollbar-thumb:hover{background:var(--bd2);background-clip:padding-box}
 a{color:var(--ac2)}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
-  background:var(--elev);border:1px solid var(--bd);padding:1px 6px;border-radius:6px;color:#E7E7E5}
+  background:var(--elev);border:1px solid var(--bd);padding:1px 6px;border-radius:6px;color:var(--tx2)}
 
 /* ---------- marca ---------- */
 .brand{display:flex;align-items:center;gap:11px}
@@ -1168,7 +1185,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
 #app{display:none}
 header{
   display:flex;align-items:center;justify-content:space-between;
-  background:rgba(26,25,23,.74);backdrop-filter:blur(16px) saturate(150%);
+  background:rgba(15,18,23,.8);backdrop-filter:blur(16px) saturate(150%);
   padding:13px 22px;border-bottom:1px solid var(--bd);
   position:sticky;top:0;z-index:5;
 }
@@ -1179,7 +1196,7 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
 /* ---------- nav (pestañas horizontales) ---------- */
 .nav{
   position:sticky;top:50px;z-index:4;
-  background:rgba(26,25,23,.82);backdrop-filter:blur(16px) saturate(150%);
+  background:rgba(15,18,23,.8);backdrop-filter:blur(16px) saturate(150%);
   display:flex;gap:6px;justify-content:center;align-items:center;
   padding:11px 14px;border-bottom:1px solid var(--bd);flex-wrap:wrap;
 }
@@ -1190,7 +1207,7 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
 }
 .nav button:hover{color:var(--tx2);background:rgba(255,255,255,.05);filter:none;box-shadow:none}
 .nav button.on{
-  background:rgba(var(--ac-rgb),.14);color:#FFE0D3;border-color:rgba(var(--ac-rgb),.4);
+  background:rgba(var(--ac-rgb),.14);color:var(--ac-tint);border-color:rgba(var(--ac-rgb),.4);
 }
 
 /* ---------- barra global de estado de envíos (acción siempre visible) ---------- */
@@ -1214,7 +1231,7 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
   border:1px solid var(--bd);border-radius:var(--r);padding:22px;box-shadow:var(--sh);
 }
 h2{
-  margin:0 0 16px;font-size:12px;color:var(--ac2);
+  margin:0 0 16px;font-size:12px;color:var(--mut);
   letter-spacing:.9px;text-transform:uppercase;font-weight:700;
   display:flex;align-items:center;gap:8px;
 }
@@ -1222,16 +1239,17 @@ h2{
 /* ---------- form fields ---------- */
 label{display:block;margin:13px 0 6px;font-size:12px;color:var(--mut);font-weight:600;letter-spacing:.2px}
 input,textarea,select{
-  width:100%;background:var(--elev);border:1px solid var(--bd);color:var(--tx);
+  /* UX-1: borde INTERACTIVO (--bd-int, ≈3:1 sobre --elev): lo tocable se distingue del decorado. */
+  width:100%;background:var(--elev);border:1px solid var(--bd-int);color:var(--tx);
   border-radius:var(--r-sm);padding:11px 12px;font-size:14px;font-family:inherit;
   transition:border-color .15s,box-shadow .15s,background .15s;
 }
 input::placeholder,textarea::placeholder{color:var(--mut)}
-input:hover,textarea:hover,select:hover{border-color:var(--bd2)}
+input:hover,textarea:hover,select:hover{border-color:var(--mut)}
 input:focus,textarea:focus,select:focus{outline:0;border-color:var(--ac);box-shadow:var(--ring);background:var(--elev)}
 textarea{min-height:88px;resize:vertical;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:13px;line-height:1.55}
 select{appearance:none;-webkit-appearance:none;
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23A8A8A5' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>");
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2393A1B2' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>");
   background-repeat:no-repeat;background-position:right 12px center;padding-right:36px;cursor:pointer}
 input[type=file]{padding:9px 12px;color:var(--mut);cursor:pointer}
 input[type=file]::file-selector-button{
@@ -1249,13 +1267,16 @@ input[type=checkbox],input[type=radio]{
 
 /* ---------- buttons ---------- */
 button{
-  background:linear-gradient(180deg,var(--ac-h),var(--ac));color:#fff;border:1px solid rgba(255,255,255,.07);border-radius:var(--r-sm);
-  padding:10px 17px;font-size:13.5px;font-weight:600;font-family:inherit;cursor:pointer;
+  /* UX-1: texto oscuro sobre el naranja (5.7:1, AA) — el blanco daba 3.26:1 y fallaba. */
+  background:linear-gradient(180deg,var(--ac-h),var(--ac));color:var(--ac-ink);border:1px solid rgba(255,255,255,.07);border-radius:var(--r-sm);
+  padding:10px 17px;font-size:13.5px;font-weight:700;font-family:inherit;cursor:pointer;
   transition:background .15s,filter .15s,transform .05s,box-shadow .15s,border-color .15s,opacity .15s;
 }
 button:hover{filter:brightness(1.07);box-shadow:var(--glow)}
 button:active{transform:translateY(1px);filter:brightness(.97)}
-button:focus-visible{outline:0;box-shadow:0 0 0 3px rgba(var(--ac-rgb),.4)}
+/* UX-1: UN solo sistema de foco (outline naranja); sobre rellenos naranja/danger el anillo es claro. */
+button:focus-visible{outline:2px solid var(--ac-tint);outline-offset:2px;box-shadow:none}
+button.sec:focus-visible,button.ghost:focus-visible{outline-color:var(--ac)}
 button:disabled{opacity:.5;cursor:not-allowed;transform:none;filter:none;box-shadow:none}
 button.sec{background:var(--elev);color:var(--tx2);border-color:var(--bd2)}
 button.sec:hover{background:var(--bd2);filter:none;box-shadow:none}
@@ -1315,28 +1336,32 @@ td b{font-weight:600;color:var(--tx)}
 .pill.inactive{background:rgba(251,191,36,.12);color:var(--warn);border-color:rgba(251,191,36,.26)}
 /* estados de envíos (reutiliza .pill) */
 .pill.queued{background:rgba(96,165,250,.13);color:var(--info);border-color:rgba(96,165,250,.3)}
-.pill.sending{background:rgba(253,120,72,.12);color:var(--ac2);border-color:rgba(253,120,72,.28)}
+/* UX-1: "enviando" es actividad (azul info), no naranja — el naranja queda para lo accionable. */
+.pill.sending{background:rgba(96,165,250,.13);color:var(--info);border-color:rgba(96,165,250,.3)}
 .pill.done{background:rgba(52,211,153,.13);color:var(--ok);border-color:rgba(52,211,153,.28)}
 .pill.partial{background:rgba(251,191,36,.12);color:var(--warn);border-color:rgba(251,191,36,.26)}
 .pill.failed{background:rgba(251,113,133,.12);color:var(--bad);border-color:rgba(251,113,133,.3)}
+/* UX-1: PAUSADO es advertencia (ámbar), no fallo; NEUTRAL para roles/etiquetas sin semántica. */
+.pill.paused{background:var(--warn-ink);color:var(--warn-tint);border-color:rgba(251,191,36,.35)}
+.pill.neutral{background:var(--elev);color:var(--tx2);border-color:var(--bd2)}
 
 /* ---------- stats ---------- */
 .stats{display:flex;gap:14px;flex-wrap:wrap}
 .stat{flex:1;min-width:130px;background:var(--elev);border:1px solid var(--bd);border-radius:var(--r);padding:18px;text-align:center;position:relative;overflow:hidden}
 .stat::after{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,var(--ac),var(--ac2));opacity:.6}
-.stat b{display:block;font-size:30px;font-weight:700;color:var(--ac2);line-height:1.1}
+.stat b{display:block;font-size:30px;font-weight:700;color:var(--tx);line-height:1.1}
 .stat span{color:var(--mut);font-size:12px}
 
 /* ---------- toast ---------- */
 .toast{
   position:fixed;bottom:24px;right:24px;z-index:50;
-  background:#11331F;color:#9ff0d2;border:1px solid rgba(52,211,153,.35);
+  background:var(--ok-ink);color:var(--ok-tint);border:1px solid rgba(52,211,153,.35);
   padding:12px 18px;border-radius:var(--r-sm);font-weight:600;font-size:13px;
   box-shadow:0 18px 50px -16px rgba(0,0,0,.7);
   opacity:0;transform:translateY(12px);transition:opacity .25s,transform .25s;pointer-events:none;
 }
 .toast.show{opacity:1;transform:none}
-.toast.err{background:#38120F;color:#ffc0c8;border-color:rgba(251,113,133,.4)}
+.toast.err{background:var(--bad-ink);color:var(--bad-tint);border-color:rgba(251,113,133,.4)}
 
 /* ---------- tab visibility ---------- */
 main>.card{display:none;animation:fade .22s ease}
@@ -1351,7 +1376,7 @@ main>.card.show{display:block}
 
 /* selector de canales (chips toggle) */
 .chan-row{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 4px}
-.pickbox{max-height:152px;overflow:auto;border:1px solid var(--bd);border-radius:var(--r-sm);background:var(--elev);margin-top:6px;padding:4px}
+.pickbox{max-height:152px;overflow:auto;border:1px solid var(--bd-int);border-radius:var(--r-sm);background:var(--elev);margin-top:6px;padding:4px}
 .pickitem{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--tx2)}
 .pickitem:hover{background:rgba(255,255,255,.04)}
 .pickitem input{width:auto;margin:0}
@@ -1364,11 +1389,12 @@ main>.card.show{display:block}
 }
 .chan:hover{border-color:var(--bd2)}
 .chan input{margin:0}
-.chan.tg.on{border-color:rgba(var(--ac-rgb),.55);background:rgba(var(--ac-rgb),.1);color:#FFE0D3}
-.chan.wa.on{border-color:rgba(52,211,153,.5);background:rgba(52,211,153,.1);color:#a9f0d4}
+/* UX-1: identidad de CANAL (eje aparte del estado): Telegram azul, WhatsApp verde. */
+.chan.tg.on{border-color:rgba(42,171,238,.55);background:rgba(42,171,238,.12);color:var(--info-tint)}
+.chan.wa.on{border-color:rgba(37,211,102,.5);background:rgba(37,211,102,.1);color:var(--ok-tint)}
 .chan .dot{width:8px;height:8px;border-radius:50%;background:var(--mut)}
-.chan.tg.on .dot{background:var(--ac)}
-.chan.wa.on .dot{background:var(--ok)}
+.chan.tg.on .dot{background:var(--tg)}
+.chan.wa.on .dot{background:var(--wa)}
 
 /* dropzone / preview del compositor */
 .img-slot{display:flex;align-items:flex-start;gap:14px;margin-top:6px}
@@ -1391,15 +1417,16 @@ main>.card.show{display:block}
 .chprog{display:flex;flex-direction:column;gap:7px;min-width:150px}
 .chprog .ch{display:flex;align-items:center;gap:8px;font-size:12px}
 .chprog .ch .ic{width:7px;height:7px;border-radius:50%;flex:none}
-.chprog .ch.tg .ic{background:var(--ac)}
-.chprog .ch.wa .ic{background:var(--ok)}
+.chprog .ch.tg .ic{background:var(--tg)}
+.chprog .ch.wa .ic{background:var(--wa)}
 .chprog .ch .num{color:var(--tx2);font-variant-numeric:tabular-nums;white-space:nowrap}
 .chprog .ch .num .fail{color:var(--bad)}
 .chprog .ch .muted{color:var(--mut)}
 .bar{flex:1;height:5px;background:var(--elev);border:1px solid var(--bd);border-radius:999px;overflow:hidden;min-width:48px}
-.bar>i{display:block;height:100%;width:0;border-radius:999px;transition:width .5s ease;background:linear-gradient(90deg,var(--ac),#FD9E76)}
-.bar.wa>i{background:linear-gradient(90deg,var(--ok),#5eead4)}
-.bar.full>i{background:var(--ok)}
+/* UX-1: la barra usa SIEMPRE el color de su canal; el "completado" lo dice la pill .done, no un
+   cambio de color (antes .bar.full se volvía verde y confundía canal con estado). */
+.bar>i{display:block;height:100%;width:0;border-radius:999px;transition:width .5s ease;background:var(--tg)}
+.bar.wa>i{background:var(--wa)}
 .bar.err>i{background:var(--bad)}
 
 /* indicador de "vivo" (polling) */
@@ -1439,16 +1466,8 @@ main>.card.show{display:block}
    --info --r --r-sm --ring.
    ============================================================ */
 
-:root{
-  --ac-soft:rgba(var(--ac-rgb),.14);
-  --ac2-soft:rgba(253,120,72,.12);
-  --ok-soft:rgba(52,211,153,.12);
-  --warn-soft:rgba(251,191,36,.12);
-  --bad-soft:rgba(251,113,133,.12);
-  --r-lg:18px;
-  --tx3:#A8A8A5;            /* secundario un punto mas contrastado que --mut */
-  --sh-sm:0 6px 18px -10px rgba(0,0,0,.6);
-}
+/* (UX-1: tokens fusionados en el :root principal; --ac2-soft y --tx3 eliminados —
+   sus usos pasaron a --ac-soft y var(--mut) respectivamente.) */
 
 /* ------------------------------------------------------------
    1) FIX: filas de listas con separador #3A3A39 (roto en oscuro)
@@ -1469,7 +1488,7 @@ main>.card.show{display:block}
 #tg_lists>div .hint, #wa_lists>div .hint{
   background:var(--elev);border:1px solid var(--bd);
   padding:2px 9px;border-radius:999px;margin-top:0;font-weight:600;
-  color:var(--tx3);
+  color:var(--mut);
 }
 /* botones de fila mas compactos para que respiren */
 #tg_lists>div button, #wa_lists>div button{ padding:7px 12px;font-size:12.5px; }
@@ -1488,19 +1507,19 @@ main>.card.show{display:block}
 }
 .callout::before{content:"i";flex:none;width:18px;height:18px;border-radius:50%;
   display:grid;place-items:center;font-weight:800;font-size:11px;
-  background:var(--info);color:#0F2440;margin-top:1px}
+  background:var(--info);color:var(--info-ink);margin-top:1px}
 .callout.warn{border-left-color:var(--warn);background:var(--warn-soft)}
-.callout.warn::before{content:"!";background:var(--warn);color:#33270A}
+.callout.warn::before{content:"!";background:var(--warn);color:var(--warn-ink)}
 .callout.danger{border-left-color:var(--bad);background:var(--bad-soft)}
-.callout.danger::before{content:"!";background:var(--bad);color:#38120F}
+.callout.danger::before{content:"!";background:var(--bad);color:var(--bad-ink)}
 .callout.ok{border-left-color:var(--ok);background:var(--ok-soft)}
-.callout.ok::before{content:"\2713";background:var(--ok);color:#11331F}
+.callout.ok::before{content:"\2713";background:var(--ok);color:var(--ok-ink)}
 .callout b{color:var(--tx)}
 /* fallback: ultimo .hint de la tarjeta de WhatsApp (aviso de baneo) resaltado */
 .card[data-tab="whatsapp"] > .hint:last-of-type{
   border:1px solid rgba(251,191,36,.3);border-left:3px solid var(--warn);
   background:var(--warn-soft);border-radius:var(--r-sm);
-  padding:11px 13px;color:#f3dca0;
+  padding:11px 13px;color:var(--warn-tint);
 }
 
 /* ------------------------------------------------------------
@@ -1514,7 +1533,7 @@ main>.card.show{display:block}
 .empty-state .ico{
   width:56px;height:56px;border-radius:16px;display:grid;place-items:center;
   font-size:26px;background:var(--ac-soft);border:1px solid rgba(var(--ac-rgb),.28);
-  color:#FFE0D3;margin-bottom:4px;
+  color:var(--ac-tint);margin-bottom:4px;
 }
 .empty-state h3{margin:0;font-size:15px;color:var(--tx)}
 .empty-state p{margin:0;max-width:340px;font-size:12.5px;line-height:1.6}
@@ -1542,16 +1561,16 @@ main>.card.show{display:block}
   animation:spin .6s linear infinite;
 }
 @keyframes spin{to{transform:rotate(360deg)}}
-button.ok{background:var(--ok);border-color:transparent;color:#11331F}
+button.ok{background:var(--ok);border-color:transparent;color:var(--ok-ink)}
 button.ok:hover{background:#46e0a9}
 .err:empty{margin-top:0;min-height:0}
 /* toasts: icono, variantes y barra de auto-cierre */
 .toast{display:flex;align-items:center;gap:9px;padding-right:16px;overflow:hidden}
 .toast::before{content:"\2713";font-weight:800}
 .toast.err::before{content:"!"}
-.toast.info{background:#0F2440;color:#bcd6ff;border-color:rgba(96,165,250,.35)}
+.toast.info{background:var(--info-ink);color:var(--info-tint);border-color:rgba(96,165,250,.35)}
 .toast.info::before{content:"i"}
-.toast.warn{background:#33270A;color:#f3dca0;border-color:rgba(251,191,36,.4)}
+.toast.warn{background:var(--warn-ink);color:var(--warn-tint);border-color:rgba(251,191,36,.4)}
 .toast.warn::before{content:"!"}
 .toast.show::after{
   content:"";position:absolute;left:0;bottom:0;height:2px;width:100%;
@@ -1575,7 +1594,7 @@ button.ok:hover{background:#46e0a9}
 /* etiqueta de seccion para encabezar grupos de tarjetas */
 .section-label{
   grid-column:1/-1;display:flex;align-items:center;gap:10px;
-  margin:6px 2px -4px;color:var(--tx3);font-size:11px;font-weight:700;
+  margin:6px 2px -4px;color:var(--mut);font-size:11px;font-weight:700;
   letter-spacing:.8px;text-transform:uppercase;
 }
 .section-label::after{content:"";flex:1;height:1px;background:var(--bd)}
@@ -1584,17 +1603,16 @@ button.ok:hover{background:#46e0a9}
 .card.accent::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;
   background:linear-gradient(90deg,var(--ac),var(--ac2));opacity:.7}
 h2{align-items:center}
-h2::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;
-  background:var(--ac2);box-shadow:0 0 0 3px var(--ac2-soft);margin-right:8px;flex:none}
+/* (UX-1: se quitó el punto naranja decorativo de h2 — el naranja queda reservado a lo accionable.) */
 /* ACCESIBILIDAD: foco visible y areas de toque */
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+/* UX-1: foco unificado — outline naranja 2px con offset (sin cajas de sombra duplicadas). */
 .nav button:focus-visible,
 .chan:focus-within,
 input[type=checkbox]:focus-visible,
 input[type=radio]:focus-visible,
-select:focus-visible,
 [onclick]:focus-visible{
-  outline:0;box-shadow:var(--ring);border-radius:var(--r-sm);
+  outline:2px solid var(--ac);outline-offset:2px;box-shadow:none;
 }
 .chan:focus-within{border-color:var(--ac)}
 input[type=checkbox],input[type=radio]{min-width:17px;min-height:17px}
@@ -1614,12 +1632,12 @@ th input[type=checkbox],td input[type=checkbox]{transform:scale(1.05)}
 }
 tbody tr:hover td{background:rgba(255,255,255,.07)}
 /* badge de origen del envio mas legible */
-.bc-src{background:var(--ac-soft);border-color:rgba(var(--ac-rgb),.28);color:#E7E7E5}
+.bc-src{background:var(--ac-soft);border-color:rgba(var(--ac-rgb),.28);color:var(--tx2)}
 /* pildora "sending" pulsa para indicar actividad */
 .pill.sending{position:relative}
 .pill.sending::after{
   content:"";display:inline-block;width:6px;height:6px;margin-left:6px;border-radius:50%;
-  background:var(--ac2);vertical-align:middle;animation:pulseDot 1.2s ease-in-out infinite;
+  background:var(--info);vertical-align:middle;animation:pulseDot 1.2s ease-in-out infinite;
 }
 @keyframes pulseDot{0%,100%{opacity:.35}50%{opacity:1}}
 /* sombra suave al hover en tarjetas para dar profundidad */
@@ -1642,7 +1660,7 @@ img.preview{box-shadow:var(--sh-sm)}
 .subnav{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .subnav button{background:transparent;border:1px solid var(--bd2);color:var(--mut);padding:8px 16px;border-radius:999px;font-weight:600;font-size:13px;cursor:pointer;transition:color .15s,background .15s,border-color .15s}
 .subnav button:hover{color:var(--tx2);filter:none;box-shadow:none}
-.subnav button.on{background:rgba(var(--ac-rgb),.14);color:#FFE0D3;border-color:rgba(var(--ac-rgb),.4)}
+.subnav button.on{background:rgba(var(--ac-rgb),.14);color:var(--ac-tint);border-color:rgba(var(--ac-rgb),.4)}
 .card.subhide{display:none !important}
 /* contenedor scrolleable para listas largas (muchos contactos) — la página no crece */
 .tbl-scroll{max-height:340px;overflow:auto;margin-top:8px;border:1px solid var(--bd);border-radius:10px}
@@ -1662,7 +1680,7 @@ tbody tr.sel-row td{background:rgba(var(--ac-rgb),.12)}
 .segf button{background:transparent;border:none;border-radius:0;color:var(--mut);padding:7px 15px;font-weight:600;font-size:12.5px;cursor:pointer;transition:color .15s,background .15s}
 .segf button+button{border-left:1px solid var(--bd2)}
 .segf button:hover{color:var(--tx2);background:rgba(255,255,255,.05);filter:none;box-shadow:none}
-.segf button.on{background:rgba(var(--ac-rgb),.16);color:#FFE0D3}
+.segf button.on{background:rgba(var(--ac-rgb),.16);color:var(--ac-tint)}
 .segf button.on.exc{background:rgba(251,191,36,.16);color:#FCE7B0}
 .excl-pat{margin:12px 0;padding:12px 14px;background:var(--bg);border:1px solid var(--bd);border-radius:10px}
 .pill.pat{background:rgba(251,146,60,.14);color:#FFC79A;border-color:rgba(251,146,60,.32)}
