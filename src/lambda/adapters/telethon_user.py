@@ -13,8 +13,8 @@ import os
 import time
 from typing import Callable
 
-from application.ports import MessageSender
-from domain.models import SendResult
+from application.ports import ChannelReader, MessageSender
+from domain.models import Post, SendResult
 
 logger = logging.getLogger(__name__)
 _MAX_FLOOD_WAIT = 60.0  # si Telegram pide esperar más que esto, fallamos el envío
@@ -50,6 +50,39 @@ class _TelethonBase:
             except Exception:
                 pass
             self._client = None
+
+
+class TelethonChannelReader(_TelethonBase, ChannelReader):
+    """Lee las últimas publicaciones del canal con el USERBOT (respaldo del preview t.me).
+
+    El preview público t.me/s/<canal> puede dejar de servir el feed sin aviso (el 6 jul 2026
+    empezó a REDIRIGIR a la tarjeta del canal y la ingesta quedó muerta). El userbot lee el canal
+    directamente (get_messages): trae los mismos message_id (el HWM sigue siendo válido), incluye
+    los captions de fotos/álbumes y detecta si el post trae imagen (has_photo). Semántica M14:
+    nunca lanza — ante cualquier fallo devuelve [] y se reintenta el próximo tick."""
+
+    def __init__(self, api_id=None, api_hash=None, session=None, limit: int = 20):
+        super().__init__(api_id, api_hash, session)
+        self._limit = limit
+
+    def leer_publicaciones(self, channel: str) -> list[Post]:
+        try:
+            ch = str(channel or "").strip()
+            entidad: object = int(ch) if ch.lstrip("-").isdigit() else ch.lstrip("@")
+            posts: list[Post] = []
+            for m in self._c().get_messages(entidad, limit=self._limit) or []:
+                texto = (getattr(m, "message", None) or "").strip()
+                if not texto:
+                    continue  # A7 (diferido): los posts SOLO-imagen se saltan, igual que con el preview
+                posts.append(Post(message_id=int(m.id), text=texto, has_photo=bool(getattr(m, "photo", None))))
+            return posts
+        except Exception:
+            logger.exception("Userbot no pudo leer el canal %s; sin publicaciones este ciclo", channel)
+            return []
+        finally:
+            # M17: no dejar la conexión abierta (el poller usa OTRO cliente Telethon para el preview
+            # a Mensajes Guardados y el refresh de contactos; nunca dos a la vez con la misma sesión).
+            self.desconectar()
 
 
 class TelethonUserSender(_TelethonBase, MessageSender):

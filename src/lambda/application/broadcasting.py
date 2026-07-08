@@ -284,7 +284,7 @@ class BroadcastList:
 
     # --- difusión desde el canal (con markup/footer) ---------------------------
 
-    def __call__(self, text: str, dedup_key: str | None = None) -> dict[str, int]:
+    def __call__(self, text: str, dedup_key: str | None = None, tiene_imagen: bool = False) -> dict[str, int]:
         cfg = self._config.get()
         mensaje = componer_mensaje(
             text,
@@ -298,14 +298,20 @@ class BroadcastList:
         if not mensaje.strip():
             logger.info("Post del canal sin contenido tras la limpieza; no se captura ni difunde")
             return {"skipped": "vacio"}
+        # Post con IMAGEN y texto mínimo (el contenido real está en la foto): la CAPTURA lo anota
+        # para que en el panel no parezca una captura vacía/corrupta ("📌" a secas). La nota es solo
+        # para las ramas de captura — el envío a contactos usa `mensaje` sin la nota.
+        mensaje_cap = mensaje + (
+            "\n\n📷 La publicación original incluye una imagen (este texto es su caption)." if tiene_imagen else ""
+        )
         # RECOPILACIÓN ≠ ENVÍO. Si el ENVÍO automático está apagado (sending_enabled=False) solo se
         # RECOPILA: se registra la lista (visible en el panel como "capturado") y se previsualiza en
         # tus Mensajes Guardados. NO se difunde, NO se crea plan, NO se reenvía a WhatsApp. Activar el
         # envío NO vacía ninguna cola: las listas capturadas no se reenvían retroactivamente.
         if not bool(cfg.get("sending_enabled", True)):
             bid = self._nuevo_id()
-            self._registrar(bid, mensaje, "capture", [], 0)
-            enviado = self._preview_capture(bid, mensaje)
+            self._registrar(bid, mensaje_cap, "capture", [], 0)
+            enviado = self._preview_capture(bid, mensaje_cap)
             logger.info(
                 "Lista capturada %s (envío apagado): registrada%s, NO difundida",
                 bid, " + preview a Mensajes Guardados OK" if enviado else " (preview NO enviado)",
@@ -324,8 +330,8 @@ class BroadcastList:
         # preview, NO difunde), en vez de inundar la agenda. Defensa de fondo a la guardia del panel.
         if not tg_on and not wa_on:
             bid = self._nuevo_id()
-            self._registrar(bid, mensaje, "capture", [], 0)
-            enviado = self._preview_capture(bid, mensaje)
+            self._registrar(bid, mensaje_cap, "capture", [], 0)
+            enviado = self._preview_capture(bid, mensaje_cap)
             logger.warning(
                 "Envío automático ACTIVO pero sin lista elegida para ningún canal; lista %s "
                 "capturada (NO difundida)%s", bid, " + preview OK" if enviado else "",

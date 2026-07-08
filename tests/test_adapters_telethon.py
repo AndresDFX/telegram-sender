@@ -77,6 +77,49 @@ class TelethonContactsTests(unittest.TestCase):
         rec.marcar_inactivo("123")  # no-op, no debe fallar
 
 
+@unittest.skipUnless(HAS_TELETHON, "requiere telethon")
+class TelethonChannelReaderTests(unittest.TestCase):
+    def _reader(self):
+        from adapters.telethon_user import TelethonChannelReader
+
+        r = TelethonChannelReader(api_id=1, api_hash="h", session="s")
+        r._client = MagicMock()  # evita conectar
+        return r, r._client
+
+    @staticmethod
+    def _msg(mid, texto, foto=None):
+        m = MagicMock()
+        m.id = mid
+        m.message = texto
+        m.photo = foto
+        return m
+
+    def test_mapea_posts_con_flag_de_foto(self):
+        r, client = self._reader()
+        client.get_messages.return_value = [
+            self._msg(1002, "(OJO) 📌", foto=object()),   # caption mínimo + imagen (el caso real)
+            self._msg(1001, "A06 $325.000"),
+        ]
+        posts = r.leer_publicaciones("iproparts")
+        self.assertEqual([(p.message_id, p.text, p.has_photo) for p in posts],
+                         [(1002, "(OJO) 📌", True), (1001, "A06 $325.000", False)])
+        client.get_messages.assert_called_once_with("iproparts", limit=20)
+
+    def test_solo_imagen_se_salta_y_canal_numerico(self):
+        r, client = self._reader()
+        client.get_messages.return_value = [self._msg(7, "", foto=object()), self._msg(6, "hola")]
+        posts = r.leer_publicaciones("-1001234")  # id numérico → entidad int
+        self.assertEqual([p.message_id for p in posts], [6])  # el solo-imagen NO entra (A7 diferido)
+        client.get_messages.assert_called_once_with(-1001234, limit=20)
+
+    def test_error_devuelve_vacio_y_desconecta(self):
+        r, client = self._reader()
+        client.get_messages.side_effect = RuntimeError("FloodWait")
+        self.assertEqual(r.leer_publicaciones("iproparts"), [])  # M14: nunca lanza
+        self.assertIsNone(r._client)  # desconectó (M17) incluso ante error
+        client.disconnect.assert_called_once()
+
+
 class CachedContactsTests(unittest.TestCase):
     def test_listar_todos_propaga_telefono(self):
         from adapters.telethon_user import CachedContacts

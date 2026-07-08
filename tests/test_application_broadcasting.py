@@ -180,6 +180,24 @@ class BroadcastListTests(unittest.TestCase):
         self.assertEqual(prev.sent[0][0], "me")
         self.assertIn("$115.000", prev.sent[0][1])  # markup aplicado en la preview
 
+    def test_captura_con_imagen_anota_la_foto(self):
+        # Post con imagen y caption mínimo ("📌"): la CAPTURA anota que hay imagen para que en el
+        # panel no parezca una captura vacía/corrupta. El envío a contactos NO lleva la nota.
+        class FakeBroadcasts:
+            def __init__(self): self.textos = []
+            def crear(self, broadcast_id, text, source, channels, tg_total=0): self.textos.append(text)
+            def registrar_error(self, bid, msg): pass
+        store = FakeBroadcasts()
+        bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), FakeConfig(sending_enabled=False), broadcasts=store)
+        res = bl("(OJO) 📌 $100.000", tiene_imagen=True)
+        self.assertTrue(res.get("captured"))
+        self.assertIn("incluye una imagen", store.textos[0])   # la nota queda en el job
+        # Envío automático activo: el texto difundido NO lleva la nota interna.
+        queue = FakeQueue()
+        bl2 = BroadcastList(FakeSubs(["1"]), queue, _auto(["1"]), broadcasts=FakeBroadcasts())
+        bl2("A $100.000", tiene_imagen=True)
+        self.assertNotIn("incluye una imagen", queue.calls[0][0])
+
     def test_b16_preview_fallido_se_registra_en_el_job(self):
         # B16: si el preview de una captura NO se entrega (FloodWait/sesión), se deja constancia en el
         # job (registrar_error) para que el panel lo muestre (antes solo quedaba en logs).

@@ -14,6 +14,10 @@ class Post:
 
     message_id: int
     text: str
+    # La publicación trae imagen (el texto puede ser solo su caption). El preview t.me no expone
+    # las fotos; el lector userbot sí lo detecta, y la captura lo anota para que un caption mínimo
+    # ("📌") no parezca una captura vacía/corrupta.
+    has_photo: bool = False
 
 
 @dataclass(frozen=True)

@@ -39,8 +39,9 @@ class FakeBroadcast:
         self._diferir_cierre_preview = False
         self.diferido_durante_envio = []
 
-    def __call__(self, text):
+    def __call__(self, text, tiene_imagen=False):
         self.textos.append(text)
+        self.imagenes = getattr(self, "imagenes", []) + [tiene_imagen]
         # B15: durante el bucle del poller debe estar activo el modo diferido (reutilizar conexión).
         self.diferido_durante_envio.append(self._diferir_cierre_preview)
         return {"batches": 1, "subscribers": 1}

@@ -49,7 +49,9 @@ class PollChannel:
         self._broadcast._diferir_cierre_preview = True
         try:
             for post in nuevos:
-                self._broadcast(post.text)
+                # tiene_imagen: la captura anota los posts cuyo contenido real está en la foto
+                # (caption mínimo tipo "📌"), para que no parezcan capturas vacías en el panel.
+                self._broadcast(post.text, tiene_imagen=bool(getattr(post, "has_photo", False)))
                 self._hwm.guardar(channel, post.message_id)
         finally:
             self._broadcast._diferir_cierre_preview = False

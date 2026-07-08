@@ -21,8 +21,15 @@ from adapters.dynamodb import (
 from adapters.s3 import S3ImageStore
 from adapters.sqs import InlineBroadcastQueue, SqsBroadcastQueue, SqsQueueStats
 from adapters.telegram import TelegramSender
-from adapters.telethon_user import CachedContacts, ContactRecipients, TelethonAccount, TelethonContacts, TelethonUserSender
-from adapters.tme import TmePreviewChannelReader
+from adapters.telethon_user import (
+    CachedContacts,
+    ContactRecipients,
+    TelethonAccount,
+    TelethonChannelReader,
+    TelethonContacts,
+    TelethonUserSender,
+)
+from adapters.tme import FallbackChannelReader, TmePreviewChannelReader
 from adapters.whatsapp import HttpWhatsAppForwarder
 from application.broadcasting import BroadcastList
 from application.deliver_batch import DeliverBatch
@@ -197,9 +204,22 @@ def build_dispatch_campaigns() -> DispatchCampaigns:
 
 
 def build_poll_channel() -> PollChannel:
-    return PollChannel(
+    store = build_config_store()
+    cfg = store.get()
+    # Lector con RESPALDO: el preview t.me primero (barato); si viene vacío (t.me dejó de servir el
+    # feed del canal — pasó el 6 jul 2026), se lee con el USERBOT. Si la sesión Telethon no está
+    # configurada, el respaldo devuelve [] sin romper nada (M14), así que encadenarlo es inocuo.
+    lector = FallbackChannelReader(
         TmePreviewChannelReader(),
+        TelethonChannelReader(
+            api_id=cfg.get("telethon_api_id") or None,
+            api_hash=cfg.get("telethon_api_hash") or None,
+            session=cfg.get("telethon_session") or None,
+        ),
+    )
+    return PollChannel(
+        lector,
         DynamoDbHighWaterMarkStore(),
         _broadcast_list(),
-        build_config_store(),
+        store,
     )

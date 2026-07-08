@@ -293,6 +293,12 @@ El plan operativo (suite automatizada, smoke post-deploy, E2E manual por flujo y
 - Los fakes WhatsApp en tests necesitan `exclude_patterns=None`/`**kwargs` en `forward`/`contar`.
 - CI estaba en rojo: el job `test` no instalaba deps → `adapters/telegram.py` importa `requests` al cargarse → ModuleNotFoundError. Fix: `pip install -r src/lambda/requirements.txt`.
 
+### Ingesta del canal: el preview t.me puede morir (6 jul 2026)
+
+- **Síntoma:** capturas con solo "📌"/"(OJO) 📌" y luego CERO capturas; el poller loguea "Preview de <canal> sin publicaciones con texto" en cada tick. **Causa:** Telegram dejó de servir `t.me/s/<canal>` (redirige a la tarjeta del canal, sin mensajes) — no es un bug del pipeline; el preview simplemente desapareció. Las capturas "📌" fueron posts cuyo contenido real estaba EN LA IMAGEN (el preview solo exponía el caption).
+- **Fix:** `FallbackChannelReader` — el poller intenta el preview (barato) y, si viene vacío, lee el canal con el **userbot** (`TelethonChannelReader`, `get_messages`): mismos `message_id` (el HWM sigue válido), captions incluidos, detecta `has_photo` y desconecta al terminar (M17). Si la sesión Telethon no está configurada, el respaldo devuelve `[]` sin romper (M14).
+- **Posts con imagen:** la CAPTURA anota "📷 La publicación original incluye una imagen (este texto es su caption)" para que un caption mínimo no parezca captura vacía. El envío a contactos NO lleva la nota. Los posts SOLO-imagen (sin caption) siguen saltándose (A7, decisión de producto diferida).
+
 ### Falsa alarma "se borraron los patrones"
 
 - NO fue bug ni deploy (la config persiste en DynamoDB; los deploys no tocan la tabla). Fue un paso de "restaurar config" en pruebas en vivo que hacía `*_exclude_patterns:[]`. Llevó a mover los 6 campos de destinatarios a **POR USUARIO** (registro `__users__[user]`), fuera de `/api/config`.

@@ -58,3 +58,24 @@ class TmePreviewChannelReader(ChannelReader):
         except Exception:
             logger.exception("No se pudo leer el preview de %s; sin publicaciones este ciclo", channel)
             return []
+
+
+class FallbackChannelReader(ChannelReader):
+    """Encadena lectores del canal: devuelve lo del PRIMERO que traiga publicaciones.
+
+    El preview t.me es barato (un GET) pero Telegram puede dejar de servirlo sin aviso (el
+    6 jul 2026 empezó a redirigir /s/<canal> a la tarjeta del canal → 0 posts → ingesta muerta).
+    Con este fallback, si el preview viene vacío se intenta el siguiente lector (userbot). Un
+    lector que falle o no esté configurado devuelve [] (semántica M14), así que probarlo es inocuo."""
+
+    def __init__(self, *readers: ChannelReader | None):
+        self._readers = [r for r in readers if r is not None]
+
+    def leer_publicaciones(self, channel: str) -> list[Post]:
+        for i, reader in enumerate(self._readers):
+            posts = reader.leer_publicaciones(channel)
+            if posts:
+                if i > 0:
+                    logger.info("Canal %s leído con el lector de RESPALDO #%d (el preview no trajo nada)", channel, i)
+                return posts
+        return []
