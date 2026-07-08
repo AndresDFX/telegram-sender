@@ -1772,28 +1772,57 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
  <nav class="nav">
    <button data-tab="inicio" onclick="showTab('inicio')">🏠 Inicio</button>
-   <button data-tab="fuentes" onclick="showTab('fuentes')">📋 Fuentes y listas</button>
-   <button data-tab="envios" onclick="showTab('envios')">📨 Envíos</button>
-   <button data-tab="ajustes" onclick="showTab('ajustes')">⚙️ Ajustes y estado</button>
+   <button data-tab="enviar" onclick="showTab('enviar')">✍️ Enviar</button>
+   <button data-tab="envios" onclick="showTab('envios')">📡 Actividad</button>
+   <button data-tab="fuentes" onclick="showTab('fuentes')">👥 Contactos</button>
+   <button data-tab="ajustes" onclick="showTab('ajustes')">⚙️ Ajustes</button>
  </nav>
  <main>
   <div id="send_banner" hidden></div>
   <div class="card accent" data-tab="inicio"><h2>Resumen</h2>
-   <div class="hint" style="margin:-4px 0 12px">Replica captura la lista de un canal fuente (con markup) <b>y</b> envía tus propios mensajes a listas de contactos por Telegram y WhatsApp — al instante o programados. Gestiona fuentes y listas en <b>📋 Fuentes y listas</b> y los envíos en <b>📨 Envíos</b>.</div>
+   <div class="hint" style="margin:-4px 0 12px">Replica captura la lista de un canal fuente (con markup) <b>y</b> envía tus propios mensajes a listas de contactos por Telegram y WhatsApp — al instante o programados. Tus contactos y listas viven en <b>👥 Contactos</b>; escribe y difunde desde <b>✍️ Enviar</b>.</div>
    <div id="dash_estado" class="callout">cargando…</div>
    <div class="stats" style="margin-top:14px">
      <div class="stat"><b id="k_sent">–</b><span>enviados (30 días)</span></div>
      <div class="stat"><b id="k_rate">–</b><span>tasa de éxito <span class="help" tabindex="0" data-tip="Histórica de los últimos 30 días, sobre los envíos contabilizados. No es el estado actual.">ⓘ</span></span></div>
      <div class="stat" role="button" tabindex="0" style="cursor:pointer" title="Ver los envíos en curso" onclick="showTab('envios');showSub('envios','historial')"><b id="k_pend">–</b><span>lotes pendientes</span></div>
-     <div class="stat" role="button" tabindex="0" style="cursor:pointer" title="Ver la cola y la DLQ" onclick="showTab('ajustes');showSub('ajustes','sistema')"><b id="k_dlq">–</b><span>en DLQ <span class="help" tabindex="0" data-tip="Lotes atascados ahora mismo (cola de fallidos SQS). Es un conteo APROXIMADO: puede tardar unos segundos en actualizarse tras reintentar/descartar, y convivir con una tasa de éxito alta (la tasa es histórica).">ⓘ</span></span></div>
+     <div class="stat" role="button" tabindex="0" style="cursor:pointer" title="Ver la cola y la DLQ" onclick="showTab('envios');showSub('envios','problemas')"><b id="k_dlq">–</b><span>en DLQ <span class="help" tabindex="0" data-tip="Lotes atascados ahora mismo (cola de fallidos SQS). Es un conteo APROXIMADO: puede tardar unos segundos en actualizarse tras reintentar/descartar, y convivir con una tasa de éxito alta (la tasa es histórica).">ⓘ</span></span></div>
    </div>
    <div id="dash_serie" style="margin-top:16px"></div>
    <div id="dash_last" class="hint" style="margin-top:14px"></div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
-     <button onclick="showTab('envios')">📨 Componer y enviar</button>
-     <button class="sec" onclick="showTab('ajustes')">⚙️ Ajustes y estado</button>
+     <button onclick="showTab('enviar')">✍️ Componer y enviar</button>
+     <button class="sec" onclick="showTab('ajustes')">⚙️ Ajustes</button>
      <button class="sec" onclick="loadDashboard()">Refrescar</button>
    </div>
+  </div>
+  <!-- UX-5: SALA DE CONTROL: los interruptores del negocio (capturar / enviar automático /
+       lista destino) viven en Inicio, no enterrados en Ajustes. -->
+  <div class="card accent" data-tab="inicio"><h2>Recopilación automática<span class="help" tabindex="0" data-tip="Lee el canal fuente y guarda cada lista nueva (con markup y footer) para que la VEAS, sin enviarla a nadie. Es independiente del ENVÍO: puedes recopilar con el envío apagado.">ⓘ</span></h2>
+   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+     <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="capture_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleCapture()"> <b>Recopilar listas del canal</b></label>
+     <span id="cap_badge" class="pill">—</span>
+   </div>
+   <div class="hint" style="margin-top:10px">Lee el <b>canal fuente configurado</b> y registra cada lista nueva para que la <b>veas</b>, <b>sin enviarla a nadie</b>. Mientras el <b>envío automático</b> esté apagado, cada lista capturada aparece en <b>📡 Actividad</b> como <b>📥 Capturada</b> y se te manda a tus <b>Mensajes Guardados</b> de Telegram. Es independiente del envío.</div>
+  </div>
+  <div class="card accent" data-tab="inicio"><h2>Envío automático<span class="help" tabindex="0" data-tip="Pausa o activa el ENVÍO automático de las listas capturadas. El envío MANUAL (Componer → Enviar) SIEMPRE sale, aun en pausa. La RECOPILACIÓN es aparte (arriba).">ⓘ</span></h2>
+   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+     <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos automáticos activos</b></label>
+     <span id="sys_badge" class="pill">—</span>
+   </div>
+   <div class="hint" style="margin-top:10px">Controla <b>solo el ENVÍO</b> de lo recopilado. <b>Apagado:</b> cada lista capturada solo se <b>ve</b> (en Envíos y en tus Mensajes Guardados), NO se envía. <b>Activado:</b> cada lista nueva se envía <b>a la lista que elijas abajo</b> por canal. Activar <b>no</b> reenvía lo ya capturado. El envío MANUAL siempre funciona.</div>
+   <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bd)">
+     <div class="hint" style="margin-top:0">¿Hay difusiones en cola que NO quieres enviar? Cancélalas (no se enviarán, ni al reactivar).</div>
+     <button class="danger" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>
+   </div>
+  </div>
+  <div class="card" data-tab="inicio"><h2>Lista del envío automático<span class="help" tabindex="0" data-tip="Cuando el envío automático está activo, cada lista capturada se envía SOLO a la lista que elijas aquí, por canal. Elige una para no enviar a 'todos' por error.">ⓘ</span></h2>
+   <div class="hint">Al activar el envío automático, cada lista del canal se enviará <b>solo a la lista elegida</b> por canal. Crea listas en <b>👥 Contactos</b>.</div>
+   <div class="row" style="margin-top:10px">
+     <div><label>✈️ Telegram</label><select id="auto_telegram_list" onchange="saveAutoList()"></select></div>
+     <div><label>🟢 WhatsApp</label><select id="auto_whatsapp_list" onchange="saveAutoList()"></select></div>
+   </div>
+   <div class="hint" style="margin-top:8px">Si dejas un canal sin lista, al intentar activar el envío te pediremos elegir una (para no difundir a todos).</div>
   </div>
   <!-- UX-4: la última lista capturada al abrir el panel — el flujo capturar→revisar→difundir se ve solo. -->
   <div class="card" data-tab="inicio" id="cap_last_card" style="display:none"><h2>📥 Última lista capturada <span class="help" tabindex="0" data-tip="La lista más reciente que Replica registró del canal fuente SIN enviarla. Con «Enviar a…» la difundes a la lista de contactos que elijas.">ⓘ</span></h2>
@@ -1803,9 +1832,9 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="hint">Configuración guiada: el botón de cada paso te lleva directo a la sección exacta para completarlo.</div>
    <div id="dash_steps" style="margin-top:10px">cargando…</div>
   </div>
-  <div class="card" data-tab="fuentes" style="padding:14px 18px"><div class="subnav" data-subnav="fuentes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="fuente" onclick="showSub('fuentes','fuente')">📡 Fuente del canal</button><button data-sub="tg" onclick="showSub('fuentes','tg')"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</button><button data-sub="wa" onclick="showSub('fuentes','wa')"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</button></div></div>
-  <div class="card" data-tab="ajustes" style="padding:14px 18px"><div class="subnav" data-subnav="ajustes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="telegram" onclick="showSub('ajustes','telegram')"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</button><button data-sub="whatsapp" onclick="showSub('ajustes','whatsapp')"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</button><button data-sub="acceso" onclick="showSub('ajustes','acceso')">👤 Acceso</button><button data-sub="envio" onclick="showSub('ajustes','envio')">📤 Envío</button><button data-sub="sistema" onclick="showSub('ajustes','sistema')">🛠️ Sistema</button></div></div>
-  <div class="card accent" data-tab="ajustes" data-sub="telegram"><h2><svg class="ico"><use href="#i-tg"></use></svg> Cuenta de Telegram<span class="help" tabindex="0" data-tip="Dos modos: Bot (envía a quienes te dan /start) o Userbot (envía desde TU cuenta a tus contactos, vía Telethon). El userbot llega a más gente pero tiene más riesgo de baneo.">ⓘ</span></h2>
+  <div class="card" data-tab="fuentes" style="padding:14px 18px"><div class="subnav" data-subnav="fuentes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="tg" onclick="showSub('fuentes','tg')"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</button><button data-sub="wa" onclick="showSub('fuentes','wa')"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</button></div></div>
+  <div class="card" data-tab="ajustes" style="padding:14px 18px"><div class="subnav" data-subnav="ajustes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="conexiones" onclick="showSub('ajustes','conexiones')">🔌 Conexiones</button><button data-sub="captura" onclick="showSub('ajustes','captura')">📥 Captura</button><button data-sub="envio" onclick="showSub('ajustes','envio')">📤 Ritmo y horarios</button><button data-sub="acceso" onclick="showSub('ajustes','acceso')">👤 Acceso</button><button data-sub="sistema" onclick="showSub('ajustes','sistema')">🛠️ Sistema</button></div></div>
+  <div class="card accent" data-tab="ajustes" data-sub="conexiones"><h2><svg class="ico"><use href="#i-tg"></use></svg> Cuenta de Telegram<span class="help" tabindex="0" data-tip="Dos modos: Bot (envía a quienes te dan /start) o Userbot (envía desde TU cuenta a tus contactos, vía Telethon). El userbot llega a más gente pero tiene más riesgo de baneo.">ⓘ</span></h2>
    <label>Modo de envío</label>
    <select id="send_mode"><option value="bot">Bot — a suscriptores que dan /start</option><option value="userbot">Userbot — desde mi cuenta a mis contactos</option></select>
 
@@ -1849,7 +1878,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span id="tl_logout_out" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="ajustes" data-sub="whatsapp"><h2><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp (reenvío)<span class="help" tabindex="0" data-tip="Conecta el servicio de WhatsApp (URL + token, QR o código) y decide si cada lista capturada también se reenvía por WhatsApp. Vincula desde tu IP residencial.">ⓘ</span></h2>
+  <div class="card" data-tab="ajustes" data-sub="conexiones"><h2><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp (reenvío)<span class="help" tabindex="0" data-tip="Conecta el servicio de WhatsApp (URL + token, QR o código) y decide si cada lista capturada también se reenvía por WhatsApp. Vincula desde tu IP residencial.">ⓘ</span></h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="whatsapp_enabled" style="width:auto"> Reenviar también cada lista por WhatsApp</label>
    <label>URL del servicio WhatsApp</label><input id="whatsapp_service_url" placeholder="https://...onrender.com">
    <label>Token del servicio <span id="wa_tok_status" class="hint"></span></label>
@@ -1878,8 +1907,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <div class="callout warn">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza con listas pequeñas. <a href="javascript:void 0" onclick="goStep('fuentes','wa')">Gestionar exclusiones de WhatsApp →</a></div>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Canal y mensaje<span class="help" tabindex="0" data-tip="Canal público de Telegram que se sondea (t.me/s/canal) y la limpieza del mensaje: líneas a quitar (ubicación/teléfono), símbolos de moneda y footer de WhatsApp.">ⓘ</span></h2>
-   <div class="hint" style="margin-top:-4px">La <b>recopilación</b> del canal y el <b>envío</b> a tus contactos son interruptores <b>separados</b> en «Ajustes y estado → Envío». Con la recopilación activa se guarda y se ve cada lista publicada (en «Envíos»); el envío automático se controla aparte.</div>
+  <div class="card" data-tab="ajustes" data-sub="captura"><h2>Canal y mensaje<span class="help" tabindex="0" data-tip="Canal público de Telegram que se sondea (t.me/s/canal) y la limpieza del mensaje: líneas a quitar (ubicación/teléfono), símbolos de moneda y footer de WhatsApp.">ⓘ</span></h2>
+   <div class="hint" style="margin-top:-4px">La <b>recopilación</b> del canal y el <b>envío</b> a tus contactos son interruptores <b>separados</b> que viven en <b>🏠 Inicio</b>. Con la recopilación activa se guarda y se ve cada lista publicada (en <b>📡 Actividad</b>); el envío automático se controla aparte.</div>
    <label>Canal fuente (username sin @)</label><input id="source_channel">
    <label>Símbolos de moneda</label><input id="currency_symbols">
    <label>Footer WhatsApp (se añade al final de cada lista)</label><textarea id="whatsapp_footer"></textarea>
@@ -1887,33 +1916,33 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <button onclick="saveCfg()">Guardar cambios</button>
   </div>
   <!-- UX-2: orden narrativo del sub Fuente: Canal → Aumento → Imagen → Probar (antes el markup iba primero, sin contexto). -->
-  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Aumento (markup)<span class="help" tabindex="0" data-tip="Sube un % los precios detectados antes de difundir. Solo afecta números con símbolo de moneda ($, 💸, COP); no toca modelos ni especificaciones. Redondea al mil hacia arriba.">ⓘ</span></h2>
+  <div class="card" data-tab="ajustes" data-sub="captura"><h2>Aumento (markup)<span class="help" tabindex="0" data-tip="Sube un % los precios detectados antes de difundir. Solo afecta números con símbolo de moneda ($, 💸, COP); no toca modelos ni especificaciones. Redondea al mil hacia arriba.">ⓘ</span></h2>
    <div class="markup"><input id="markup_percentage" type="number" step="0.1"><div>
      <div style="font-size:13px">% que se suma a cada precio</div>
      <div class="hint">Ej: $325.000 + 15% → $374.000 (redondeo al mil ↑)</div></div></div>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Imagen de la lista</h2>
+  <div class="card" data-tab="ajustes" data-sub="captura"><h2>Imagen de la lista</h2>
    <div class="hint">Se envía como foto antes de cada lista. Sube un archivo o pega una URL.</div>
    <input type="file" id="imgfile" accept="image/*" style="margin-top:10px" onchange="uploadImg()">
    <img id="imgprev" class="preview" style="display:none">
    <label>…o URL externa</label><input id="image_url" placeholder="https://...">
    <button class="sec" onclick="saveCfg()">Guardar URL</button>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="fuente"><h2>Probar procesamiento del mensaje<span class="help" tabindex="0" data-tip="Pega un texto de ejemplo del canal y mira cómo quedaría YA procesado (markup, limpieza y footer) sin enviar nada.">ⓘ</span></h2>
+  <div class="card" data-tab="ajustes" data-sub="captura"><h2>Probar procesamiento del mensaje<span class="help" tabindex="0" data-tip="Pega un texto de ejemplo del canal y mira cómo quedaría YA procesado (markup, limpieza y footer) sin enviar nada.">ⓘ</span></h2>
    <div class="hint">Pega un mensaje tal como lo publica el canal y mira cómo quedará <b>ya procesado</b> (markup aplicado, sin ubicación/marca/teléfonos, con footer). Así verificas las reglas antes de enviar.</div>
    <textarea id="pp_in" style="min-height:90px;margin-top:10px" placeholder="Pega aquí el texto original del canal..."></textarea>
    <button class="sec" style="margin-top:8px" onclick="probarProcesado()">Procesar</button>
    <div class="hint" style="margin-top:10px">Resultado (lo que se enviaría):</div>
    <div id="pp_out" style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-top:4px;min-height:40px;font-size:13px;color:var(--tx2)">—</div>
   </div>
-  <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Cola de mensajes</h2>
+  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de mensajes</h2>
    <div class="stats"><div class="stat"><b id="q_p">–</b><span>lotes programados pendientes</span></div>
      <div class="stat"><b id="q_b">–</b><span>en cola SQS (en vuelo)</span></div>
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
-   <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>Envíos → Envíos fraccionados</b>.</div>
+   <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>📡 Actividad → Historial</b>.</div>
    <button class="ghost" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
   </div>
-  <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
+  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
    <div class="hint">Lotes que agotaron reintentos. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
    <div id="dlq_list" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
@@ -2028,8 +2057,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <button onclick="saveLists('whatsapp')">Guardar listas WhatsApp</button>
   </div>
-  <div class="card" data-tab="envios" style="padding:14px 18px"><div class="subnav" data-subnav="envios"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="componer" onclick="showSub('envios','componer')">✍️ Componer</button><button data-sub="programados" onclick="showSub('envios','programados')">⏰ Programados</button><button data-sub="historial" onclick="showSub('envios','historial')">📡 Historial</button></div></div>
-  <div class="card" data-tab="envios" data-sub="componer"><h2>✍️ Componer y enviar<span class="help" tabindex="0" data-tip="Redacta un mensaje propio y envíalo ya (o prográmalo). Respeta listas y exclusiones de cada canal. WhatsApp exige elegir una lista; el texto de Telegram no puede pasar de 4096 caracteres.">ⓘ</span></h2>
+  <div class="card" data-tab="envios" style="padding:14px 18px"><div class="subnav" data-subnav="envios"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="historial" onclick="showSub('envios','historial')">📡 Historial</button><button data-sub="programados" onclick="showSub('envios','programados')">⏰ Programados</button><button data-sub="problemas" onclick="showSub('envios','problemas')">⚠️ Problemas</button></div></div>
+  <div class="card" data-tab="enviar"><h2>✍️ Componer y enviar<span class="help" tabindex="0" data-tip="Redacta un mensaje propio y envíalo ya (o prográmalo). Respeta listas y exclusiones de cada canal. WhatsApp exige elegir una lista; el texto de Telegram no puede pasar de 4096 caracteres.">ⓘ</span></h2>
    <div class="hint">Escribe un mensaje y envíalo de inmediato a los canales seleccionados. Respeta las listas y exclusiones configuradas en cada canal.</div>
    <label>Mensaje <span id="bc_count" class="charcount">0 caracteres</span></label>
    <textarea id="bc_text" style="min-height:120px" placeholder="Escribe aquí el mensaje a difundir..." oninput="bcCount()"></textarea>
@@ -2090,7 +2119,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <table id="bc_table"><thead><tr><th class="selcol"><input type="checkbox" id="bc_selall" onchange="bcSelAll(this.checked)"></th><th>Mensaje</th><th>Estado</th><th>Progreso</th><th></th></tr></thead>
        <tbody id="bc_rows"></tbody></table>
    </div>
-   <div class="empty-state" id="bc_empty" style="display:none"><div class="ico">📨</div><h3>Aún no hay difusiones</h3><p>Cuando la <b>captura</b> esté activa, cada lista del canal aparecerá aquí <b>sin enviarse</b> — tú decides a quién va. También puedes escribir una ahora mismo.</p><button style="margin-top:8px" onclick="showSub('envios','componer')">✍️ Componer un envío</button></div>
+   <div class="empty-state" id="bc_empty" style="display:none"><div class="ico">📨</div><h3>Aún no hay difusiones</h3><p>Cuando la <b>captura</b> esté activa, cada lista del canal aparecerá aquí <b>sin enviarse</b> — tú decides a quién va. También puedes escribir una ahora mismo.</p><button style="margin-top:8px" onclick="showTab('enviar')">✍️ Componer un envío</button></div>
    <div class="tbl-toolbar">
      <button class="danger" id="bc_delsel" onclick="bcDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
      <button class="danger" onclick="bcClearFinished()">🗑 Limpiar terminados</button>
@@ -2186,32 +2215,6 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>Contraseña actual</label><input id="cp_cur" type="password">
    <label>Nueva contraseña (mínimo 8)</label><input id="cp_new" type="password">
    <div style="margin-top:10px"><button onclick="changePassword()">Cambiar contraseña</button> <span id="cp_status" class="hint" style="margin-left:10px"></span></div>
-  </div>
-  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Recopilación automática<span class="help" tabindex="0" data-tip="Lee el canal fuente y guarda cada lista nueva (con markup y footer) para que la VEAS, sin enviarla a nadie. Es independiente del ENVÍO: puedes recopilar con el envío apagado.">ⓘ</span></h2>
-   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-     <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="capture_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleCapture()"> <b>Recopilar listas del canal</b></label>
-     <span id="cap_badge" class="pill">—</span>
-   </div>
-   <div class="hint" style="margin-top:10px">Lee el <b>canal fuente configurado</b> y registra cada lista nueva para que la <b>veas</b>, <b>sin enviarla a nadie</b>. Mientras el <b>envío automático</b> esté apagado, cada lista capturada aparece en <b>Envíos</b> como <b>📥 Capturada</b> y se te manda a tus <b>Mensajes Guardados</b> de Telegram. Es independiente del envío.</div>
-  </div>
-  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Envío automático<span class="help" tabindex="0" data-tip="Pausa o activa el ENVÍO automático de las listas capturadas. El envío MANUAL (Componer → Enviar) SIEMPRE sale, aun en pausa. La RECOPILACIÓN es aparte (arriba).">ⓘ</span></h2>
-   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-     <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos automáticos activos</b></label>
-     <span id="sys_badge" class="pill">—</span>
-   </div>
-   <div class="hint" style="margin-top:10px">Controla <b>solo el ENVÍO</b> de lo recopilado. <b>Apagado:</b> cada lista capturada solo se <b>ve</b> (en Envíos y en tus Mensajes Guardados), NO se envía. <b>Activado:</b> cada lista nueva se envía <b>a la lista que elijas abajo</b> por canal. Activar <b>no</b> reenvía lo ya capturado. El envío MANUAL siempre funciona.</div>
-   <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bd)">
-     <div class="hint" style="margin-top:0">¿Hay difusiones en cola que NO quieres enviar? Cancélalas (no se enviarán, ni al reactivar).</div>
-     <button class="danger" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>
-   </div>
-  </div>
-  <div class="card" data-tab="ajustes" data-sub="envio"><h2>Lista del envío automático<span class="help" tabindex="0" data-tip="Cuando el envío automático está activo, cada lista capturada se envía SOLO a la lista que elijas aquí, por canal. Elige una para no enviar a 'todos' por error.">ⓘ</span></h2>
-   <div class="hint">Al activar el envío automático, cada lista del canal se enviará <b>solo a la lista elegida</b> por canal. Crea listas en <b>Fuentes y listas</b>.</div>
-   <div class="row" style="margin-top:10px">
-     <div><label>✈️ Telegram</label><select id="auto_telegram_list" onchange="saveAutoList()"></select></div>
-     <div><label>🟢 WhatsApp</label><select id="auto_whatsapp_list" onchange="saveAutoList()"></select></div>
-   </div>
-   <div class="hint" style="margin-top:8px">Si dejas un canal sin lista, al intentar activar el envío te pediremos elegir una (para no difundir a todos).</div>
   </div>
   <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Anti-baneo · lotes y ritmo<span class="help" tabindex="0" data-tip="Tamaño de lote (máx 150) y delays ALEATORIOS entre mensajes para no parecer spam y reducir el riesgo de baneo. Envío fraccionado = un lote a la vez.">ⓘ</span></h2>
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="scheduling_enabled" style="width:auto"> Envío fraccionado y secuencial (procesa un lote a la vez)</label>
@@ -2519,7 +2522,7 @@ async function setSending(on){
       // UX-2: el botón NAVEGA directo a elegir la lista (antes daba instrucciones de texto).
       const ir=await confirmModal('Antes de activar el ENVÍO automático, elige una LISTA para: '+faltan.join(' y ')+'.\n\nAsí no se envía a TODOS los contactos por error.',{okText:'Elegir lista ahora →',cancelText:'Ahora no'});
       renderSendingState(false);
-      if(ir) goStep('ajustes','envio');
+      if(ir) goStep('inicio');
       return;
     }
     const ps=await pendingSummary();
@@ -2735,7 +2738,7 @@ async function refreshConn(){
     // En modo bot los suscriptores no son caché de sesión (vienen de /start) => nunca "viejos".
     TG_STALE = (a.mode==='userbot' && a.connected===false);
     if(tg){ tg.onclick=null; tg.style.cursor='';
-      const irCuenta=()=>{ showTab('ajustes'); try{ showSub('ajustes','telegram'); }catch(e){} };
+      const irCuenta=()=>{ goStep('ajustes','conexiones'); };
       if(a.mode==='userbot'){
         const me=a.me||{}; const phone=me.phone?('+'+String(me.phone).replace(/^\+/,'')):''; const who=phone||me.name||'cuenta';
         if(a.connected===true){ tg.className='pill active'; tg.innerHTML=ICO_TG+' '+bcEsc(who)+' ✓';
@@ -2758,11 +2761,11 @@ async function refreshConn(){
     if(wa){ const num=(ok&&s.me&&s.me.id)?('+'+String(s.me.id).split('@')[0].split(':')[0]):'';
       wa.className='pill '+(ok?'active':'failed'); wa.innerHTML=ok?(ICO_WA+' '+bcEsc(num||'WhatsApp')):(ICO_WA+' WA ✕');
       // UX-2: la pill de WhatsApp caído NAVEGA a su vinculación (espejo del patrón de Telegram).
-      wa.onclick=ok?null:()=>{ showTab('ajustes'); try{ showSub('ajustes','whatsapp'); }catch(e){} };
+      wa.onclick=ok?null:()=>{ goStep('ajustes','conexiones'); };
       wa.style.cursor=ok?'':'pointer';
       wa.title=ok?((num?('WhatsApp '+num):'WhatsApp conectado')+(s.contacts?(' · '+s.contacts+' contactos'):'')):('desconectado — clic para vincular'+(s.lastCloseMsg?(' · '+s.lastCloseMsg):'')); } }
   catch(e){ WA_STALE=true; if(wa){ wa.className='pill neutral'; wa.innerHTML=ICO_WA+' WA ?'; wa.title='servicio no configurado o inaccesible — clic para configurar';
-      wa.onclick=()=>{ showTab('ajustes'); try{ showSub('ajustes','whatsapp'); }catch(e){} }; wa.style.cursor='pointer'; } }
+      wa.onclick=()=>{ goStep('ajustes','conexiones'); }; wa.style.cursor='pointer'; } }
   syncReRender();  // refleja el estado de sincronización en las pantallas de contactos
 }
 let CONN_TIMER=null;
@@ -2772,19 +2775,21 @@ function connStartPolling(){ if(CONN_TIMER) return; refreshConn();
 const SESSION_MAX_MS=8*3600*1000;
 function sessionFresca(){ try{ const t=parseInt(sessionStorage.getItem('cred_ts')||'0',10); return t && (Date.now()-t)<SESSION_MAX_MS; }catch(e){ return true; } }
 // --- Onboarding: checklist de primeros pasos (desde la config) ---
-function goStep(tab,sub){ showTab(tab); if(sub){ try{ showSub(tab,sub); }catch(e){} } }
+// UX-5: rutas viejas → nuevas (aliases durante la transición; retirar en 2-3 releases).
+const GO_ALIASES={'envios/componer':['enviar',''],'ajustes/telegram':['ajustes','conexiones'],'ajustes/whatsapp':['ajustes','conexiones'],'fuentes/fuente':['ajustes','captura']};
+function goStep(tab,sub){ const a=GO_ALIASES[tab+'/'+(sub||'')]; if(a){ tab=a[0]; sub=a[1]; } showTab(tab); if(sub){ try{ showSub(tab,sub); }catch(e){} } }
 function renderSteps(c){
   const steps=[
     {ok: !!(c.bot_token_set||c.telethon_session_set), ic:ICO_TG, t:'Conectar Telegram',
-     d:'Bot (a suscriptores) o tu cuenta (userbot, a tus contactos) para poder enviar.', tab:'ajustes', sub:'telegram'},
+     d:'Bot (a suscriptores) o tu cuenta (userbot, a tus contactos) para poder enviar.', tab:'ajustes', sub:'conexiones'},
     {ok: !!(c.source_channel&&String(c.source_channel).trim()), ic:ICO_TG, t:'Definir el canal fuente',
-     d:'El canal de Telegram del que se leen las listas a reenviar.', tab:'fuentes', sub:'fuente'},
+     d:'El canal de Telegram del que se leen las listas a reenviar.', tab:'ajustes', sub:'captura'},
     {ok: ((c.telegram_lists||[]).length>0 || (c.whatsapp_lists||[]).length>0), t:'Crear listas o elegir destinatarios',
      d:'Agrupa contactos en listas y define a quién se envía en cada canal.', tab:'fuentes', sub:'tg'},
     {ok: !!c.whatsapp_enabled, ic:ICO_WA, t:'Conectar WhatsApp',
-     d:'Opcional: reenvía también por WhatsApp (vincula desde tu IP residencial).', tab:'ajustes', sub:'whatsapp', opt:true},
+     d:'Opcional: reenvía también por WhatsApp (vincula desde tu IP residencial).', tab:'ajustes', sub:'conexiones', opt:true},
     {ok: c.sending_enabled!==false, t:'Activar los envíos',
-     d:'Enciende el interruptor para que salgan los envíos automáticos.', tab:'ajustes', sub:'envio'},
+     d:'Enciende el interruptor para que salgan los envíos automáticos.', tab:'inicio', sub:''},
   ];
   const done=steps.filter(s=>s.ok).length, total=steps.length, pct=Math.round(done/total*100);
   const reqDone=steps.filter(s=>!s.opt).every(s=>s.ok);
@@ -3093,8 +3098,10 @@ async function waBulkFiltered(accion){ const ids=waFiltered().map(c=>String(c.id
 function waPrev(){ WA_PAGE--; renderWa(); }
 function waNext(){ WA_PAGE++; renderWa(); }
 // Sub-navegación genérica (por pestaña): muestra solo las tarjetas con el data-sub elegido.
-const SUB_DEFAULT={fuentes:'fuente', envios:'componer', ajustes:'telegram'};  // UX-2: cada pestaña abre en su PRIMER sub visible
+const SUB_DEFAULT={fuentes:'tg', envios:'historial', ajustes:'conexiones'};  // UX-5: primer sub visible de cada pestaña
 function showSub(tab,s){
+  // UX-5: si el sub pedido ya no existe (localStorage viejo / ruta renombrada), cae al default.
+  if(!document.querySelector('.subnav[data-subnav="'+tab+'"] button[data-sub="'+s+'"]')) s=SUB_DEFAULT[tab]||s;
   document.querySelectorAll('main>.card[data-tab="'+tab+'"][data-sub]').forEach(c=>c.classList.toggle('subhide', c.dataset.sub!==s));
   document.querySelectorAll('.subnav[data-subnav="'+tab+'"] button').forEach(b=>b.classList.toggle('on', b.dataset.sub===s));
   try{ localStorage.setItem('sub_'+tab,s); }catch(e){}
@@ -3107,7 +3114,7 @@ function showTab(t){
   try{ localStorage.setItem('tab',t); }catch(e){}
   if(t==='envios'){ sgFillLists(); sgChan(); sgType(); loadSchedules(); }
   if(SUB_DEFAULT[t]){ showSub(t, (function(){try{return localStorage.getItem('sub_'+t)}catch(e){return null}})()||SUB_DEFAULT[t]); }
-  const TAB_NAMES={inicio:'Inicio',fuentes:'Fuentes y listas',envios:'Envíos',ajustes:'Ajustes y estado'};
+  const TAB_NAMES={inicio:'Inicio',enviar:'Enviar',envios:'Actividad',fuentes:'Contactos',ajustes:'Ajustes'};
   const _h=$('page_h1'); if(_h) _h.textContent=TAB_NAMES[t]||'Panel';  // B22: contexto de sección para lectores de pantalla
   window.scrollTo(0,0); }
 // Mejora de accesibilidad aplicada una vez al arrancar (no cambia el aspecto visual).
@@ -3434,7 +3441,7 @@ function bcRow(b){
 function bcSendCaptured(el){
   let full=(el.getAttribute('data-full')||'').trim();
   full=full.replace(/\n*📷 La publicación original incluye una imagen[^\n]*$/,'').trim();
-  showSub('envios','componer');
+  showTab('enviar');
   const t=$('bc_text'); if(t){ t.value=full; t.dispatchEvent(new Event('input')); t.focus(); }
   toast('Lista cargada en el compositor — elige canal y destinatarios','info');
   try{ $('bc_text').scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
