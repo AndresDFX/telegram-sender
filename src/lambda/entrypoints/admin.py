@@ -1795,6 +1795,10 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="sec" onclick="loadDashboard()">Refrescar</button>
    </div>
   </div>
+  <!-- UX-4: la última lista capturada al abrir el panel — el flujo capturar→revisar→difundir se ve solo. -->
+  <div class="card" data-tab="inicio" id="cap_last_card" style="display:none"><h2>📥 Última lista capturada <span class="help" tabindex="0" data-tip="La lista más reciente que Replica registró del canal fuente SIN enviarla. Con «Enviar a…» la difundes a la lista de contactos que elijas.">ⓘ</span></h2>
+   <div id="cap_last">cargando…</div>
+  </div>
   <div class="card" data-tab="inicio" id="dash_steps_card"><h2>Primeros pasos <span id="steps_n" class="hint"></span></h2>
    <div class="hint">Configuración guiada: el botón de cada paso te lleva directo a la sección exacta para completarlo.</div>
    <div id="dash_steps" style="margin-top:10px">cargando…</div>
@@ -2072,8 +2076,16 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span id="bc_status" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="envios" data-sub="historial"><h2>📡 Envíos <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
-   <div class="hint">Estado y progreso de cada difusión. Se actualiza automáticamente mientras hay envíos en curso.</div>
+  <div class="card" data-tab="envios" data-sub="historial"><h2>📡 Historial de difusiones <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
+   <div class="hint">Estado y progreso de cada difusión. Las <b>📥 Capturadas</b> son listas del canal registradas SIN enviar — con «Enviar a…» decides a quién van. Se actualiza automáticamente mientras hay envíos en curso.</div>
+   <!-- UX-4: filtro segmentado por estado (las capturadas dejan de estar camufladas entre difusiones) -->
+   <div class="segf" role="tablist" style="margin-top:10px">
+     <button data-v="todas" class="on" aria-pressed="true" onclick="bcSetFilter('todas')">Todas</button>
+     <button data-v="capturadas" aria-pressed="false" onclick="bcSetFilter('capturadas')">📥 Capturadas</button>
+     <button data-v="encurso" aria-pressed="false" onclick="bcSetFilter('encurso')">En curso</button>
+     <button data-v="enviadas" aria-pressed="false" onclick="bcSetFilter('enviadas')">Enviadas</button>
+     <button data-v="fallidas" aria-pressed="false" onclick="bcSetFilter('fallidas')">Fallidas</button>
+   </div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="bc_table"><thead><tr><th class="selcol"><input type="checkbox" id="bc_selall" onchange="bcSelAll(this.checked)"></th><th>Mensaje</th><th>Estado</th><th>Progreso</th><th></th></tr></thead>
        <tbody id="bc_rows"></tbody></table>
@@ -2812,8 +2824,9 @@ async function loadDashboard(){
           (fa?`<div style="height:${fp}%;background:var(--bad)"></div>`:'')+
           `<div style="flex:1;background:linear-gradient(180deg,var(--ac),var(--ac2))"></div></div>`; }).join('') : '<div class="hint">sin actividad aún</div>')+'</div>'+
       '<div class="hint" style="margin-top:4px;font-size:11px"><span style="color:var(--ac)">■</span> enviados · <span style="color:var(--bad)">■</span> fallidos</div>';
-    try{ const last=((await api('/api/broadcasts')).broadcasts||[])[0];
-      if($('dash_last')) $('dash_last').innerHTML = last? ('Último envío: <b>'+bcEsc((last.text||'(imagen)').slice(0,48))+'</b> — '+(BC_STATUS[last.status]||last.status)+' · '+bcFmtTime(last.created_at)) : 'Aún no hay envíos.'; }catch(e){}
+    try{ const bcs=((await api('/api/broadcasts')).broadcasts||[]); const last=bcs[0];
+      if($('dash_last')) $('dash_last').innerHTML = last? ('Último envío: <b>'+bcEsc((last.text||'(imagen)').slice(0,48))+'</b> — '+(BC_STATUS[last.status]||last.status)+' · '+bcFmtTime(last.created_at)) : 'Aún no hay envíos.';
+      bcRenderLastCaptured(bcs);  /* UX-4: card "Última lista capturada" también se alimenta desde Inicio */ }catch(e){}
   }catch(e){ if($('dash_estado')) $('dash_estado').textContent='no se pudo cargar el resumen';
     ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e2=$(id); if(e2) e2.classList.remove('kpi-load');}); }
 }
@@ -3404,14 +3417,27 @@ function bcRow(b){
   const label=BC_STATUS[st]||st;
   const txt=(b.text||'').trim()||'(solo imagen)';
   const tr=document.createElement('tr');
+  // UX-4: una lista CAPTURADA tiene acción propia — "Enviar a…" abre el compositor precargado.
+  const sendBtn = st==='captured'
+    ? `<button style="padding:4px 10px;margin-right:6px" title="Abrir el compositor con esta lista" data-full="${bcEsc(b.full_text||txt)}" onclick="bcSendCaptured(this)">Enviar a…</button>`
+    : '';
   tr.innerHTML=
     `<td class="selcol"><input type="checkbox" class="bcsel" data-id="${b.id}" onchange="bcSelChanged()"></td>`+
     `<td class="bc-msg"><b role="button" tabindex="0" title="Ver mensaje completo" style="cursor:pointer" data-full="${bcEsc(b.full_text||txt)}" onclick="bcMsgDetail(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcMsgDetail(this)}">${bcEsc(txt)} ›</b>`+
       `<div class="bc-meta"><span class="bc-src">${bcEsc(b.source||'manual')}</span><span>${bcFmtTime(b.created_at)}</span></div></td>`+
     `<td><span class="pill ${st}">${bcEsc(label)}</span>${b.last_error?`<div class="bc-err" role="button" tabindex="0" onclick="bcErrDetail(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcErrDetail(this)}" data-err="${bcEsc((b.error_reasons||[]).join('\n')||b.last_error)}" title="Ver detalle del error">⚠ ${bcEsc(String(b.last_error).slice(0,72))} ›</div>`:''}</td>`+
     `<td><div class="chprog">${bcChanCell(false,b.telegram)}${bcChanCell(true,b.whatsapp)}</div></td>`+
-    `<td style="text-align:right;white-space:nowrap"><button class="danger" style="padding:4px 9px" title="Borrar definitivamente" onclick="bcDelete('${b.id}')">🗑</button></td>`;
+    `<td style="text-align:right;white-space:nowrap">${sendBtn}<button class="danger" style="padding:4px 9px" title="Borrar definitivamente" onclick="bcDelete('${b.id}')">🗑</button></td>`;
   return tr;
+}
+// UX-4: abre el compositor con el texto de la lista capturada (quita la nota interna 📷 si la trae).
+function bcSendCaptured(el){
+  let full=(el.getAttribute('data-full')||'').trim();
+  full=full.replace(/\n*📷 La publicación original incluye una imagen[^\n]*$/,'').trim();
+  showSub('envios','componer');
+  const t=$('bc_text'); if(t){ t.value=full; t.dispatchEvent(new Event('input')); t.focus(); }
+  toast('Lista cargada en el compositor — elige canal y destinatarios','info');
+  try{ $('bc_text').scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
 }
 function bcErrDetail(el){
   const raw=(el.getAttribute('data-err')||'').trim();
@@ -3423,11 +3449,24 @@ function bcMsgDetail(el){
   const full=(el.getAttribute('data-full')||'').trim();
   alertModal(full||'(sin texto / solo imagen)',{title:'Mensaje completo'});
 }
+// UX-4: filtro segmentado del historial. 'fallidas' incluye los parciales (completados con fallos).
+let BC_FILTER='todas';
+const BC_FILTERS={
+  todas: ()=>true,
+  capturadas: b=>b.status==='captured',
+  encurso: b=>b.status==='queued'||b.status==='sending',
+  enviadas: b=>b.status==='done',
+  fallidas: b=>b.status==='failed'||b.status==='partial',
+};
+function bcSetFilter(v){ BC_FILTER=v;
+  document.querySelectorAll('.card[data-sub="historial"] .segf button').forEach(x=>{ const on=x.dataset.v===v; x.classList.toggle('on',on); x.setAttribute('aria-pressed',on?'true':'false'); });
+  loadBroadcasts(); }
 async function loadBroadcasts(){
   { const _b=$('bc_rows'); if(_b && !_b.children.length) skelTable('bc_rows',5,4); }
   try{
     const r=await api('/api/broadcasts');
-    const list=r.broadcasts||[];
+    const todos=r.broadcasts||[];
+    const list=todos.filter(BC_FILTERS[BC_FILTER]||BC_FILTERS.todas);
     const rows=$('bc_rows'); rows.innerHTML='';
     $('bc_empty').style.display=list.length?'none':'block';
     let active=false;
@@ -3435,7 +3474,21 @@ async function loadBroadcasts(){
     if($('bc_selall')) $('bc_selall').checked=false; bcSelChanged();
     const live=$('bc_live'); live.classList.toggle('on', active);
     $('bc_live_t').textContent = active ? 'en vivo' : 'al día';
+    bcRenderLastCaptured(todos);
   }catch(e){ /* silencioso: no romper el polling por un fallo puntual */ }
+}
+// UX-4: card "Última lista capturada" en Inicio — el flujo capturar→revisar→difundir se ve al abrir.
+function bcRenderLastCaptured(list){
+  const card=$('cap_last_card'), out=$('cap_last'); if(!card||!out) return;
+  const cap=(list||[]).find(b=>b.status==='captured');
+  if(!cap){ card.style.display='none'; return; }
+  card.style.display='block';
+  const txt=(cap.full_text||cap.text||'').trim()||'(solo imagen)';
+  out.innerHTML='<div class="bc-meta" style="margin-bottom:6px"><span>'+bcFmtTime(cap.created_at)+'</span></div>'+
+    '<div style="white-space:pre-wrap;max-height:180px;overflow:auto;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;font-size:13px;color:var(--tx2)">'+bcEsc(txt.slice(0,900))+(txt.length>900?'…':'')+'</div>'+
+    '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'+
+    '<button data-full="'+bcEsc(txt)+'" onclick="bcSendCaptured(this)">Enviar a…</button>'+
+    '<button class="ghost" onclick="showTab(\'envios\');showSub(\'envios\',\'historial\');bcSetFilter(\'capturadas\')">Ver todas las capturadas</button></div>';
 }
 async function bcDelete(id){
   if(!await confirmModal('¿Borrar este envío DEFINITIVAMENTE de la tabla? No se puede deshacer (no afecta lo ya entregado).',{danger:true,okText:'Borrar'})) return;
