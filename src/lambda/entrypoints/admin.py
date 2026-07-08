@@ -1840,7 +1840,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <div class="hint">Alternativa manual: genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a esa cuenta: trátala como secreto.</div>
    </details>
    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
-     <button onclick="saveAccount()">Guardar cuenta</button>
+     <button class="sec" onclick="saveAccount()">Guardar cuenta</button>
      <button class="danger" onclick="tlLogout()">🗑 Limpiar sesión userbot</button>
      <span id="tl_logout_out" class="hint" style="margin-top:0"></span>
    </div>
@@ -1852,7 +1852,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <input id="whatsapp_token" type="password" placeholder="(pegar solo si quieres cambiarlo)">
    <button onclick="saveWhatsapp()">Guardar WhatsApp</button>
    <div style="margin-top:14px">
-     <button class="sec" onclick="waStatus()">Ver estado</button> <span id="wa_state" class="hint"></span>
+     <button class="ghost" onclick="waStatus()">Ver estado</button> <span id="wa_state" class="hint"></span>
    </div>
    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--bd)">
      <div style="font-weight:700;font-size:13px;margin-bottom:6px">Vincular WhatsApp</div>
@@ -1907,13 +1907,13 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <div class="stat"><b id="q_b">–</b><span>en cola SQS (en vuelo)</span></div>
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
    <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>Envíos → Envíos fraccionados</b>.</div>
-   <button class="sec" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
+   <button class="ghost" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
   </div>
   <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
    <div class="hint">Lotes que agotaron reintentos. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
    <div id="dlq_list" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-     <button class="sec" onclick="loadDlq()">Ver / refrescar</button>
+     <button class="ghost" onclick="loadDlq()">Ver / refrescar</button>
      <button class="sec" onclick="dlqRedrive()">↩ Reintentar todo</button>
      <button class="danger" onclick="dlqPurge()">🗑 Descartar todo</button>
    </div>
@@ -1921,7 +1921,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
   <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Auditoría <span id="audit_n" class="hint"></span></h2>
    <div class="hint">Últimas acciones realizadas en el panel (config, envíos, cancelaciones, DLQ).</div>
    <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>cuándo</th><th>usuario</th><th>acción</th><th>detalle</th></tr></thead><tbody id="audit_rows"></tbody></table></div>
-   <button class="sec" style="margin-top:12px" onclick="loadAudit()">Refrescar</button>
+   <button class="ghost" style="margin-top:12px" onclick="loadAudit()">Refrescar</button>
   </div>
   <div class="card" data-tab="fuentes" data-sub="tg"><h2>Destinatarios<span class="help" tabindex="0" data-tip="Contactos a los que envías por Telegram. Filtra por estado (Todos/Incluidos/Excluidos). Marca y usa Excluir/Incluir; incluir un contacto que coincide con un patrón crea una EXCEPCIÓN (se envía pese al patrón).">ⓘ</span> <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
@@ -1939,13 +1939,13 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <label style="margin:0 0 6px">⛔ Auto-excluir por patrón de nombre</label>
      <div class="hint" style="margin:0 0 8px">Un patrón por línea. Cualquier contacto cuyo nombre <b>contenga</b> un patrón (sin distinguir mayúsculas) queda excluido solo de los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>. Son <b>tus</b> patrones (por usuario); los envíos excluyen con la <b>unión</b> de los de todos los usuarios.</div>
      <textarea id="tg_excl_pat" style="min-height:62px" placeholder="FAM&#10;#"></textarea>
-     <button style="margin-top:8px" onclick="saveExclPatterns('telegram')">Guardar patrones</button>
+     <button class="sec" style="margin-top:8px" onclick="saveExclPatterns('telegram')">Guardar patrones</button>
    </div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
      <button class="sec" onclick="toggleAll(true)">Marcar página</button>
      <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
-     <button onclick="bulk('excluir')">Excluir marcados</button>
-     <button onclick="bulk('incluir')">Incluir marcados</button>
+     <button class="sec" onclick="bulk('excluir')">Excluir marcados</button>
+     <button class="sec" onclick="bulk('incluir')">Incluir marcados</button>
      <button class="sec" onclick="createListFromGrid('telegram')">➕ Lista con marcados</button>
      <button class="sec" onclick="createListFromIncluded('telegram')">➕ Lista con incluidos</button>
      <button class="ghost" onclick="bulkFiltered('excluir')">Excluir filtrados</button>
@@ -1990,13 +1990,13 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <label style="margin:0 0 6px">⛔ Auto-excluir por patrón de nombre</label>
      <div class="hint" style="margin:0 0 8px">Un patrón por línea. Cualquier contacto cuyo nombre <b>contenga</b> un patrón (sin distinguir mayúsculas) queda excluido solo de los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>. Son <b>tus</b> patrones (por usuario); los envíos excluyen con la <b>unión</b> de los de todos los usuarios.</div>
      <textarea id="wa_excl_pat" style="min-height:62px" placeholder="FAM&#10;#"></textarea>
-     <button style="margin-top:8px" onclick="saveExclPatterns('whatsapp')">Guardar patrones</button>
+     <button class="sec" style="margin-top:8px" onclick="saveExclPatterns('whatsapp')">Guardar patrones</button>
    </div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
      <button class="sec" onclick="waToggleAll(true)">Marcar página</button>
      <button class="sec" onclick="waToggleAll(false)">Desmarcar</button>
-     <button onclick="waBulk('excluir')">Excluir marcados</button>
-     <button onclick="waBulk('incluir')">Incluir marcados</button>
+     <button class="sec" onclick="waBulk('excluir')">Excluir marcados</button>
+     <button class="sec" onclick="waBulk('incluir')">Incluir marcados</button>
      <button class="ghost" onclick="waBulkFiltered('excluir')">Excluir filtrados</button>
      <button class="ghost" onclick="waBulkFiltered('incluir')">Incluir filtrados</button>
      <button class="sec" onclick="createListFromGrid('whatsapp')">➕ Lista con marcados</button>
@@ -2063,7 +2063,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
 
    <label style="margin-top:16px">Programar (opcional)</label>
    <input type="datetime-local" id="bc_sched" style="max-width:260px">
-   <div class="hint">Vacío = enviar ya (fraccionado). Con fecha/hora = se difiere hasta entonces y luego se gotea por lotes. La hora se interpreta en la <b>zona horaria configurada</b> (Ajustes → Envío → Anti-baneo), no en la de tu navegador.</div>
+   <div class="hint">Vacío = enviar ya (fraccionado). Con fecha/hora = se difiere hasta entonces y luego se gotea por lotes. Hora en <b class="tz-lbl">Colombia · Bogotá (UTC-5)</b> — <a href="javascript:void 0" onclick="goStep('ajustes','envio')">cambiar</a>.</div>
 
    <div class="compose-actions">
      <button id="bc_send" onclick="sendBroadcast()">Enviar</button>
@@ -2078,7 +2078,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <table id="bc_table"><thead><tr><th class="selcol"><input type="checkbox" id="bc_selall" onchange="bcSelAll(this.checked)"></th><th>Mensaje</th><th>Estado</th><th>Progreso</th><th></th></tr></thead>
        <tbody id="bc_rows"></tbody></table>
    </div>
-   <div class="bc-empty" id="bc_empty" style="display:none">Aún no hay envíos. Crea uno en <b>Componer y enviar</b>.</div>
+   <div class="empty-state" id="bc_empty" style="display:none"><div class="ico">📨</div><h3>Aún no hay difusiones</h3><p>Cuando la <b>captura</b> esté activa, cada lista del canal aparecerá aquí <b>sin enviarse</b> — tú decides a quién va. También puedes escribir una ahora mismo.</p><button style="margin-top:8px" onclick="showSub('envios','componer')">✍️ Componer un envío</button></div>
    <div class="tbl-toolbar">
      <button class="danger" id="bc_delsel" onclick="bcDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
      <button class="danger" onclick="bcClearFinished()">🗑 Limpiar terminados</button>
@@ -2124,7 +2124,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <label>Días</label>
      <div class="chan-row" id="sg_days"></div>
    </div>
-   <div class="hint" style="margin-top:8px">La hora usa la zona horaria configurada en <b>Ajustes y estado → Envío → Anti-baneo</b> (ventana de envío).</div>
+   <div class="hint" style="margin-top:8px">Hora en <b class="tz-lbl">Colombia · Bogotá (UTC-5)</b> — <a href="javascript:void 0" onclick="goStep('ajustes','envio')">cambiar</a>.</div>
    <div class="compose-actions">
      <button id="sg_create" onclick="sgCreate()">Programar</button>
      <button class="ghost" onclick="sgClear()">Limpiar</button>
@@ -2205,7 +2205,15 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="scheduling_enabled" style="width:auto"> Envío fraccionado y secuencial (procesa un lote a la vez)</label>
    <div class="row">
      <div><label>Tamaño de lote (máx 150)</label><input id="batch_size" type="number" min="1" max="150"></div>
-     <div><label>Zona horaria (min vs UTC, ej -300)</label><input id="window_tz" type="number" step="1"></div>
+     <div><label>Zona horaria de TODOS los horarios<span class="help" tabindex="0" data-tip="Gobierna la ventana de envío, los mensajes programados y los envíos diferidos. Los horarios se interpretan en ESTA zona, no en la del navegador de cada usuario.">ⓘ</span></label>
+       <select id="window_tz" onchange="tzSyncLabels()">
+         <option value="-300">Colombia · Bogotá (UTC-5)</option>
+         <option value="-360">México CDMX / Costa Rica (UTC-6)</option>
+         <option value="-240">Venezuela / Bolivia (UTC-4)</option>
+         <option value="-180">Argentina / Chile / Uruguay (UTC-3)</option>
+         <option value="0">UTC</option>
+         <option value="60">España peninsular (UTC+1)</option>
+       </select></div>
    </div>
    <div class="row">
      <div><label>Delay Telegram mín (s)</label><input id="tg_delay_min" type="number" step="0.1" min="0"></div>
@@ -2401,6 +2409,12 @@ async function loadCfg(){ const c=await api('/api/config');
   // --- anti-baneo / horario por canal ---
   ['batch_size','tg_delay_min','tg_delay_max','wa_delay_min','wa_delay_max','window_tz',
    'tg_window_start','tg_window_end','wa_window_start','wa_window_end'].forEach(k=>{ if($(k)) $(k).value=c[k]??''; });
+  // UX-3: window_tz es un SELECT legible; si la config trae un offset fuera de las opciones,
+  // se inyecta como opción "UTC±h" para no perderlo. El backend sigue recibiendo minutos.
+  (function(){ const s=$('window_tz'); if(!s||s.tagName!=='SELECT') return;
+    const v=String(c.window_tz??-300);
+    if(![...s.options].some(o=>o.value===v)){ const o=document.createElement('option'); o.value=v; o.textContent='UTC'+(v>=0?'+':'')+(v/60); s.appendChild(o); }
+    s.value=v; tzSyncLabels(); })();
   if($('scheduling_enabled')) $('scheduling_enabled').checked = c.scheduling_enabled!==false;
   if($('tg_window_enabled')) $('tg_window_enabled').checked = !!c.tg_window_enabled;
   if($('wa_window_enabled')) $('wa_window_enabled').checked = !!c.wa_window_enabled;
@@ -3116,6 +3130,11 @@ function bcValidate(){ const btn=$('bc_send'); if(!btn) return;
 // M40/M3/M9: el datetime-local se interpreta en la ZONA CONFIGURADA (window_tz), no en la del
 // navegador, para que coincida con la ventana de envío del servidor. (Si navegador==zona, no cambia.)
 function schedTz(){ return parseInt(($('window_tz')&&$('window_tz').value)||'-300',10) || -300; }
+// UX-3: etiqueta humana de la zona configurada, INLINE junto a cada datetime (adiós hints de peregrinaje).
+function tzLabel(){ const s=$('window_tz');
+  if(s&&s.tagName==='SELECT'&&s.selectedIndex>=0&&s.options[s.selectedIndex]) return s.options[s.selectedIndex].textContent;
+  const m=schedTz(); return 'UTC'+(m>=0?'+':'')+(m/60); }
+function tzSyncLabels(){ document.querySelectorAll('.tz-lbl').forEach(e=>{ e.textContent=tzLabel(); }); }
 function schedTzLabel(){ const t=schedTz(), s=t<0?'-':'+', a=Math.abs(t); return 'UTC'+s+String(Math.floor(a/60)).padStart(2,'0')+':'+String(a%60).padStart(2,'0'); }
 function schedEpoch(sv){ const m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(sv||''); if(!m) return 0;
   const utc=Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]); return Math.floor((utc - schedTz()*60000)/1000); }
@@ -3238,10 +3257,16 @@ async function sendBroadcast(){
   // Programación opcional: datetime-local -> epoch (s). Vacío = enviar ya.
   let ep=0; const sv=$('bc_sched')?$('bc_sched').value:'';
   if(sv){ ep=schedEpoch(sv); if(ep>Math.floor(Date.now()/1000)) body.scheduled_at=ep; else { toast('La fecha programada debe ser futura',true); return; } }
-  // Canales EXPLÍCITOS en la confirmación: que se vea si saldrá por Telegram, WhatsApp o ambos.
+  // UX-3: la confirmación SIEMPRE dice a CUÁNTOS contactos irá por canal (panel de armado);
+  // si el conteo no se puede calcular, se dice explícitamente (nunca confirmar a ciegas).
+  let counts='';
+  try{ const r=await api('/api/broadcast/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bcBody())});
+    const p=[]; if(tg) p.push('Telegram: '+(r.telegram??0)+' contacto(s)'); if(wa) p.push('WhatsApp: '+(r.whatsapp??0)+' contacto(s)');
+    counts=p.join(' · ');
+  }catch(e){ counts='(no se pudo calcular el conteo — revisa la previsualización)'; }
   const chs=[tg&&'Telegram', wa&&'WhatsApp'].filter(Boolean).join(' + ');
   let msg = body.scheduled_at ? ('¿Programar este envío para '+sv.replace('T',' ')+' ('+schedTzLabel()+')?') : '¿Enviar este mensaje ahora?';
-  msg += '\n\nSe enviará por: '+chs+'.';
+  msg += '\n\nSe enviará por: '+chs+'.\nDestinatarios → '+counts;
   if(wa) msg+='\n\n⚠️ El envío masivo por WhatsApp puede banear tu número.';
   if(!await confirmModal(msg,{okText: body.scheduled_at ? 'Programar' : 'Enviar'})) return;
   const btn=$('bc_send'); btn.disabled=true; btn.classList.add('btn-loading'); $('bc_status').textContent='guardando...';
