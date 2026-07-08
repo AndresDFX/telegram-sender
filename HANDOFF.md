@@ -234,8 +234,11 @@ Lista accionable para no repetir fallos:
 - **`AlertEmail` validado + recordatorio SNS (B14):** el parámetro lleva `NoEcho` y `AllowedPattern` de email. Recordar: una suscripción SNS por email **solo entrega tras confirmarla** desde el correo; si es el único canal de reseteo de contraseña (sin Resend), hay que confirmarla o el código no llega.
 
 ### Trade-offs conocidos del diseño fail-open (NO son bugs nuevos)
-- **Doble-conteo / reenvío si `dedup.marcar()` cae por infra (M10/M30/B4):** `marcar()`/`procesado()` son fail-open a propósito (priorizan no-bloquear sobre no-duplicar; un re-lanzar reentregaría en bucle). Ante un fallo de infra REAL (no `ConditionalCheckFailed`) entre incrementar contadores y marcar, una reentrega SQS puede re-contar/re-enviar. Mitigación pendiente sugerida: métrica/alarma cuando `marcar()` cae al except de infra. Aceptado como trade-off.
-- **`paused`/strikes se leen una vez por invoke (B8):** correcto con `WorkerEventSourceMapping BatchSize=1` (invariante actual). Si se sube el BatchSize por throughput, habría que mover la lectura de pausa/strikes a por-record.
+- **Doble-conteo / reenvío si `dedup.marcar()` cae por infra (M10/M30/B4):** `marcar()`/`procesado()` son fail-open a propósito (priorizan no-bloquear sobre no-duplicar; un re-lanzar reentregaría en bucle). Ante un fallo de infra REAL (no `ConditionalCheckFailed`) entre incrementar contadores y marcar, una reentrega SQS puede re-contar/re-enviar. **Mitigación IMPLEMENTADA:** el except de infra emite la métrica `Replica/Backend / DedupInfraError` vía **EMF** (log estructurado → CloudWatch la extrae sin permisos extra) y el stack tiene la alarma `…-dedup-infra` → SNS. Si la alarma suena, revisar `ProcessedUpdates` y los contadores de los jobs del período.
+- **`paused`/strikes se leen una vez por invoke (B8):** correcto con `WorkerEventSourceMapping BatchSize=1` (invariante actual). El worker ahora **advierte en logs** si detecta más de 1 record por invoke; si se sube el BatchSize por throughput, mover la lectura de pausa/strikes a por-record.
+
+### Plan de pruebas
+El plan operativo (suite automatizada, smoke post-deploy, E2E manual por flujo y matriz de regresión bug→test) vive en **[docs/PLAN_PRUEBAS.md](docs/PLAN_PRUEBAS.md)**. Regla: todo bug corregido lleva test de regresión con el ID del hallazgo en el nombre (`test_a12_…`); si uno de esos tests falla, se está reintroduciendo un bug conocido.
 
 ### FloodWait de Telegram (Telethon)
 

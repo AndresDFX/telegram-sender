@@ -491,6 +491,31 @@ Resources:
       AlarmActions:
         - !Ref AlertsTopic
 
+  # M10/M30: el dedup es fail-open (no bloquear el envío); un fallo de INFRA (throttle/permiso)
+  # abre la puerta a doble-conteo/reenvío en reentregas. El código emite DedupInfraError vía EMF
+  # (log estructurado → métrica automática, sin permisos extra); esta alarma lo hace visible.
+  DedupInfraErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${EnvironmentName}-dedup-infra"
+      AlarmDescription: >-
+        El dedup (ProcessedUpdates) está fallando por infra (throttle/permiso/tabla): el envío
+        sigue (fail-open) pero hay riesgo de duplicados/doble-conteo en reentregas. Revisar la
+        tabla y los logs del worker.
+      Namespace: Replica/Backend
+      MetricName: DedupInfraError
+      Dimensions:
+        - Name: Component
+          Value: dedup
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
   PollerErrorsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:

@@ -31,6 +31,32 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _metrica_dedup_infra() -> None:
+    """M10/M30: emite la métrica ``DedupInfraError`` vía EMF (Embedded Metric Format).
+
+    El diseño del dedup es fail-open (no bloquear el envío), pero un fallo de INFRA real
+    (throttle/permiso/tabla) abre la puerta a doble-conteo/reenvío en una reentrega. Antes solo
+    quedaba en logs; con EMF, CloudWatch extrae la métrica automáticamente del log (sin permisos
+    ni llamadas API extra) y una alarma del stack avisa por SNS. Best-effort: nunca lanza."""
+    try:
+        import json as _json
+
+        print(_json.dumps({
+            "_aws": {
+                "Timestamp": int(time.time() * 1000),
+                "CloudWatchMetrics": [{
+                    "Namespace": "Replica/Backend",
+                    "Dimensions": [["Component"]],
+                    "Metrics": [{"Name": "DedupInfraError", "Unit": "Count"}],
+                }],
+            },
+            "Component": "dedup",
+            "DedupInfraError": 1,
+        }))
+    except Exception:
+        pass
+
+
 class DynamoDbSubscriberRepository(SubscriberRepository):
     def __init__(self, table_name: str | None = None, status_index: str | None = None, endpoint: str | None = None):
         self._name = table_name or os.environ.get("SUBSCRIBERS_TABLE", "SubscriptoresTelegram")
@@ -140,6 +166,7 @@ class DynamoDbDedupStore(DedupStore):
             # Si re-lanzáramos, el worker reencolaría un lote YA ENTREGADO y lo RE-ENTREGARÍA en
             # bucle (duplicados). Mejor seguir sin marcar que duplicar el mensaje.
             logger.exception("dedup.marcar falló para %s; continúo sin marcar (evita reentrega-duplicado)", key)
+            _metrica_dedup_infra()  # M10/M30: visible en CloudWatch (alarma), no solo en logs
             return False
 
     def borrar(self, key: str) -> None:
@@ -150,6 +177,7 @@ class DynamoDbDedupStore(DedupStore):
         try:
             return bool(self._t().get_item(Key={"updateId": str(key)}).get("Item"))
         except Exception:
+            _metrica_dedup_infra()  # M10/M30: el fail-open ante infra deja rastro medible
             return False  # ante duda no bloquear el envío
 
 

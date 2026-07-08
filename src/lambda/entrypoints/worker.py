@@ -76,6 +76,17 @@ def _resolver_imagen(body: dict) -> str | None:
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     _ensure()
 
+    # B8: INVARIANTE — el ESM de SQS usa BatchSize=1 (template.yaml). Este handler lee 'paused' y
+    # cuenta strikes UNA vez por invoke; con BatchSize>1 un lote manual y uno automático del mismo
+    # evento compartirían esa decisión y los strikes se inflarían por-record. Si alguien sube el
+    # BatchSize por throughput, este warning lo hace visible ANTES de que muerda en producción.
+    if len(event.get("Records", [])) > 1:
+        logger.warning(
+            "BatchSize>1 detectado (%d records): el gate de pausa y los strikes anti-baneo asumen "
+            "BatchSize=1; revisar worker.py (B8) antes de subir el BatchSize del ESM.",
+            len(event.get("Records", [])),
+        )
+
     # Interruptor maestro: en PAUSA NO se entregan los lotes AUTOMÁTICOS (captura del canal).
     # Los lotes MANUALES (Componer → Enviar, body["manual"]=True) SÍ se entregan aun en pausa:
     # la pausa solo frena lo automático. Los lotes automáticos descartados se confirman (ack)

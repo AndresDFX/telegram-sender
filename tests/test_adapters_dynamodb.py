@@ -99,6 +99,34 @@ class DedupStoreTests(unittest.TestCase):
         with patch.object(dynamodb, "_table", return_value=table):
             self.assertFalse(store.marcar("42"))  # no lanza: fail-open simétrico con procesado()
 
+    def test_m10_fallo_de_infra_emite_metrica_emf(self):
+        # M10/M30: el fail-open ante infra debe dejar rastro MEDIBLE: un log EMF con la métrica
+        # DedupInfraError (CloudWatch la extrae y el stack alarma por SNS). Duplicado real NO emite.
+        import io
+        import json as _json
+        from contextlib import redirect_stdout
+
+        table = MagicMock()
+        table.put_item.side_effect = ClientError(
+            {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "x"}}, "PutItem"
+        )
+        store = dynamodb.DynamoDbDedupStore()
+        out = io.StringIO()
+        with patch.object(dynamodb, "_table", return_value=table), redirect_stdout(out):
+            store.marcar("42")
+        emf = _json.loads(out.getvalue().strip())
+        self.assertEqual(emf["DedupInfraError"], 1)
+        self.assertEqual(emf["Component"], "dedup")
+        self.assertEqual(emf["_aws"]["CloudWatchMetrics"][0]["Namespace"], "Replica/Backend")
+        # Duplicado real (ConditionalCheckFailed): NO es fallo de infra, no emite métrica.
+        table.put_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "x"}}, "PutItem"
+        )
+        out2 = io.StringIO()
+        with patch.object(dynamodb, "_table", return_value=table), redirect_stdout(out2):
+            store.marcar("42")
+        self.assertEqual(out2.getvalue(), "")
+
 
 class ConfigStoreTests(unittest.TestCase):
     def test_get_mezcla_defaults_con_item(self):
