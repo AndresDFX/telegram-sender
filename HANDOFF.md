@@ -176,6 +176,8 @@ New → Web Service → conectar repo → **Root Directory `whatsapp-service`** 
 
 ## Operación del panel
 
+> **Manual para usuarios invitados:** [docs/MANUAL_USUARIO_INVITADO.md](docs/MANUAL_USUARIO_INVITADO.md) — cómo una segunda persona opera el panel compartiendo el mismo canal de origen del admin (qué es global vs por-usuario, flujos de envío, qué no tocar). El canal de origen y la captura son GLOBALES (no hay nada que configurar por usuario); lo único personal son las exclusiones, y los envíos aplican la UNIÓN de las de todos.
+
 Acceso por `AdminUrl` con HTTP Basic Auth (usuario `admin` + `ADMIN_PASSWORD`). El panel es un único HTML/CSS/JS embebido. Sobre todas las pestañas hay una **barra global de estado de envíos** siempre visible (ACTIVOS en verde / EN PAUSA en rojo) con acción directa para activar/pausar. El header muestra la identidad de Telegram que envía (en userbot, el teléfono con ✓ o "renovar" si caducó), el canal fuente (`📡 @canal`), el número de WhatsApp conectado y un badge con el rol del usuario.
 
 > **Cambios de comportamiento tras la revisión UX/UI/a11y (junio 2026, 6 tandas):** dos que el operador debe conocer:
