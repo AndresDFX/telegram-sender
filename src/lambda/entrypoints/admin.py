@@ -108,6 +108,11 @@ _BOOLS = ("whatsapp_enabled", "scheduling_enabled", "window_enabled", "capture_e
           "tg_window_enabled", "wa_window_enabled")
 # Secretos que NO se sobreescriben con un valor vacío (para no borrarlos al guardar otros campos).
 _NO_VACIAR = ("telethon_session", "telethon_api_id", "telethon_api_hash", "whatsapp_token", "bot_token", "resend_api_key")
+# El estado de sesión Telegram del header se sirve de la caché que mantiene el poller (que ya abre
+# Telethon cada ~5 min). Mientras la caché sea más fresca que esto, el panel NO abre conexión propia
+# (evita el solape de dos clientes con la misma sesión). Se elige > intervalo del poller (5 min) para
+# que su escritura periódica mantenga la caché siempre válida cuando el poller está corriendo.
+_TG_STATUS_TTL = 390
 
 
 def _ensure() -> None:
@@ -786,15 +791,24 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             if str(cfg.get("send_mode", "bot")).lower() == "userbot":
                 if not cfg.get("telethon_session"):
                     return _json({"mode": "userbot", "configured": False, "connected": False, "needs_renew": True})
+                # El poller mantiene esta caché caliente (ya abre Telethon cada run). El panel la LEE y
+                # NO abre su propia conexión salvo que esté vencida: evita dos clientes con la misma
+                # StringSession a la vez (panel cada 60s + poller) que Telegram penaliza.
+                cache = config.get_tg_status()
+                if cache.get("checked_at") and (int(time.time()) - int(cache["checked_at"])) < _TG_STATUS_TTL:
+                    conn = bool(cache.get("connected"))
+                    return _json({"mode": "userbot", "configured": True, "connected": conn,
+                                  "needs_renew": not conn, "me": cache.get("me"), "cached": True})
                 try:
                     cuenta = wiring.build_telethon_account()
                     est = cuenta.estado() if cuenta else {"authorized": False, "me": None}
-                    return _json({
-                        "mode": "userbot", "configured": True,
-                        "connected": bool(est.get("authorized")),
-                        "needs_renew": not bool(est.get("authorized")),
-                        "me": est.get("me"),
-                    })
+                    conn = bool(est.get("authorized"))
+                    try:
+                        config.set_tg_status(connected=conn, me=est.get("me"))  # refresca la caché
+                    except Exception:
+                        logger.exception("No se pudo cachear el estado de sesión de Telegram")
+                    return _json({"mode": "userbot", "configured": True, "connected": conn,
+                                  "needs_renew": not conn, "me": est.get("me")})
                 except Exception:
                     logger.exception("No se pudo verificar la sesión userbot de Telegram")
                     # No afirmamos "renovar" ante un fallo transitorio: estado desconocido.

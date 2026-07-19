@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sys
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "lambda"))
@@ -21,6 +22,7 @@ class FakeConfig:
                     "strip_patterns": ["ubicad"], "whatsapp_footer": "", "image_url": "",
                     "send_mode": "bot", "telethon_api_id": "", "telethon_api_hash": "", "telethon_session": ""}
         self.users = {}
+        self.tg_status = {"connected": None, "me": None, "checked_at": 0}
 
     def get(self):
         return dict(self.cfg)
@@ -35,6 +37,13 @@ class FakeConfig:
 
     def set_users(self, users):
         self.users = dict(users)
+
+    def get_tg_status(self):
+        return dict(self.tg_status)
+
+    def set_tg_status(self, connected, me=None):
+        self.tg_status = {"connected": connected, "me": me if me is not None else self.tg_status.get("me"),
+                          "checked_at": int(time.time())}
 
 
 class FakeSubs:
@@ -382,6 +391,32 @@ class TelegramAccountTests(unittest.TestCase):
         admin.wiring.build_telethon_account = _boom
         b = json.loads(admin.lambda_handler(self._ev(), None)["body"])
         self.assertIsNone(b["connected"]); self.assertFalse(b["needs_renew"])  # estado desconocido, no falsa alarma
+
+    def test_userbot_usa_cache_sin_abrir_telethon(self):
+        # Refactor sesión-concurrente: si el poller dejó un estado FRESCO en caché, el panel lo sirve
+        # SIN abrir su propia conexión Telethon (evita el solape de dos clientes con la misma sesión).
+        admin.config.cfg["send_mode"] = "userbot"; admin.config.cfg["telethon_session"] = "SESS"
+        admin.config.tg_status = {"connected": True, "me": {"phone": "573001112233"}, "checked_at": int(time.time())}
+
+        def _fail():
+            raise AssertionError("el panel NO debe abrir Telethon con la caché fresca")
+        admin.wiring.build_telethon_account = _fail
+        b = json.loads(admin.lambda_handler(self._ev(), None)["body"])
+        self.assertTrue(b["connected"]); self.assertTrue(b["cached"]); self.assertEqual(b["me"]["phone"], "573001112233")
+
+    def test_userbot_cache_vencida_rechequea_y_cachea(self):
+        # Caché vieja (poller caído): el panel hace UN chequeo en vivo y refresca la caché.
+        admin.config.cfg["send_mode"] = "userbot"; admin.config.cfg["telethon_session"] = "SESS"
+        admin.config.tg_status = {"connected": False, "me": None, "checked_at": int(time.time()) - 9999}
+
+        class FakeAcc:
+            def estado(self):
+                return {"authorized": True, "me": {"id": "1", "name": "Yo", "phone": "57300"}}
+        admin.wiring.build_telethon_account = lambda: FakeAcc()
+        b = json.loads(admin.lambda_handler(self._ev(), None)["body"])
+        self.assertTrue(b["connected"]); self.assertNotIn("cached", b)
+        self.assertTrue(admin.config.tg_status["connected"])              # se refrescó la caché
+        self.assertGreater(admin.config.tg_status["checked_at"], int(time.time()) - 5)
 
 
 if __name__ == "__main__":

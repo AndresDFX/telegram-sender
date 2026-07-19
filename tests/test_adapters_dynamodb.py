@@ -128,6 +128,44 @@ class DedupStoreTests(unittest.TestCase):
         self.assertEqual(out2.getvalue(), "")
 
 
+class TgStatusCacheTests(unittest.TestCase):
+    def _store_con_tabla(self):
+        # Fake table que guarda ítems por configId (get_item/put_item), para probar la caché real.
+        items = {}
+
+        class _T:
+            def get_item(self, Key):
+                it = items.get(Key["configId"])
+                return {"Item": it} if it else {}
+
+            def put_item(self, Item):
+                items[Item["configId"]] = Item
+
+        store = dynamodb.DynamoDbConfigStore()
+        store._t = lambda: _T()
+        return store
+
+    def test_set_y_get_tg_status(self):
+        store = self._store_con_tabla()
+        store.set_tg_status(connected=True, me={"phone": "57300"})
+        s = store.get_tg_status()
+        self.assertTrue(s["connected"]); self.assertEqual(s["me"]["phone"], "57300")
+        self.assertGreater(s["checked_at"], 0)
+
+    def test_set_tg_status_preserva_me_previo(self):
+        # Escribir connected=False SIN me no debe borrar la identidad ya cacheada (es estable).
+        store = self._store_con_tabla()
+        store.set_tg_status(connected=True, me={"phone": "57300"})
+        store.set_tg_status(connected=False)  # sesión caída, sin me
+        s = store.get_tg_status()
+        self.assertFalse(s["connected"]); self.assertEqual(s["me"]["phone"], "57300")  # me conservado
+
+    def test_get_tg_status_vacio(self):
+        store = self._store_con_tabla()
+        s = store.get_tg_status()
+        self.assertEqual(s["checked_at"], 0); self.assertIsNone(s["me"])
+
+
 class ConfigStoreTests(unittest.TestCase):
     def test_get_mezcla_defaults_con_item(self):
         from decimal import Decimal

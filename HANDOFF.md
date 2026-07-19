@@ -250,6 +250,7 @@ El plan operativo (suite automatizada, smoke post-deploy, E2E manual por flujo y
 ### FloodWait de Telegram (Telethon)
 
 - **NUNCA listar contactos con Telethon EN VIVO** (`GetContactsRequest`) desde el panel/preview: Telegram responde `FloodWaitError` (hasta ~1000s) y reventaba `enviar_manual`/`previsualizar` con HTTP 500. Fix: listar desde la **CACHÉ** (DynamoDB `__contacts__`); el envío real (`sendMessage`) no sufre ese FloodWait. El poller refresca la caché máx cada 30 min.
+- **Estado de sesión del header también va por CACHÉ** (evita dos clientes con la MISMA `StringSession` a la vez): el panel llamaba `/api/telegram/account` cada 60s, que abría Telethon y podía solaparse con el lector/preview del poller (que desde que t.me murió corre cada 5 min). Fix: el **poller** escribe el estado `{connected, me, checked_at}` en `__tg_status__` (config table) en cada run (ya tiene Telethon abierto); el **panel solo LEE** la caché y solo abre conexión propia si está vencida (`_TG_STATUS_TTL=390s` > los 5 min del poller → mientras el poller corra, el panel nunca conecta). `me` se conserva entre escrituras (identidad estable). El poller cachea también con la captura pausada.
 
 ### WhatsApp / Baileys
 

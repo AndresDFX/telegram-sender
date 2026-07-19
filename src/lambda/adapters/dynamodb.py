@@ -426,6 +426,32 @@ class DynamoDbConfigStore(ConfigStore):
         except (TypeError, ValueError):
             return 0
 
+    # Estado de la sesión userbot cacheado (lo escribe el POLLER, que ya abre Telethon cada run;
+    # el panel solo lo LEE, para no abrir una conexión Telethon propia cada 60s que se solape con la
+    # del poller usando la MISMA StringSession —Telegram penaliza dos clientes a la vez—).
+    _TG_STATUS_ID = "__tg_status__"
+
+    def get_tg_status(self) -> dict:
+        """Último estado de sesión de Telegram cacheado: {connected, me, checked_at} (vacío si nunca).
+        ``me`` se conserva entre escrituras (la identidad de la cuenta no cambia)."""
+        item = self._t().get_item(Key={"configId": self._TG_STATUS_ID}).get("Item") or {}
+        try:
+            checked_at = int(item.get("checked_at", 0))
+        except (TypeError, ValueError):
+            checked_at = 0
+        return {"connected": item.get("connected"), "me": item.get("me") or None, "checked_at": checked_at}
+
+    def set_tg_status(self, connected, me=None) -> None:
+        """Cachea el estado de sesión. Si ``me`` es None, conserva el ``me`` previo (identidad estable)."""
+        prev = self.get_tg_status()
+        item = {
+            "configId": self._TG_STATUS_ID,
+            "connected": connected,
+            "me": me if me is not None else prev.get("me"),
+            "checked_at": int(time.time()),
+        }
+        self._t().put_item(Item={k: v for k, v in item.items() if v is not None or k == "connected"})
+
     # Campos numéricos: DynamoDB no acepta float de Python, se guardan como Decimal.
     _NUMERICOS = (
         "markup_percentage",
