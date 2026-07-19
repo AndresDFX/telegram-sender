@@ -66,7 +66,7 @@ Servicio portable basado en **Baileys** (WhatsApp Web). Mantiene la conexión (s
 
 ### El panel admin
 
-El frontend es una **SPA monolítica embebida** como un único string crudo `_PAGE` en `admin.py` (≈línea 1023 en adelante; archivo total ~3457 líneas). HTML + CSS + JS inline, autocontenido (sin CDN), servido en `GET /admin`. Incluye su **design system** (paleta naranja `#FD531E`, escala de grises cálida, colores semánticos), favicon SVG inline y la lógica JS que consume la API REST del mismo Lambda. La parte Python alrededor de `_PAGE` (líneas 109-1022) son helpers (`_ensure`, `_audit`, autorización por sesión/rol con `_autorizado`/`_es_admin`, reseteo por email, saneo de config) y el router `lambda_handler` (línea 510).
+El frontend es una **SPA monolítica embebida** como un único string crudo `_PAGE` en `admin.py` (≈línea 1092 en adelante; archivo total ~3650 líneas). HTML + CSS + JS inline, autocontenido (sin CDN), servido en `GET /admin`. Incluye su **design system** (paleta naranja `#FD531E`, escala de grises cálida, colores semánticos), favicon SVG inline y la lógica JS que consume la API REST del mismo Lambda. La parte Python alrededor de `_PAGE` (helpers antes del string) son helpers (`_ensure`, `_audit`, autorización por sesión/rol con `_autorizado`/`_es_admin`, reseteo por email, saneo de config) y el router `lambda_handler` (≈línea 529).
 
 ### Archivos clave
 
@@ -178,7 +178,7 @@ New → Web Service → conectar repo → **Root Directory `whatsapp-service`** 
 
 > **Manual para usuarios invitados:** [docs/MANUAL_USUARIO_INVITADO.md](docs/MANUAL_USUARIO_INVITADO.md) — cómo una segunda persona opera el panel compartiendo el mismo canal de origen del admin (qué es global vs por-usuario, flujos de envío, qué no tocar). El canal de origen y la captura son GLOBALES (no hay nada que configurar por usuario); lo único personal son las exclusiones, y los envíos aplican la UNIÓN de las de todos.
 
-Acceso por `AdminUrl` con HTTP Basic Auth (usuario `admin` + `ADMIN_PASSWORD`). El panel es un único HTML/CSS/JS embebido. Sobre todas las pestañas hay una **barra global de estado de envíos** siempre visible (ACTIVOS en verde / EN PAUSA en rojo) con acción directa para activar/pausar. El header muestra la identidad de Telegram que envía (en userbot, el teléfono con ✓ o "renovar" si caducó), el canal fuente (`📡 @canal`), el número de WhatsApp conectado y un badge con el rol del usuario.
+Acceso por `AdminUrl` con HTTP Basic Auth (usuario `admin` + `ADMIN_PASSWORD`). El panel es un único HTML/CSS/JS embebido. Sobre todas las pestañas hay una **barra global de estado de envíos** siempre visible (ACTIVOS en verde / EN PAUSA en ÁMBAR; el rojo queda para fallos) con acción directa para activar/pausar. El header muestra la identidad de Telegram que envía (en userbot, el teléfono con ✓ o "renovar" si caducó), el canal fuente (`📡 @canal`), el número de WhatsApp conectado y un badge con el rol del usuario.
 
 > **Rediseño UX/colores (julio 2026, 6 batches del workflow `ux-color-redesign-panel`):** la navegación pasó a **5 pestañas por intención**: 🏠 Inicio (sala de control: switches de captura/envío automático + lista destino + última capturada) · ✍️ Enviar (compositor ÚNICO con modos ⚡Ahora/📅Una vez/🔁Recurrente — el formulario duplicado de "Programar un mensaje" se eliminó) · 📡 Actividad (historial con filtro Todas/Capturadas/En curso/Enviadas/Fallidas + botón «Enviar a…» en capturadas, programados, ⚠️ Problemas con cola/DLQ) · 👥 Contactos (antes "Fuentes y listas") · ⚙️ Ajustes (🔌 Conexiones / 📥 Captura / 📤 Ritmo y horarios / 👤 Acceso / 🛠️ Sistema). `goStep` mantiene ALIASES de rutas viejas→nuevas (retirar en 2-3 releases). Paleta consolidada: un solo `:root`, botón primario con texto oscuro (AA), canal Telegram=azul/WhatsApp=verde separado del estado, pausado=ámbar (rojo solo fallos), zona horaria como select legible, confirmaciones de envío siempre con N destinatarios.
 
@@ -188,18 +188,21 @@ Acceso por `AdminUrl` con HTTP Basic Auth (usuario `admin` + `ADMIN_PASSWORD`). 
 >
 > Además: borrado masivo en los 3 flujos (Envíos/Programados/Fraccionados); clic en el mensaje del historial → texto completo; validaciones (HH:MM, lote 1–150, delays, lista de WhatsApp obligatoria al programar); bloqueo de login devuelve 429 con "espera N min"; rate-limit en recuperación de contraseña; y mejoras de accesibilidad/responsive. La marca **Replica** (naranja) se mantiene.
 
-### Pestañas
+### Pestañas (5, orientadas a verbo tras el rediseño de julio 2026)
 
-- **🏠 Inicio:** resumen, KPIs de 30 días (enviados, tasa, lotes pendientes, DLQ), mini-gráfico de actividad, primeros pasos y accesos rápidos.
-- **📋 Fuentes y listas** (sub-nav Fuente del canal / Telegram / WhatsApp): configurar canal fuente, markup, símbolos, footer, patrones de limpieza, imagen y "probar procesamiento"; gestionar **destinatarios** con filtro Todos / Incluidos / Excluidos y contador, **listas de distribución** (whitelist/blacklist) y **auto-exclusión por patrón de nombre**.
-- **📨 Envíos:** **Componer y enviar** (texto + imagen + canales + selector "Enviar a" + previsualización + contador con aviso de límite 4096); tabla de **Envíos** con estado, barras de progreso "en vivo", borrado individual/masivo y error clickeable; **Programar un mensaje** y **Mensajes programados** (once/daily/weekly); **Envíos fraccionados** (monitor de planes).
-- **⚙️ Ajustes y estado:** Cuenta de Telegram (bot/userbot), WhatsApp (reenvío), Correo de recuperación (Resend), cambio de contraseña, **interruptor maestro de envíos** (solo automáticos), anti-baneo (lote/delays), ventana horaria, cola/DLQ, auditoría y **usuarios del panel con roles** (gestión solo visible para administradores).
+- **🏠 Inicio:** KPIs de 30 días (clicables) + mini-gráfico + **sala de control**: switches «Recopilar listas del canal» y «Envíos automáticos activos», selector **«Lista del envío automático»** por canal, card **«Última lista capturada»** (con «Enviar a…») y checklist de primeros pasos. Aquí viven los interruptores del negocio (antes enterrados en Ajustes).
+- **✍️ Enviar:** compositor **ÚNICO**: texto + imagen + canales + «Enviar a» (listas/contactos) + previsualización + contador (límite 4096) + selector **«¿Cuándo se envía?»** con modos **⚡ Ahora / 📅 Una vez el… / 🔁 Recurrente** (diario/semanal). El botón cambia a «Programar» según el modo. No hay formulario de programación aparte.
+- **📡 Actividad** (sub-nav): **Historial** (tabla con estado, progreso «en vivo», borrado individual/masivo, error clickeable y **filtro segmentado** Todas / 📥 Capturadas / En curso / Enviadas / Fallidas + botón **«Enviar a…»** en las capturadas) · **Envíos fraccionados** (monitor de planes) · **⏰ Programados** (solo lista de recurrentes: pausar/reanudar/borrar) · **⚠️ Problemas** (cola SQS + DLQ con reintentar/descartar).
+- **👥 Contactos** (sub-nav Telegram / WhatsApp): **destinatarios** con filtro Todos / Incluidos / Excluidos y contador, **listas de distribución** (whitelist/blacklist) y **auto-exclusión por patrón de nombre**.
+- **⚙️ Ajustes** (sub-nav): **🔌 Conexiones** (cuenta de Telegram bot/userbot, WhatsApp reenvío + QR/pairing) · **📥 Captura** (canal fuente, markup, símbolos, footer, patrones, imagen, «probar procesamiento») · **📤 Ritmo y horarios** (anti-baneo lote/delays, ventanas, **zona horaria como select legible**) · **👤 Acceso** (usuarios con roles, correo de recuperación, cambio de contraseña) · **🛠️ Sistema** (auditoría).
+
+`goStep` mantiene ALIASES de rutas viejas→nuevas (retirar en 2-3 releases); `showSub` cae al sub default si el guardado en `localStorage` ya no existe.
 
 ### Operación típica
 
-- **Activar/pausar lo automático:** desde la barra global. Recuerda: la pausa solo frena réplica y programados; el **manual siempre sale**.
-- **Envío puntual:** Envíos → Componer → escribir texto + imagen → elegir canales (ninguno viene preseleccionado) → "Enviar a" (listas/audiencias/contactos) → previsualizar → enviar (ya o programar) → seguir el progreso en la tabla de Envíos y revisar errores/estados ahí mismo.
-- **Listas y exclusiones:** en Fuentes y listas, gestionar listas por canal (`all`/`only`/`except`) y patrones de auto-exclusión por nombre. El envío manual a WhatsApp **exige** una lista/destinatarios concretos.
+- **Activar/pausar lo automático:** switch «Envíos automáticos activos» en 🏠 Inicio o la barra global. La pausa solo frena lo automático; el **manual siempre sale**.
+- **Envío puntual:** ✍️ Enviar → texto + imagen → canales (ninguno preseleccionado) → «Enviar a» (listas/contactos) → modo ⚡ Ahora (o 📅 Una vez el…) → confirmar (muestra N destinatarios) → seguir en 📡 Actividad → Historial.
+- **Listas y exclusiones:** en 👥 Contactos, listas por canal (`all`/`only`/`except`) y patrones de auto-exclusión por nombre. El envío manual a WhatsApp **exige** una lista/destinatarios concretos.
 
 ---
 
@@ -269,7 +272,7 @@ El plan operativo (suite automatizada, smoke post-deploy, E2E manual por flujo y
 - **Una URL S3 prefirmada solo es válida si el ROL que la firma tiene `s3:GetObject`.** El rol del **dispatcher** NO lo tenía → 403 al descargar (texto llegaba, imagen no). Fix: añadir `s3:GetObject` sobre `images/*` al dispatcher.
 - Checkbox Telegram nacía `checked` → mensajes por AMBOS canales. Fix: ningún canal preseleccionado + confirmación de canales.
 - WhatsApp manual exige el servicio CONFIGURADO (url+token), NO `whatsapp_enabled` (que es el auto-reenvío del canal).
-- **Envío automático SIEMPRE por lista elegida (A12):** el ENVÍO automático del canal difunde SOLO a la lista `auto_<canal>_list` elegida en Ajustes. Si un canal no tiene lista elegida NO difunde (antes caía a `<canal>_target`=`{mode:'all'}` → toda la agenda); si NINGÚN canal tiene lista, el post se trata como **captura** (registra + preview, no envía). En consecuencia el automático va siempre en modo `only` y NO aplica la auto-exclusión por patrón de nombre (esa solo actúa en envíos AMPLIOS/manuales). La guardia "elige lista antes de activar" se enforza también en el **backend**: `/api/config POST` rechaza con **400** activar `sending_enabled` sin `auto_telegram_list` (y sin `auto_whatsapp_list` si `whatsapp_enabled`), no solo en el front.
+- **Envío automático SIEMPRE por lista elegida (A12):** el ENVÍO automático del canal difunde SOLO a la lista `auto_<canal>_list` elegida en 🏠 Inicio. Si un canal no tiene lista elegida NO difunde (antes caía a `<canal>_target`=`{mode:'all'}` → toda la agenda); si NINGÚN canal tiene lista, el post se trata como **captura** (registra + preview, no envía). En consecuencia el automático va siempre en modo `only` y NO aplica la auto-exclusión por patrón de nombre (esa solo actúa en envíos AMPLIOS/manuales). La guardia "elige lista antes de activar" se enforza también en el **backend**: `/api/config POST` rechaza con **400** activar `sending_enabled` sin `auto_telegram_list` (y sin `auto_whatsapp_list` si `whatsapp_enabled`), no solo en el front.
 
 ### Truncado de mensajes
 
@@ -317,9 +320,9 @@ El plan operativo (suite automatizada, smoke post-deploy, E2E manual por flujo y
 
 ## Estado actual
 
-> Estas notas tienen 4-12 días; el último commit `c932b41` es posterior a varias. Verificar contra el código actual antes de afirmar como hecho.
+> Notas revisadas por última vez tras la revisión post-rediseño (HEAD `2857100`, julio 2026). Verificar contra el código actual antes de afirmar como hecho.
 
-- **Recopilación ACTIVA + envío PAUSADO** (`capture_enabled=True` por defecto, `sending_enabled=False`): el poller captura `@iproparts` y autoenvía cada lista a **Mensajes Guardados** del userbot (se ven como `📥 Capturada` en el panel), SIN difundir a nadie. El envío MANUAL (Componer → Enviar) SIEMPRE sale. Para encender el envío automático: elegir lista por canal en Ajustes → «Lista del envío automático» (el panel lo exige) y activar.
+- **Recopilación ACTIVA + envío PAUSADO** (`capture_enabled=True` por defecto, `sending_enabled=False`): el poller captura `@iproparts` y autoenvía cada lista a **Mensajes Guardados** del userbot (se ven como `📥 Capturada` en el panel), SIN difundir a nadie. El envío MANUAL (✍️ Enviar → ⚡ Ahora) SIEMPRE sale. Para encender el envío automático: en 🏠 Inicio elegir la lista por canal en «Lista del envío automático» (el panel lo exige) y activar el switch «Envíos automáticos activos».
 - **Modo de envío Telegram: `userbot` (Telethon)** — envía como la cuenta del usuario a sus contactos (no como bot a suscriptores), aceptando riesgo de baneo. La sesión viva NO está en `.env.deploy` (esa está REVOCADA); la válida vive en DynamoDB config (`telethon_session`, ~353 chars); `api_id`/`api_hash` vienen del env del Lambda. El bot `getMe` responde `@ipro_listas_bot`.
 - **Fuente de ingesta: `@iproparts`** (público, ajeno) → ingesta por **poller** (sondea `https://t.me/s/iproparts` por cron, high-water mark del `message_id`); el webhook solo para onboarding `/start`·`/stop`.
 - **WhatsApp 100% operativo en producción**, desplegado en **Render** (`https://telegram-sender-dm43.onrender.com`, Docker, plan Free → duerme a 15 min). Conectado como número **573243198985**, ~2180-2307 contactos (2180 con nombre de agenda), sesión + contactos persistidos en DynamoDB. Resuelve `list_ids` como JIDs (no nombres de lista).

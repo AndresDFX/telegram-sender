@@ -1,6 +1,6 @@
 # Plan de pruebas — Replica (Telegram/WhatsApp broadcasting)
 
-`Actualizado: 2026-07-08 · Suite: 276 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
+`Actualizado: 2026-07-19 · Suite: 286 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
 
 Este plan cubre **qué probar, cómo y con qué criterio de aceptación** en los tres niveles que tiene el
 proyecto: (1) suite automatizada, (2) smoke post-deploy y (3) pruebas E2E manuales por flujo. Incluye
@@ -13,7 +13,7 @@ cambio futuro no los reintroduzca sin que nadie lo note.
 
 | Nivel | Qué valida | Cuándo corre | Herramienta |
 |-------|------------|--------------|-------------|
-| **Unitaria** (276 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
+| **Unitaria** (286 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
 | **Sintaxis del servicio Node** | `index.js` y `dynamoAuth.js` parsean | Local, antes de commit | `node --check whatsapp-service/src/*.js` |
 | **Smoke post-deploy** | El stack desplegado responde y está cableado | Tras cada deploy relevante | Checklist §3 (manual/CLI) |
 | **E2E manual** | Flujos completos de negocio con cuentas de prueba | Antes de activar envío real / tras cambios grandes | Checklist §4 (panel + Telegram/WhatsApp reales) |
@@ -80,29 +80,31 @@ prueba con SOLO esas cuentas; `sending_enabled=False` salvo en el caso que lo pr
 
 ### F1 — Captura (recopilación sin envío)
 1. Con envío automático EN PAUSA, publicar un post con precio en el canal fuente.
-2. ✅ Aparece en Envíos como **capturado** (no "enviado"), con `full_text` visible en el modal.
+2. ✅ Aparece en **📡 Actividad → Historial (filtro 📥 Capturadas)** como **capturado** (no "enviado"), con `full_text` visible en el modal.
 3. ✅ Llega el preview a Mensajes Guardados del userbot; si NO llega, el job muestra el error de
    preview (B16). Ningún contacto recibe nada.
 4. ✅ Posts sin contenido tras limpieza (solo ubicación/branding) NO se capturan (M4).
 
-### F2 — Envío manual (Componer)
-1. Componer → texto con precio → elegir lista de prueba TG → **Enviar en el momento**.
+### F2 — Envío manual (✍️ Enviar)
+1. ✍️ Enviar → modo **⚡ Ahora** → texto con precio → elegir lista de prueba TG → **enviar**.
 2. ✅ Llega al chat de prueba aunque la ventana horaria esté cerrada y el sistema en pausa (manual salta ambos).
-3. ✅ El markup NO se aplica (manual va crudo); el progreso llega a 100% en Envíos.
+3. ✅ El markup NO se aplica (manual va crudo); el progreso llega a 100% en **📡 Actividad → Historial**.
 4. Repetir con imagen subida: ✅ imagen+texto llegan (caption si cabe, dos mensajes si >1024).
 5. Manual WhatsApp a la lista de prueba: ✅ llega al número de prueba; requiere servicio configurado.
 6. ✅ Enviar a lista vacía / todos excluidos → error visible con causa, no silencio.
 
 ### F3 — Envío automático por lista (A12/M25)
-1. Elegir "Lista del envío automático" por canal en Ajustes; activar envío.
+1. En **🏠 Inicio**, elegir la lista por canal en «Lista del envío automático» y activar «Envíos automáticos activos».
 2. ✅ Intentar activar SIN lista (vía panel y vía API directa) → bloqueado (front) y **400** (backend).
 3. Publicar en el canal: ✅ difunde SOLO a la lista elegida, con markup y footer aplicados.
 4. Borrar/renombrar la lista elegida y publicar: ✅ el job registra el error de auto-lista (M25), no
    difunde a todos ni cierra como "enviado" vacío silencioso.
 
 ### F4 — Programación y fraccionado
-1. Crear horario (once y daily) → ✅ dispara a su hora, respeta ventana y avanza `next_run` aunque
-   el envío falle (A2 — no re-dispara en bucle).
+1. Crear un **recurrente** (daily/weekly) desde **✍️ Enviar → 🔁 Recurrente** → ✅ dispara a su hora,
+   respeta ventana y avanza `next_run` aunque el envío falle (A2 — no re-dispara en bucle). El envío
+   único NO se crea como horario desde el panel: es el modo **📅 Una vez el…** de ✍️ Enviar (aparece en
+   **📡 Actividad → Historial**, no en Programados). Un schedule `type=once` puro solo se crea por API.
 2. Envío fraccionado (lista > batch_size): ✅ el dispatcher libera UN lote por tick; el progreso
    avanza por lotes; cancelar pendientes detiene los lotes en vuelo (worker los descarta).
 3. ✅ Con el servicio WhatsApp caído (suspender Render), Telegram sigue saliendo (independencia) y el
@@ -128,7 +130,7 @@ prueba con SOLO esas cuentas; `sending_enabled=False` salvo en el caso que lo pr
 3. `/blocked/clear` + `/reconnect` inmediato: ✅ los opt-outs limpiados NO reviven (M19).
 
 ### F8 — Gestión de datos del panel
-1. Borrado masivo/selectivo en Envíos, Horarios y Listas: ✅ borra lo seleccionado.
+1. Borrado masivo/selectivo en **📡 Actividad → Historial / Programados** y **👥 Contactos → listas**: ✅ borra lo seleccionado.
 2. ✅ "Borrar terminados" NO borra un fraccionado largo aún en vuelo (M8) ni las listas capturadas (M27).
 
 ---
@@ -148,6 +150,10 @@ prueba con SOLO esas cuentas; `sending_enabled=False` salvo en el caso que lo pr
 | M6/B7 | Job colgado 'enviando'; foto perdida entregada como éxito | `test_m6_…`, `test_b7_…` x2 | F2.4 |
 | M10/M30 | Doble-conteo invisible si el dedup cae por infra | `test_m10_…` (métrica EMF) + alarma `…-dedup-infra` | §3.8 |
 | M26/B12 | Lockout roto; códigos de pairing fantasma | `test_lockout…` | F6.2 / F7.1 |
+| Poller dedup_key | Reintento del poller (fallo de HWM/timeout) duplica la difusión del mismo post | `test_poller_pasa_dedup_key_determinista` (poll_channel) | F1 (retry) |
+| «Una vez» diferido | Un 📅 «Una vez el…» sale YA (no se difiere) con el fraccionado apagado o sin store de planes | `test_diferido_crea_plan_aunque_el_fraccionado_este_apagado`, `test_diferido_sin_store_de_planes_se_rechaza` (broadcasting) | F4.1 |
+| tz UTC=0 | Offset horario 0 (UTC) tratado como ausente → ventana y `next_run` mal calculados | `test_dentro_y_fuera_utc` (scheduling), `test_zona_horaria_utc_menos_5` (schedules) | F4.1 / F2.2 |
+| Init pestaña Enviar | La pestaña ✍️ Enviar carga en blanco (sin compositor ni listas) al entrar directo | — (panel/SPA, sin suite) | F2.1 |
 
 ---
 

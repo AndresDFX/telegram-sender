@@ -140,29 +140,29 @@ siempre visible muestra si los envíos automáticos están **ACTIVOS** (verde) o
 directa para activar/pausar (la pausa solo frena lo automático; el envío manual sigue disponible; al activar
 avisa cuántas difusiones hay en cola). El header muestra: la **identidad de Telegram que envía** (en userbot, el
 **teléfono** de la cuenta con ✓ si la sesión es válida o **«renovar»** clicable si caducó/se revocó → lleva a
-Ajustes → Cuenta de Telegram; en modo bot, `@usuario · ID`), el **canal fuente** al que está integrado
+Ajustes → 🔌 Conexiones; en modo bot, `@usuario · ID`), el **canal fuente** al que está integrado
 (`📡 @canal`), el **número de WhatsApp conectado**, y un badge con el **rol** del usuario.
 
-Cuatro pestañas:
+Cinco pestañas (orientadas a verbo, rediseño julio 2026):
 
-- **🏠 Inicio**: resumen, KPIs de 30 días (enviados, tasa, lotes pendientes, DLQ), mini-gráfico de
-  actividad, primeros pasos y accesos rápidos.
-- **📋 Fuentes y listas** (sub-nav **Fuente del canal / ✈️ Telegram / 🟢 WhatsApp**):
-  - *Fuente del canal*: canal fuente, markup %, símbolos, footer, patrones de limpieza, imagen, **probar procesamiento**.
-  - *Telegram / WhatsApp*: **Destinatarios** con **filtro Todos / ✅ Incluidos / ⛔ Excluidos** y contador
-    "incluidos · excluidos"; **listas de distribución** (whitelist/blacklist); **auto-exclusión por patrón
-    de nombre** (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`); en WhatsApp además
-    auto-excluidos por fallos.
-- **📨 Envíos**: **Componer y enviar** (texto + imagen + canales + selector "Enviar a" + previsualización +
-  contador con aviso de límite 4096); **Envíos** (tabla con estado + barras de progreso, "en vivo",
-  borrado individual/masivo, **clic en el mensaje → ver texto completo**, error de envío clickeable con el
-  detalle); **Programar un mensaje** y **Mensajes programados** (once/daily/weekly, con **borrado
-  individual/masivo**: seleccionar + «Borrar seleccionados»/«Borrar todos»); **Envíos fraccionados**
-  (monitor de planes con borrado individual/masivo). **Los tres flujos** (Envíos, Programados, Fraccionados)
-  tienen selección y borrado masivo consistente.
-- **⚙️ Ajustes y estado**: Cuenta de Telegram (bot/userbot), WhatsApp (reenvío), **Correo de recuperación**
-  (Resend), cambio de contraseña, **interruptor maestro de envíos** (solo automáticos), anti-baneo (lote/delays),
-  ventana horaria, cola/DLQ, auditoría y **usuarios del panel con roles** (gestión solo visible para administradores).
+- **🏠 Inicio**: KPIs de 30 días clicables (enviados, tasa, lotes pendientes, DLQ) + mini-gráfico + **sala
+  de control**: switches «Recopilar listas del canal» y «Envíos automáticos activos», **«Lista del envío
+  automático»** por canal, card **«Última lista capturada»** (con «Enviar a…») y primeros pasos.
+- **✍️ Enviar**: compositor **único** (texto + imagen + canales + «Enviar a» + previsualización + contador
+  4096) con selector **«¿Cuándo se envía?»**: **⚡ Ahora / 📅 Una vez el… / 🔁 Recurrente** (diario/semanal).
+  El botón cambia a «Programar» según el modo; no hay formulario de programación aparte.
+- **📡 Actividad**: **Historial** (estado + barras «en vivo», borrado individual/masivo, clic → texto
+  completo, error clickeable, y **filtro segmentado** Todas / 📥 Capturadas / En curso / Enviadas / Fallidas
+  + botón **«Enviar a…»** en las capturadas) · **Envíos fraccionados** (monitor de planes) · **⏰ Programados**
+  (recurrentes: pausar/reanudar/borrar) · **⚠️ Problemas** (cola SQS + DLQ). Borrado masivo consistente.
+- **👥 Contactos** (sub-nav **✈️ Telegram / 🟢 WhatsApp**): **Destinatarios** con **filtro Todos / ✅ Incluidos
+  / ⛔ Excluidos** y contador; **listas de distribución** (whitelist/blacklist); **auto-exclusión por patrón
+  de nombre** (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`); en WhatsApp además auto-excluidos
+  por fallos.
+- **⚙️ Ajustes** (sub-nav): **🔌 Conexiones** (Telegram bot/userbot, WhatsApp reenvío + QR/pairing) · **📥
+  Captura** (canal fuente, markup %, símbolos, footer, patrones, imagen, **probar procesamiento**) · **📤
+  Ritmo y horarios** (anti-baneo lote/delays, ventanas, **zona horaria como select legible**) · **👤 Acceso**
+  (usuarios con roles, correo de recuperación Resend, cambio de contraseña) · **🛠️ Sistema** (auditoría).
 
 API (Basic Auth) bajo `/admin/api/`: `me`, `config`, `subscribers`, `image`, `queue`, `dlq[/redrive|/purge]`,
 `audit`, `users[/role|/delete]`, `metrics`, `broadcast` (envío manual), `broadcast/preview`, `broadcasts[/delete]`,
@@ -201,7 +201,7 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
   evalúa la ventana **por canal**: una ventana cerrada en un canal NO frena al otro, y un WhatsApp caído (no
   resuelve su total) **no bloquea** los envíos de Telegram (Telegram se despacha primero, sin depender de WhatsApp).
   Los delays anti-baneo también son por canal (`tg_delay_*` / `wa_delay_*`). **El envío MANUAL INMEDIATO**
-  («Componer → Enviar en el momento», `source="manual"` y `not_before=0`) **salta la ventana** y sale al instante;
+  (✍️ Enviar → modo ⚡ Ahora, `source="manual"` y `not_before=0`) **salta la ventana** y sale al instante;
   la ventana sigue aplicando a lo automático del canal y a los envíos manuales **programados**.
 - **Recopilación y envío SEPARADOS** (dos interruptores independientes):
   - **Recopilación** (`capture_enabled`): el poller lee `@iproparts` y, por cada lista nueva, la registra
@@ -213,7 +213,7 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
     (panel + Mensajes Guardados), NO se difunden, NO crean plan ni cola — activar **no** reenvía lo ya capturado.
     Cuando está **activo**, cada lista nueva se difunde **solo a la lista elegida por canal**
     (`auto_telegram_list` / `auto_whatsapp_list`); el panel **exige** elegir lista antes de activar (evita enviar
-    a "todos"). El **envío MANUAL** (Componer → Enviar) **SIEMPRE sale**, aun con el envío apagado (`source="manual"`;
+    a "todos"). El **envío MANUAL** (✍️ Enviar) **SIEMPRE sale**, aun con el envío apagado (`source="manual"`;
     lo del canal es `source="channel"`/`"capture"`). Si un manual queda **sin destinatarios** se rechaza con motivo
     y se audita (`broadcast:rechazado`). Auto-pausa anti-baneo (solo el envío) tras 2 lotes totalmente fallidos.
 - **Programación y fraccionado**: **schedules** (once/daily/weekly; `application/materialize_schedules.py` los
