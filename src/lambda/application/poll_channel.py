@@ -51,7 +51,15 @@ class PollChannel:
             for post in nuevos:
                 # tiene_imagen: la captura anota los posts cuyo contenido real está en la foto
                 # (caption mínimo tipo "📌"), para que no parezcan capturas vacías en el panel.
-                self._broadcast(post.text, tiene_imagen=bool(getattr(post, "has_photo", False)))
+                # dedup_key: broadcast_id DETERMINISTA por (canal, message_id). Si el guardar del HWM
+                # falla o la Lambda muere tras crear el plan, el siguiente tick relee el mismo post y
+                # reusa el mismo id (sobrescribe el plan) en vez de crear otro → no duplica la difusión
+                # (mismo cierre que M18 hizo para el webhook; aquí el único caller que faltaba).
+                self._broadcast(
+                    post.text,
+                    dedup_key=f"{channel}:{post.message_id}",
+                    tiene_imagen=bool(getattr(post, "has_photo", False)),
+                )
                 self._hwm.guardar(channel, post.message_id)
         finally:
             self._broadcast._diferir_cierre_preview = False

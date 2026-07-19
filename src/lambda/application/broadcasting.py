@@ -507,10 +507,18 @@ class BroadcastList:
                 )
             raise ValueError("No hay destinatarios para este envío: elige al menos un canal con contactos.")
         channels = (["telegram"] if telegram else []) + (["whatsapp"] if wa_on else [])
+
+        # Un envío DIFERIDO (scheduled_at futuro) EXIGE el almacén de planes para respetar la hora: si
+        # se cayera al envío inmediato, saldría YA aunque el panel diga "programado". Si hay planes,
+        # forzamos la rama de plan aunque el fraccionado esté apagado; sin planes, se rechaza claro.
+        diferido = bool(scheduled_at) and int(scheduled_at) > 0
+        if diferido and self._plans is None:
+            raise ValueError("No se puede programar en este modo: falta el almacén de planes (envío fraccionado).")
+
         bid = self._nuevo_id()
         self._registrar(bid, text, "manual", channels, len(clientes))
 
-        if self._usar_scheduler(cfg):
+        if self._usar_scheduler(cfg) or diferido:
             self._crear_plan(
                 bid, cfg=cfg, text=text, image_url=image_url or None, image_key=image_key or None,
                 clientes=clientes, tg_on=bool(telegram), wa_on=wa_on, wa_mode=wa_mode, wa_list_ids=wa_ids,

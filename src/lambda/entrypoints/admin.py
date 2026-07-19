@@ -824,8 +824,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             img_key = str(cuerpo.get("image_key", "")).strip()
             if img_key and not img_key.startswith("images/"):
                 img_key = ""  # solo aceptamos claves de nuestro bucket de imágenes
-            if not texto:
-                return _json({"error": "texto requerido"}, 400)
+            # UX-fix: el compositor permite "solo imagen" (texto opcional). Solo se exige texto si NO
+            # hay imagen — antes el flujo solo-imagen moría con 400 aunque el front lo permitía.
+            if not texto and not (img or img_key):
+                return _json({"error": "escribe un mensaje o adjunta una imagen"}, 400)
             if len(texto) > 4096:  # límite de Telegram; evita que falle en cada destinatario
                 return _json({"error": "el mensaje supera 4096 caracteres"}, 400)
             if not (a_tg or a_wa):
@@ -926,6 +928,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     nr = proximo_run(s["type"], s["at"], s["days"], int(config.get().get("window_tz", -300)), int(time.time()))
                     if nr:
                         campos["next_run"] = nr
+                # UX-fix: reactivar un 'once' cuyo next_run YA pasó lo dispararía de inmediato en el
+                # siguiente tick (vencidos exige next_run>0). Se rechaza: un envío único ya usado no se
+                # "reactiva"; hay que crear uno nuevo con fecha futura.
+                elif s and s["type"] == "once" and int(s.get("next_run", 0)) <= int(time.time()):
+                    return _json({"error": "Ese envío único ya pasó su hora; créalo de nuevo con una fecha futura."}, 400)
             schedule_store.actualizar(sid, **campos)
             _audit("schedule:toggle", f"{sid}={'on' if enabled else 'off'}")
             return _json({"ok": True})
@@ -1346,6 +1353,8 @@ td b{font-weight:600;color:var(--tx)}
 /* UX-1: PAUSADO es advertencia (ámbar), no fallo; NEUTRAL para roles/etiquetas sin semántica. */
 .pill.paused{background:var(--warn-ink);color:var(--warn-tint);border-color:rgba(251,191,36,.35)}
 .pill.neutral{background:var(--elev);color:var(--tx2);border-color:var(--bd2)}
+/* UX-fix: la pill CAPTURADA (📥) faltaba y salía transparente. Azul info suave (recopilado, no enviado). */
+.pill.captured{background:rgba(96,165,250,.13);color:var(--info);border-color:rgba(96,165,250,.3)}
 
 /* ---------- stats ---------- */
 .stats{display:flex;gap:14px;flex-wrap:wrap}
@@ -1810,7 +1819,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="sending_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleSending()"> <b>Envíos automáticos activos</b></label>
      <span id="sys_badge" class="pill">—</span>
    </div>
-   <div class="hint" style="margin-top:10px">Controla <b>solo el ENVÍO</b> de lo recopilado. <b>Apagado:</b> cada lista capturada solo se <b>ve</b> (en Envíos y en tus Mensajes Guardados), NO se envía. <b>Activado:</b> cada lista nueva se envía <b>a la lista que elijas abajo</b> por canal. Activar <b>no</b> reenvía lo ya capturado. El envío MANUAL siempre funciona.</div>
+   <div class="hint" style="margin-top:10px">Controla <b>solo el ENVÍO</b> de lo recopilado. <b>Apagado:</b> cada lista capturada solo se <b>ve</b> (en 📡 Actividad y en tus Mensajes Guardados), NO se envía. <b>Activado:</b> cada lista nueva se envía <b>a la lista que elijas abajo</b> por canal. Activar <b>no</b> reenvía lo ya capturado. El envío MANUAL siempre funciona.</div>
    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bd)">
      <div class="hint" style="margin-top:0">¿Hay difusiones en cola que NO quieres enviar? Cancélalas (no se enviarán, ni al reactivar).</div>
      <button class="danger" style="margin-top:8px" onclick="cancelPending()">🗑 Cancelar difusiones pendientes</button>
@@ -1935,22 +1944,6 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="hint" style="margin-top:10px">Resultado (lo que se enviaría):</div>
    <div id="pp_out" style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-top:4px;min-height:40px;font-size:13px;color:var(--tx2)">—</div>
   </div>
-  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de mensajes</h2>
-   <div class="stats"><div class="stat"><b id="q_p">–</b><span>lotes programados pendientes</span></div>
-     <div class="stat"><b id="q_b">–</b><span>en cola SQS (en vuelo)</span></div>
-     <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
-   <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>📡 Actividad → Historial</b>.</div>
-   <button class="ghost" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
-  </div>
-  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
-   <div class="hint">Lotes que agotaron reintentos. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
-   <div id="dlq_list" style="margin-top:10px"></div>
-   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-     <button class="ghost" onclick="loadDlq()">Ver / refrescar</button>
-     <button class="sec" onclick="dlqRedrive()">↩ Reintentar todo</button>
-     <button class="danger" onclick="dlqPurge()">🗑 Descartar todo</button>
-   </div>
-  </div>
   <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Auditoría <span id="audit_n" class="hint"></span></h2>
    <div class="hint">Últimas acciones realizadas en el panel (config, envíos, cancelaciones, DLQ).</div>
    <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>cuándo</th><th>usuario</th><th>acción</th><th>detalle</th></tr></thead><tbody id="audit_rows"></tbody></table></div>
@@ -2074,8 +2067,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
 
    <label style="margin-top:16px">Canales</label>
    <div class="chan-row">
-     <label class="chan tg" id="bc_chan_tg"><span class="dot"></span><input type="checkbox" id="bc_telegram" onchange="bcChan()" style="display:none"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</label>
-     <label class="chan wa" id="bc_chan_wa"><span class="dot"></span><input type="checkbox" id="bc_whatsapp" onchange="bcChan()" style="display:none"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</label>
+     <label class="chan tg" id="bc_chan_tg"><span class="dot"></span><input type="checkbox" id="bc_telegram" onchange="bcChan()" class="sr-only"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</label>
+     <label class="chan wa" id="bc_chan_wa"><span class="dot"></span><input type="checkbox" id="bc_whatsapp" onchange="bcChan()" class="sr-only"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</label>
    </div>
    <div class="hint" id="bc_wa_warn" style="display:none">⚠️ El envío masivo por WhatsApp puede banear tu número. El sistema lo hace con ritmo lento (anti-baneo); úsalo con listas pequeñas.</div>
 
@@ -2097,9 +2090,9 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label style="margin-top:16px">¿Cuándo se envía?</label>
    <!-- UX-6: UN solo compositor con 3 modos; adiós al formulario duplicado de "Programar un mensaje". -->
    <div class="chan-row">
-     <label class="chan on" id="bc_mode_now"><input type="radio" name="bc_mode" value="now" checked onchange="bcMode()" style="display:none">⚡ Ahora</label>
-     <label class="chan" id="bc_mode_once"><input type="radio" name="bc_mode" value="once" onchange="bcMode()" style="display:none">📅 Una vez el…</label>
-     <label class="chan" id="bc_mode_rec"><input type="radio" name="bc_mode" value="rec" onchange="bcMode()" style="display:none">🔁 Recurrente</label>
+     <label class="chan on" id="bc_mode_now"><input type="radio" name="bc_mode" value="now" checked onchange="bcMode()" class="sr-only">⚡ Ahora</label>
+     <label class="chan" id="bc_mode_once"><input type="radio" name="bc_mode" value="once" onchange="bcMode()" class="sr-only">📅 Una vez el…</label>
+     <label class="chan" id="bc_mode_rec"><input type="radio" name="bc_mode" value="rec" onchange="bcMode()" class="sr-only">🔁 Recurrente</label>
    </div>
    <div id="bc_once_box" style="display:none;margin-top:10px">
      <input type="datetime-local" id="bc_sched" style="max-width:260px">
@@ -2107,8 +2100,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
    <div id="bc_rec_box" style="display:none;margin-top:10px">
      <div class="chan-row">
-       <label class="chan on" id="sg_freq_daily"><input type="radio" name="sg_type" value="daily" checked onchange="sgType()" style="display:none">Diario</label>
-       <label class="chan" id="sg_freq_weekly"><input type="radio" name="sg_type" value="weekly" onchange="sgType()" style="display:none">Semanal</label>
+       <label class="chan on" id="sg_freq_daily"><input type="radio" name="sg_type" value="daily" checked onchange="sgType()" class="sr-only">Diario</label>
+       <label class="chan" id="sg_freq_weekly"><input type="radio" name="sg_type" value="weekly" onchange="sgType()" class="sr-only">Semanal</label>
      </div>
      <div id="sg_time_box" style="margin-top:10px"><label style="margin-top:0">Hora</label><input type="time" id="sg_at" value="09:00" style="max-width:160px"></div>
      <div id="sg_days_box" style="margin-top:10px;display:none"><label style="margin-top:0">Días</label><div class="chan-row" id="sg_days"></div></div>
@@ -2123,10 +2116,26 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span id="bc_status" class="hint" style="margin-top:0"></span>
    </div>
   </div>
+  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de mensajes</h2>
+   <div class="stats"><div class="stat"><b id="q_p">–</b><span>lotes programados pendientes</span></div>
+     <div class="stat"><b id="q_b">–</b><span>en cola SQS (en vuelo)</span></div>
+     <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
+   <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>📡 Actividad → Historial</b>.</div>
+   <button class="ghost" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
+  </div>
+  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
+   <div class="hint">Lotes que agotaron reintentos. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
+   <div id="dlq_list" style="margin-top:10px"></div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+     <button class="ghost" onclick="loadDlq()">Ver / refrescar</button>
+     <button class="sec" onclick="dlqRedrive()">↩ Reintentar todo</button>
+     <button class="danger" onclick="dlqPurge()">🗑 Descartar todo</button>
+   </div>
+  </div>
   <div class="card" data-tab="envios" data-sub="historial"><h2>📡 Historial de difusiones <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
    <div class="hint">Estado y progreso de cada difusión. Las <b>📥 Capturadas</b> son listas del canal registradas SIN enviar — con «Enviar a…» decides a quién van. Se actualiza automáticamente mientras hay envíos en curso.</div>
    <!-- UX-4: filtro segmentado por estado (las capturadas dejan de estar camufladas entre difusiones) -->
-   <div class="segf" role="tablist" style="margin-top:10px">
+   <div class="segf" role="group" aria-label="Filtrar difusiones por estado" style="margin-top:10px">
      <button data-v="todas" class="on" aria-pressed="true" onclick="bcSetFilter('todas')">Todas</button>
      <button data-v="capturadas" aria-pressed="false" onclick="bcSetFilter('capturadas')">📥 Capturadas</button>
      <button data-v="encurso" aria-pressed="false" onclick="bcSetFilter('encurso')">En curso</button>
@@ -2146,13 +2155,12 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
   </div>
   <div class="card" data-tab="envios" data-sub="programados"><h2>📅 Mensajes programados <span id="sg_n" class="hint"></span></h2>
-   <div class="hint">Los mensajes recurrentes se crean desde <b>✍️ Enviar → 🔁 Recurrente</b>; aquí los pausas, reanudas o borras.</div>
-   <div class="hint">Próximos envíos automáticos. Puedes pausarlos/activarlos o eliminarlos.</div>
+   <div class="hint">Envíos recurrentes creados desde <b>✍️ Enviar → 🔁 Recurrente</b>; aquí los pausas, reanudas o borras.</div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="sg_table"><thead><tr><th class="selcol"><input type="checkbox" id="sg_selall" onchange="sgSelAll(this.checked)"></th><th>Mensaje</th><th>Canales</th><th>Cuándo</th><th>Próximo</th><th></th></tr></thead>
        <tbody id="sg_rows"></tbody></table>
    </div>
-   <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Crea uno arriba para enviarlo automáticamente.</p></div>
+   <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Los recurrentes (diario/semanal) se crean en el compositor.</p><button style="margin-top:8px" onclick="showTab('enviar');try{document.querySelector('input[name=bc_mode][value=rec]').checked=true;bcMode();}catch(e){}">🔁 Crear recurrente</button></div>
    <div class="tbl-toolbar">
      <button class="danger" id="sg_delsel" onclick="sgDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
      <button class="danger" onclick="sgDeleteAll()">🗑 Borrar todos</button>
@@ -2269,13 +2277,15 @@ function toast(m,v){ const t=$('toast'); t.textContent=m;
 function dsModal(o){ o=o||{}; return new Promise(resolve=>{
   const ov=document.createElement('div'); ov.className='ds-overlay';
   const d=document.createElement('div'); d.className='ds-modal'; d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true');
-  d.innerHTML='<h3>'+bcEsc(o.title||'Confirmar')+'</h3>'+
+  d.innerHTML='<h3 id="ds_modal_title">'+bcEsc(o.title||'Confirmar')+'</h3>'+
     (o.message?'<div class="ds-modal-body">'+bcEsc(o.message)+'</div>':'')+
     (o.input?'<input id="ds_modal_input" placeholder="'+bcEsc(o.placeholder||'')+'">':'')+
     '<div class="ds-modal-actions">'+(o.noCancel?'':'<button class="ghost" data-a="c">'+bcEsc(o.cancelText||'Cancelar')+'</button>')+
     '<button class="'+(o.danger?'danger':'')+'" data-a="k">'+bcEsc(o.okText||'Aceptar')+'</button></div>';
+  d.setAttribute('aria-labelledby','ds_modal_title');
   ov.appendChild(d); document.body.appendChild(ov);
-  const inp=d.querySelector('#ds_modal_input'); if(inp) setTimeout(()=>{inp.focus();},40);
+  // UX-fix: al abrir, enfocar el input o (si no hay) el botón primario — accesible por teclado.
+  const inp=d.querySelector('#ds_modal_input'); setTimeout(()=>{ (inp||d.querySelector('[data-a="k"]')).focus(); },40);
   const no=o.input?null:(o.noCancel?true:false);
   function close(v){ document.removeEventListener('keydown',onKey); ov.remove(); resolve(v); }
   function onKey(e){ if(e.key==='Escape') close(no); else if(e.key==='Enter') close(o.input?(inp?inp.value:''):true); }
@@ -2464,12 +2474,12 @@ function renderSendingState(on){
   const badge=$('sys_badge'); if(badge){ badge.className='pill '+(on?'active':'paused'); badge.textContent = on?'ACTIVOS':'PAUSADOS'; }  // UX-2: pausa=ámbar
   const hb=$('hdr_badge'); if(hb){
     if(on){ hb.style.display='none'; hb.onclick=null; }
-    else { hb.style.display='inline-block'; hb.className='pill failed'; hb.style.cursor='pointer';
+    else { hb.style.display='inline-block'; hb.className='pill paused'; hb.style.cursor='pointer';  // UX-2: pausa=ámbar (rojo solo fallos)
       hb.title='Envíos AUTOMÁTICOS en pausa (puedes seguir enviando manualmente) — clic para activarlos'; hb.textContent='⏸ Auto en pausa · activar'; hb.onclick=enableSending; }
   }
   const sb=$('send_banner'); if(sb){ sb.hidden=false;
     if(on){ sb.className='active'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>Envíos automáticos activos.</b> Cada lista nueva del canal se envía a la lista elegida por canal.</span><button class="sb-pause" onclick="setSending(false)">Pausar automáticos</button>'; }
-    else { sb.className='paused'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>⏸ Envíos AUTOMÁTICOS en pausa.</b> Las listas capturadas solo se VEN (en Envíos y en tus Mensajes Guardados), no se envían. <b>Tú sí puedes enviar manualmente</b> desde «Componer → Enviar en el momento».</span><button class="sb-go" onclick="enableSending()">▶ Activar automáticos</button>'; }
+    else { sb.className='paused'; sb.innerHTML='<span class="sb-dot"></span><span class="sb-txt"><b>⏸ Envíos AUTOMÁTICOS en pausa.</b> Las listas capturadas solo se VEN (en 📡 Actividad y en tus Mensajes Guardados), no se envían. <b>Tú sí puedes enviar manualmente</b> desde <b>✍️ Enviar → ⚡ Ahora</b>.</span><button class="sb-go" onclick="enableSending()">▶ Activar automáticos</button>'; }
   }
 }
 async function pendingSummary(){
@@ -2483,7 +2493,7 @@ async function pendingSummary(){
   }catch(e){ return {planes:0,envios:0,items:[]}; }
 }
 async function setSending(on){
-  if(!on){ if(!(await confirmModal('¿Pausar el ENVÍO automático? Las listas que se capturen quedarán solo VISIBLES (en Envíos y en tus Mensajes Guardados), sin enviarse a nadie. Podrás seguir enviando manualmente desde «Componer → Enviar en el momento».',{okText:'Pausar automáticos',danger:true}))){ renderSendingState(true); return; } }
+  if(!on){ if(!(await confirmModal('¿Pausar el ENVÍO automático? Las listas que se capturen quedarán solo VISIBLES (en 📡 Actividad y en tus Mensajes Guardados), sin enviarse a nadie. Podrás seguir enviando manualmente desde ✍️ Enviar → ⚡ Ahora.',{okText:'Pausar automáticos',danger:true}))){ renderSendingState(true); return; } }
   else {
     toast('Calculando a quién se enviará…','info');
     const c=await api('/api/config');
@@ -2503,14 +2513,14 @@ async function setSending(on){
     const autoT=c.auto_telegram_list?{mode:'only',lists:[c.auto_telegram_list]}:(TGT.telegram||{mode:'all',lists:[]});
     const autoW=c.auto_whatsapp_list?{mode:'only',lists:[c.auto_whatsapp_list]}:(TGT.whatsapp||{mode:'all',lists:[]});
     const tg=audienceFor('telegram',autoT), wa=audienceFor('whatsapp',autoW);
-    const fmt=(emoji,canal,a,ok)=>{ if(ok===false) return emoji+' '+canal+': no se pudo calcular (abre Fuentes → '+canal+' para ver el detalle).';
+    const fmt=(emoji,canal,a,ok)=>{ if(ok===false) return emoji+' '+canal+': no se pudo calcular (abre 👥 Contactos → '+canal+' para ver el detalle).';
       const MAX=12, lista=a.names.slice(0,MAX).map(x=>'   • '+x).join('\n'), mas=a.names.length>MAX?('\n   …y '+(a.names.length-MAX)+' más'):'';
       return emoji+' '+canal+' ('+a.mode+') — '+a.total+' contacto(s)'+(a.total?':\n'+lista+mas:' (nadie)'); };
     let msg='Al ACTIVAR, cada lista NUEVA del canal se enviará SOLO a la lista elegida por canal:\n\n'
       + fmt('✈️','Telegram',tg,true) + '\n\n' + fmt('🟢','WhatsApp',wa,waOk);
     if(ps.planes>0){
       const ne = ps.envios>0 ? (' (~'+ps.envios.toLocaleString('es')+' envíos)') : '';
-      msg += '\n\n⚠️ Además hay '+ps.planes+' difusión(es) EN COLA'+ne+' que saldrán al activar (gestiónalas en «Envíos fraccionados»).';
+      msg += '\n\n⚠️ Además hay '+ps.planes+' difusión(es) EN COLA'+ne+' que saldrán al activar (gestiónalas en 📡 Actividad → Historial).';
     }
     msg += '\n\n¿Activar los envíos automáticos?';
     if(!(await confirmModal(msg,{okText:'Activar envíos',danger:ps.planes>0}))){ renderSendingState(false); return; }
@@ -2649,7 +2659,7 @@ let Q_TIMER=null;
 function qStartPolling(){
   if(Q_TIMER) return; loadQueue();
   Q_TIMER=setInterval(()=>{ if(!CRED||document.hidden) return;
-    const vis=document.querySelector('main>.card[data-tab="ajustes"]')?.classList.contains('show');
+    const vis=document.querySelector('main>.card[data-tab="envios"]')?.classList.contains('show');  // UX-fix: Problemas vive en Actividad
     if(vis) loadQueue(); }, BC_POLL);
 }
 // --- Probar procesamiento del mensaje (preview ya procesado) ---
@@ -3100,7 +3110,7 @@ function a11yEnhance(){ try{
   // M4: el modo de envío (Todos/Solo/Excepto) se persiste al cambiarlo (antes solo con "Guardar listas").
   ['telegram','whatsapp'].forEach(ch=>document.querySelectorAll('input[name=mode_'+ch+']').forEach(r=>r.addEventListener('change',()=>saveLists(ch))));
 }catch(e){} }
-function boot(){ a11yEnhance(); showTab((()=>{try{const s=localStorage.getItem('tab');return ['inicio','fuentes','envios','ajustes'].includes(s)?s:'inicio'}catch(e){return 'inicio'}})()); loadMe(); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
+function boot(){ a11yEnhance(); showTab((()=>{try{const s=localStorage.getItem('tab');return ['inicio','enviar','fuentes','envios','ajustes'].includes(s)?s:'inicio'}catch(e){return 'inicio'}})()); loadMe(); loadCfg(); loadQueue(); loadSubs(); loadDlq(); loadDashboard(); connStartPolling(); }
 if(CRED && !sessionFresca()){ logout(); }
 else if(CRED){ fetch(BASE+'/api/me',{headers:hdr()}).then(r=>{ if(r.ok){ $('login').style.display='none'; $('app').style.display='block'; boot(); } else { logout(); } }).catch(()=>{}); }
 
@@ -3123,7 +3133,7 @@ function bcValidate(){ const btn=$('bc_send'); if(!btn) return;
   btn.disabled=!!reason; btn.title=reason||'Enviar'; }
 // M40/M3/M9: el datetime-local se interpreta en la ZONA CONFIGURADA (window_tz), no en la del
 // navegador, para que coincida con la ventana de envío del servidor. (Si navegador==zona, no cambia.)
-function schedTz(){ return parseInt(($('window_tz')&&$('window_tz').value)||'-300',10) || -300; }
+function schedTz(){ const v=parseInt(($('window_tz')&&$('window_tz').value) ?? '-300',10); return Number.isFinite(v)?v:-300; }  // UX-fix: UTC(0) ya no cae a -300
 // UX-3: etiqueta humana de la zona configurada, INLINE junto a cada datetime (adiós hints de peregrinaje).
 function tzLabel(){ const s=$('window_tz');
   if(s&&s.tagName==='SELECT'&&s.selectedIndex>=0&&s.options[s.selectedIndex]) return s.options[s.selectedIndex].textContent;
@@ -3236,6 +3246,9 @@ function bcClear(){
   BC_TG_SEL.clear(); BC_WA_SEL.clear();
   $('bc_tg_search').value=''; $('bc_wa_search').value=''; $('bc_tg_list').value=''; $('bc_wa_list').value='';
   if($('bc_sched')) $('bc_sched').value='';
+  // UX-fix: limpiar también el estado del modo recurrente (nombre + días), si no el siguiente lo hereda.
+  if($('sg_name')) $('sg_name').value='';
+  SG_DAYS.clear(); document.querySelectorAll('#sg_days .chan').forEach(e=>e.classList.remove('on'));
   bcRenderPick('tg'); bcRenderPick('wa');
   $('bc_status').textContent=''; bcCount(); bcPrev();
 }
@@ -3263,7 +3276,12 @@ async function bcCreateRecurring(){
   if(t==='weekly'){ if(!SG_DAYS.size){ toast('Elige al menos un día de la semana',true); return; } body.days=[...SG_DAYS]; }
   if(wa && !body.whatsapp_list){ toast('Elige una lista de WhatsApp (no se envía a toda la agenda)',true); return; }
   const chs=[tg&&'Telegram', wa&&'WhatsApp'].filter(Boolean).join(' + ');
-  if(!await confirmModal('¿Programar el envío RECURRENTE ('+(t==='daily'?'diario':'semanal')+' a las '+body.at+', '+tzLabel()+')?\n\nSe enviará por: '+chs+'.',{okText:'Programar recurrente'})) return;
+  // UX-fix: conteo de destinatarios también en el recurrente (patrón UX-3); las listas ya están elegidas.
+  let counts='';
+  try{ const pv=await api('/api/broadcast/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(bcBody())});
+    const pp=[]; if(tg) pp.push('Telegram: '+(pv.telegram??0)); if(wa) pp.push('WhatsApp: '+(pv.whatsapp??0)); counts='\nDestinatarios → '+pp.join(' · ');
+  }catch(e){ counts='\nDestinatarios → (no se pudo calcular el conteo)'; }
+  if(!await confirmModal('¿Programar el envío RECURRENTE ('+(t==='daily'?'diario':'semanal')+' a las '+body.at+', '+tzLabel()+')?\n\nSe enviará por: '+chs+'.'+counts,{okText:'Programar recurrente'})) return;
   const btn=$('bc_send'); btn.disabled=true; btn.classList.add('btn-loading');
   try{
     const r=await fetch(BASE+'/api/schedules',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify(body)});
@@ -3304,17 +3322,21 @@ async function sendBroadcast(){
   const btn=$('bc_send'); btn.disabled=true; btn.classList.add('btn-loading'); $('bc_status').textContent='guardando...';
   try{
     await api('/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    // "enviando" != "entregado": el envío se fracciona y la ENTREGA real se confirma abajo en Envíos.
-    toast(body.scheduled_at?'✓ Programado para más tarde':'✓ Enviando — la entrega se confirma abajo en Envíos','info'); $('bc_status').textContent='';
+    // UX-fix: tanto "Ahora" como "Una vez" aterrizan en 📡 Actividad → Historial (donde SÍ aparecen);
+    // un "Una vez" no sale en ⏰ Programados, así que decir dónde queda evita confusión.
+    toast(body.scheduled_at?'✓ Programado — míralo en Actividad → Historial':'✓ Enviando — sigue la entrega en Actividad → Historial','info'); $('bc_status').textContent='';
     bcClear();
-    showTab('envios');
+    showTab('envios'); showSub('envios','historial');
     loadBroadcasts();
   }catch(e){ const _m=e.message||(body.scheduled_at?'No se pudo programar':'No se pudo enviar'); $('bc_status').textContent=_m; toast(_m,true); }
   finally{ btn.disabled=false; btn.classList.remove('btn-loading'); }
 }
 // Al abrir la pestaña Enviar: rellenar listas + previsualizar (hook aditivo sobre showTab).
 (function(){ const _s=window.showTab;
-  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='envios'){ try{ bcFillLists(); bcChan(); }catch(e){} } }; }
+  // UX-fix: el compositor vive en la pestaña 'enviar' (antes era un sub de 'envios'). Al ABRIR Enviar
+  // hay que poblar los selects de listas (bcFillLists es el ÚNICO sitio que lo hace), reflejar el
+  // estado de canales (bcChan: muestra/oculta el picker de TG) y arrancar la preview de destinatarios.
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='enviar'){ try{ bcFillLists(); bcChan(); bcPrev(); }catch(e){} } }; }
 })();
 // ===== Envíos: listado + polling (GET /api/broadcasts) =====
 let BC_TIMER=null;
@@ -3436,10 +3458,13 @@ function bcRow(b){
 // UX-4: abre el compositor con el texto de la lista capturada (quita la nota interna 📷 si la trae).
 function bcSendCaptured(el){
   let full=(el.getAttribute('data-full')||'').trim();
-  full=full.replace(/\n*📷 La publicación original incluye una imagen[^\n]*$/,'').trim();
+  const teniaImg=/📷 La publicación original (incluye|es una|era una) (imagen|IMAGEN)/.test(full);
+  full=full.replace(/\n*📷 La publicación original[^\n]*(\n[^\n]*)?$/,'').trim();
   showTab('enviar');
   const t=$('bc_text'); if(t){ t.value=full; t.dispatchEvent(new Event('input')); t.focus(); }
-  toast('Lista cargada en el compositor — elige canal y destinatarios','info');
+  // UX-fix: si la captura traía imagen, avisar (no se puede recuperar la foto automáticamente).
+  if(teniaImg) toast('Ojo: la publicación original traía una IMAGEN — adjúntala aquí si quieres enviarla','warn');
+  else toast('Lista cargada en el compositor — elige canal y destinatarios','info');
   try{ $('bc_text').scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
 }
 function bcErrDetail(el){
@@ -3471,7 +3496,16 @@ async function loadBroadcasts(){
     const todos=r.broadcasts||[];
     const list=todos.filter(BC_FILTERS[BC_FILTER]||BC_FILTERS.todas);
     const rows=$('bc_rows'); rows.innerHTML='';
-    $('bc_empty').style.display=list.length?'none':'block';
+    // UX-fix: estado vacío CONTEXTUAL por filtro (antes con "Fallidas" sin resultados decía "Aún no hay difusiones").
+    const emp=$('bc_empty'); emp.style.display=list.length?'none':'block';
+    if(!list.length){ const h=emp.querySelector('h3'), p=emp.querySelector('p');
+      const MSG={ todas:['Aún no hay difusiones','Cuando la captura esté activa, cada lista del canal aparecerá aquí sin enviarse.'],
+        capturadas:['Sin listas capturadas','La captura del canal dejará aquí las listas nuevas, sin enviarlas.'],
+        encurso:['No hay envíos en curso','Los envíos en progreso aparecerán aquí mientras se despachan.'],
+        enviadas:['Sin envíos completados todavía','Cuando una difusión termine, la verás aquí.'],
+        fallidas:['Sin difusiones fallidas 🎉','No hay envíos con errores en este momento.'] };
+      const m=MSG[BC_FILTER]||MSG.todas; if(h) h.textContent=m[0]; if(p) p.textContent=m[1];
+      emp.querySelector('button').style.display = BC_FILTER==='todas' ? '' : 'none'; }
     let active=false;
     list.forEach(b=>{ rows.appendChild(bcRow(b)); if(b.status==='queued'||b.status==='sending') active=true; });
     if($('bc_selall')) $('bc_selall').checked=false; bcSelChanged();
@@ -3613,7 +3647,9 @@ function plStartPolling(){
     if(vis) loadPlans(); }, BC_POLL);
 }
 (function(){ const _s=window.showTab;
-  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='inicio') loadDashboard(); if(t==='envios') loadPlans(); if(t==='fuentes') loadBlocked(); if(t==='ajustes'){ loadQueue(); loadDlq(); loadAudit(); loadUsers(); } }; }
+  // UX-fix: la cola SQS y la DLQ se muestran en 📡 Actividad → ⚠️ Problemas (antes en Ajustes→Sistema):
+  // se cargan al entrar a 'envios', no a 'ajustes'. Auditoría y usuarios siguen en Ajustes.
+  if(typeof _s==='function'){ window.showTab=function(t){ _s(t); if(t==='inicio') loadDashboard(); if(t==='envios'){ loadPlans(); loadQueue(); loadDlq(); } if(t==='fuentes') loadBlocked(); if(t==='ajustes'){ loadAudit(); loadUsers(); } }; }
   const start=()=>{ if(CRED){ plStartPolling(); qStartPolling(); } };
   if(document.readyState!=='loading') start();
   else document.addEventListener('DOMContentLoaded', start);

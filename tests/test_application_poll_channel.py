@@ -39,9 +39,10 @@ class FakeBroadcast:
         self._diferir_cierre_preview = False
         self.diferido_durante_envio = []
 
-    def __call__(self, text, tiene_imagen=False):
+    def __call__(self, text, dedup_key=None, tiene_imagen=False):
         self.textos.append(text)
         self.imagenes = getattr(self, "imagenes", []) + [tiene_imagen]
+        self.dedup_keys = getattr(self, "dedup_keys", []) + [dedup_key]
         # B15: durante el bucle del poller debe estar activo el modo diferido (reutilizar conexión).
         self.diferido_durante_envio.append(self._diferir_cierre_preview)
         return {"batches": 1, "subscribers": 1}
@@ -80,6 +81,13 @@ class PollChannelTests(unittest.TestCase):
         self.assertEqual(res["new"], 1)
         self.assertEqual(bc.textos, ["B $100.000"])
         self.assertEqual(hwm.value, 1002)
+
+    def test_poller_pasa_dedup_key_determinista(self):
+        # El poller debe pasar dedup_key=f"{canal}:{message_id}" para que un reintento (fallo del HWM /
+        # timeout) reuse el mismo broadcast_id y sobrescriba el plan en vez de duplicar la difusión.
+        hwm, bc = FakeHwm(1000), FakeBroadcast()
+        PollChannel(FakeReader(POSTS), hwm, bc, CFG)()
+        self.assertEqual(bc.dedup_keys, ["ch:1001", "ch:1002"])
 
     def test_b15_difiere_cierre_de_preview_y_cierra_una_vez(self):
         # B15: con varios posts nuevos, el preview se difiere durante el bucle (reutiliza conexión)

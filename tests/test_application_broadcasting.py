@@ -488,6 +488,24 @@ class SchedulerPathTests(unittest.TestCase):
         self.assertTrue(res["scheduled"])
         self.assertEqual(plans.creados[0]["not_before"], 1750000000)
 
+    def test_diferido_crea_plan_aunque_el_fraccionado_este_apagado(self):
+        # Bug: con scheduling_enabled=False, un scheduled_at futuro se ignoraba y el envío salía YA
+        # aunque el panel dijera "programado". Ahora, con store de planes, un diferido SIEMPRE crea plan.
+        plans, queue = FakePlans(), FakeQueue()
+        cfg = FakeConfig(scheduling_enabled=False)
+        bl = BroadcastList(FakeSubs(["1", "2"]), queue, cfg, plans=plans)
+        res = bl.enviar_manual("hola", telegram=True, whatsapp=False, scheduled_at=1750000000)
+        self.assertTrue(res["scheduled"])
+        self.assertEqual(queue.calls, [])                       # NO se envió de inmediato
+        self.assertEqual(plans.creados[0]["not_before"], 1750000000)
+
+    def test_diferido_sin_store_de_planes_se_rechaza(self):
+        # Sin almacén de planes no se puede diferir: rechazar claro en vez de enviar ya "en silencio".
+        cfg = FakeConfig(scheduling_enabled=False)
+        bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, plans=None)
+        with self.assertRaises(ValueError):
+            bl.enviar_manual("hola", telegram=True, whatsapp=False, scheduled_at=1750000000)
+
     def test_manual_etiqueta_source_manual(self):
         # El plan manual se marca source="manual" (el dispatcher/worker lo dejan pasar en pausa).
         plans = FakePlans()
