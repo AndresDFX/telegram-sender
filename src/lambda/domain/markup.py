@@ -68,6 +68,36 @@ def _formatear_cop(pesos: int, simbolo: str = "$") -> str:
     return f"{simbolo}{pesos:,}".replace(",", ".")
 
 
+def desglosar_precios(
+    limpio: str,
+    marcado: str,
+    *,
+    currency_symbols: str = DEFAULT_CURRENCY_SYMBOLS,
+) -> list[dict]:
+    """Empareja el precio ANTERIOR con el NUEVO por cada producto, para mostrarlo en el panel.
+
+    Recibe el texto YA LIMPIO (pre-markup) y el MARCADO (post-markup): como el markup reemplaza cada
+    precio en su sitio 1:1, la N-ésima coincidencia de precio en ``limpio`` corresponde a la N-ésima
+    en ``marcado``. Devuelve una fila por precio: ``{"producto": <línea>, "anterior": "$325.000",
+    "nuevo": "$374.000"}``. Si por alguna razón los conteos no cuadran, empareja hasta el menor
+    (best-effort) para no inventar correspondencias."""
+    pat = _price_pattern(currency_symbols)
+
+    def _linea(texto: str, pos: int) -> str:
+        ini = texto.rfind("\n", 0, pos) + 1
+        fin = texto.find("\n", pos)
+        return texto[ini:(fin if fin != -1 else len(texto))].strip()
+
+    ant = [(m.group(0).strip(), _linea(limpio, m.start())) for m in pat.finditer(limpio)]
+    nue = [m.group(0).strip() for m in pat.finditer(marcado)]
+    filas = []
+    for (anterior, producto), nuevo in zip(ant, nue):
+        if anterior == nuevo:
+            continue  # el precio no cambió (p.ej. no era escalable): no aporta al comparador
+        filas.append({"producto": producto, "anterior": anterior, "nuevo": nuevo})
+    return filas
+
+
 def aplicar_markup(
     texto: str,
     porcentaje: float = DEFAULT_MARKUP_PERCENTAGE,

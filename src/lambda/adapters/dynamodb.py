@@ -576,26 +576,34 @@ class DynamoDbBroadcastStore:
     def _t(self):
         return _table(self._name, self._endpoint)
 
-    def crear(self, broadcast_id: str, text: str, source: str, channels, tg_total: int = 0, ttl_days: int = 30) -> None:
+    def crear(self, broadcast_id: str, text: str, source: str, channels, tg_total: int = 0, ttl_days: int = 30,
+              price_diff: list | None = None) -> None:
         now = int(time.time())
-        self._t().put_item(
-            Item={
-                "id": broadcast_id,
-                "created_at": now,
-                "text": (text or "")[:600],  # preview corto para la tabla
-                "full_text": (text or "")[:4096],  # texto COMPLETO (para "ver mensaje completo" en el panel)
-                "source": source,
-                "channels": list(channels),
-                "tg_total": int(tg_total),
-                "tg_sent": 0,
-                "tg_failed": 0,
-                "wa_total": 0,
-                "wa_sent": 0,
-                "wa_failed": 0,
-                "wa_started": False,
-                "ttl": now + ttl_days * 86400,
-            }
-        )
+        item = {
+            "id": broadcast_id,
+            "created_at": now,
+            "text": (text or "")[:600],  # preview corto para la tabla
+            "full_text": (text or "")[:4096],  # texto COMPLETO (para "ver mensaje completo" en el panel)
+            "source": source,
+            "channels": list(channels),
+            "tg_total": int(tg_total),
+            "tg_sent": 0,
+            "tg_failed": 0,
+            "wa_total": 0,
+            "wa_sent": 0,
+            "wa_failed": 0,
+            "wa_started": False,
+            "ttl": now + ttl_days * 86400,
+        }
+        # Comparador de precios (anterior→nuevo por producto) para el panel; acotado a 200 filas por si
+        # una lista es enorme (mantiene el item lejos del límite de 400KB de DynamoDB).
+        if price_diff:
+            item["price_diff"] = [
+                {"producto": str(f.get("producto", ""))[:120], "anterior": str(f.get("anterior", "")),
+                 "nuevo": str(f.get("nuevo", ""))}
+                for f in price_diff[:200]
+            ]
+        self._t().put_item(Item=item)
 
     def incr_telegram(self, broadcast_id: str, sent: int = 0, failed: int = 0) -> None:
         self._add(broadcast_id, "ADD tg_sent :s, tg_failed :f", {":s": int(sent), ":f": int(failed)})
@@ -724,6 +732,7 @@ class DynamoDbBroadcastStore:
                     "created_at": int(j.get("created_at", 0)),
                     "text": j.get("text", ""),
                     "full_text": j.get("full_text") or j.get("text", ""),  # texto completo para el panel
+                    "price_diff": list(j.get("price_diff") or []),  # comparador anterior→nuevo por producto
                     "source": j.get("source", ""),
                     "channels": list(j.get("channels", [])),
                     "status": self._estado(j),

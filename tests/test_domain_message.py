@@ -128,6 +128,22 @@ class TelefonoTests(unittest.TestCase):
         self.assertIn("$374.000", out)           # y el precio (con markup) también
 
 
+class ComponerConDesgloseTests(unittest.TestCase):
+    def test_devuelve_mensaje_y_desglose(self):
+        from domain.message import componer_con_desglose
+        src = "UBICADOS aqui\nSAMSUNG A06 $325.000\n📲 Pedidos: 300 123 4567"
+        msg, desglose = componer_con_desglose(src, markup_percentage=15, currency_symbols="$", footer="")
+        self.assertNotIn("UBICADOS", msg)                 # limpieza aplicada
+        self.assertIn("$374.000", msg)                    # markup en el mensaje final
+        self.assertEqual(len(desglose), 1)
+        self.assertEqual((desglose[0]["anterior"], desglose[0]["nuevo"]), ("$325.000", "$374.000"))
+
+    def test_vacio_da_desglose_vacio(self):
+        from domain.message import componer_con_desglose
+        msg, desglose = componer_con_desglose("UBICADOS EN EL C.C", markup_percentage=15, footer="X")
+        self.assertEqual((msg, desglose), ("", []))
+
+
 class ComponerVacioTests(unittest.TestCase):
     def test_solo_ubicacion_no_difunde_solo_footer(self):
         # M4: si la limpieza vacía el cuerpo, devolver "" (no "solo footer", que sería spam).

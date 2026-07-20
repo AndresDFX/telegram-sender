@@ -30,6 +30,22 @@ class MarkupTests(unittest.TestCase):
         for original in ("A37 5G 6-128GB", "REDMI PAD 2 8-256GB", "05/06/2026", "3218354891", "8:30AM"):
             self.assertEqual(aplicar_markup(original, 15), original)
 
+    def test_desglosar_precios_empareja_anterior_y_nuevo(self):
+        from domain.markup import desglosar_precios
+        limpio = "TV CORN 24\"\n$350.000\nADAPTADOR\n$80.000"
+        marcado = aplicar_markup(limpio, 15)  # 350000→402500→403000 ; 80000→92000
+        d = desglosar_precios(limpio, marcado)
+        self.assertEqual(len(d), 2)
+        self.assertEqual((d[0]["anterior"], d[0]["nuevo"]), ("$350.000", "$403.000"))
+        self.assertEqual((d[1]["anterior"], d[1]["nuevo"]), ("$80.000", "$92.000"))
+        self.assertEqual(d[0]["producto"], "$350.000")  # la línea del precio
+
+    def test_desglosar_omite_precios_que_no_cambian(self):
+        from domain.markup import desglosar_precios
+        # markup 0% → ningún precio cambia → desglose vacío (no aporta al comparador).
+        limpio = "A $100.000"
+        self.assertEqual(desglosar_precios(limpio, aplicar_markup(limpio, 0)), [])
+
     def test_b3_no_corrompe_precio_con_coma_decimal_o_mixta(self):
         # B3: con coma decimal CO (',50') o separadores mixtos (',000') el patrón solo casaba la parte
         # entera y dejaba la fracción suelta, corrompiendo el precio. Ahora NO se toca (mejor que basura).

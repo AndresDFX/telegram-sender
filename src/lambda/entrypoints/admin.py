@@ -1369,6 +1369,17 @@ td b{font-weight:600;color:var(--tx)}
 .pill.neutral{background:var(--elev);color:var(--tx2);border-color:var(--bd2)}
 /* UX-fix: la pill CAPTURADA (📥) faltaba y salía transparente. Azul info suave (recopilado, no enviado). */
 .pill.captured{background:rgba(96,165,250,.13);color:var(--info);border-color:rgba(96,165,250,.3)}
+/* Detalle de difusión (mensaje final que se envía + comparador de precios anterior→nuevo). */
+.det-sec{margin:0 0 16px}
+.det-h{font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mut);margin-bottom:7px}
+.det-msg{white-space:pre-wrap;max-height:280px;overflow:auto;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-sm);padding:12px;font-size:13px;color:var(--tx2);line-height:1.5}
+.det-tbl{width:100%;border-collapse:collapse;font-size:13px}
+.det-tbl th{text-align:left;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:6px 8px;border-bottom:1px solid var(--bd)}
+.det-tbl td{padding:7px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
+.det-tbl td:first-child{color:var(--tx2)}
+.det-ant{color:var(--mut);text-decoration:line-through;white-space:nowrap;font-variant-numeric:tabular-nums}
+.det-arr{color:var(--mut);text-align:center}
+.det-nue{color:var(--ok);font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
 
 /* ---------- stats ---------- */
 .stats{display:flex;gap:14px;flex-wrap:wrap}
@@ -2293,6 +2304,7 @@ function dsModal(o){ o=o||{}; return new Promise(resolve=>{
   const d=document.createElement('div'); d.className='ds-modal'; d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true');
   d.innerHTML='<h3 id="ds_modal_title">'+bcEsc(o.title||'Confirmar')+'</h3>'+
     (o.message?'<div class="ds-modal-body">'+bcEsc(o.message)+'</div>':'')+
+    (o.html?'<div class="ds-modal-body">'+o.html+'</div>':'')+  /* o.html: HTML de confianza (lo arma el panel con valores ya escapados) */
     (o.input?'<input id="ds_modal_input" placeholder="'+bcEsc(o.placeholder||'')+'">':'')+
     '<div class="ds-modal-actions">'+(o.noCancel?'':'<button class="ghost" data-a="c">'+bcEsc(o.cancelText||'Cancelar')+'</button>')+
     '<button class="'+(o.danger?'danger':'')+'" data-a="k">'+bcEsc(o.okText||'Aceptar')+'</button></div>';
@@ -2310,7 +2322,7 @@ function dsModal(o){ o=o||{}; return new Promise(resolve=>{
 }); }
 function confirmModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'¿Confirmas?',message:message,okText:opts.okText||'Aceptar',cancelText:opts.cancelText,danger:!!opts.danger}); }
 function promptModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'Escribe un valor',message:message,input:true,placeholder:opts.placeholder,okText:opts.okText||'Aceptar'}); }
-function alertModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'Aviso',message:message,okText:opts.okText||'Entendido',noCancel:true,danger:opts.danger}); }
+function alertModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'Aviso',message:message,html:opts.html,okText:opts.okText||'Entendido',noCancel:true,danger:opts.danger}); }
 // Skeleton de carga reutilizable: filas placeholder con shimmer mientras llegan los datos (solo 1ª carga).
 function skelTable(id,cols,rows){ const t=$(id); if(!t) return; const r=rows||4, c=cols||3;
   t.innerHTML=Array.from({length:r},()=>'<tr class="skeleton">'+Array.from({length:c},()=>'<td><div class="sk-line"></div></td>').join('')+'</tr>').join(''); }
@@ -3462,7 +3474,7 @@ function bcRow(b){
     : '';
   tr.innerHTML=
     `<td class="selcol"><input type="checkbox" class="bcsel" data-id="${b.id}" onchange="bcSelChanged()"></td>`+
-    `<td class="bc-msg"><b role="button" tabindex="0" title="Ver mensaje completo" style="cursor:pointer" data-full="${bcEsc(b.full_text||txt)}" onclick="bcMsgDetail(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcMsgDetail(this)}">${bcEsc(txt)} ›</b>`+
+    `<td class="bc-msg"><b role="button" tabindex="0" title="Ver el mensaje que se envía y el comparador de precios" style="cursor:pointer" onclick="bcDetail('${b.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcDetail('${b.id}')}">${bcEsc(txt)} ›</b>`+
       `<div class="bc-meta"><span class="bc-src">${bcEsc(b.source||'manual')}</span><span>${bcFmtTime(b.created_at)}</span></div></td>`+
     `<td><span class="pill ${st}">${bcEsc(label)}</span>${b.last_error?`<div class="bc-err" role="button" tabindex="0" onclick="bcErrDetail(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcErrDetail(this)}" data-err="${bcEsc((b.error_reasons||[]).join('\n')||b.last_error)}" title="Ver detalle del error">⚠ ${bcEsc(String(b.last_error).slice(0,72))} ›</div>`:''}</td>`+
     `<td><div class="chprog">${bcChanCell(false,b.telegram)}${bcChanCell(true,b.whatsapp)}</div></td>`+
@@ -3487,12 +3499,30 @@ function bcErrDetail(el){
   const body = lines.length>1 ? lines.map((l,i)=>(i+1)+'. '+l).join('\n') : (raw||'Sin detalle disponible.');
   alertModal(body,{title:'Detalle del error',danger:true});
 }
-function bcMsgDetail(el){
-  const full=(el.getAttribute('data-full')||'').trim();
-  alertModal(full||'(sin texto / solo imagen)',{title:'Mensaje completo'});
+// Detalle enriquecido de una difusión: el MENSAJE FINAL tal como se envía (ya sin ubicación/teléfonos,
+// con markup y footer) + el COMPARADOR de precios (anterior→nuevo por producto). El mensaje que se
+// muestra es EXACTAMENTE full_text, es decir, lo que se envía / se está enviando ahora mismo.
+function bcDetail(id){
+  const b=(BC_BYID&&BC_BYID[id])||null;
+  const full=(b&&(b.full_text||b.text)||'').trim();
+  const diff=(b&&b.price_diff)||[];
+  let html='<div class="det-sec"><div class="det-h">📤 Mensaje que se envía</div>'+
+    '<div class="det-msg">'+(full?bcEsc(full):'(sin texto / solo imagen)')+'</div></div>';
+  if(diff.length){
+    const filas=diff.map(f=>'<tr><td>'+bcEsc(f.producto||'')+'</td><td class="det-ant">'+bcEsc(f.anterior||'')+
+      '</td><td class="det-arr">→</td><td class="det-nue">'+bcEsc(f.nuevo||'')+'</td></tr>').join('');
+    html+='<div class="det-sec"><div class="det-h">💰 Comparador de precios ('+diff.length+')</div>'+
+      '<div style="overflow-x:auto"><table class="det-tbl"><thead><tr><th>Producto</th><th>Antes</th><th></th><th>Ahora</th></tr></thead><tbody>'+filas+'</tbody></table></div></div>';
+  } else {
+    html+='<div class="det-sec"><div class="hint">💰 El comparador de precios (anterior→nuevo) aparece en las difusiones NUEVAS del canal. Para capturas anteriores a esta función no se guardó el precio original.</div></div>';
+  }
+  alertModal('',{title:'Detalle de la difusión', html: html});
 }
+// Compat: filas viejas que aún llamen bcMsgDetail(this) con data-full.
+function bcMsgDetail(el){ alertModal(bcEsc((el.getAttribute('data-full')||'').trim())||'(sin texto)',{title:'Mensaje completo', html:''}); }
 // UX-4: filtro segmentado del historial. 'fallidas' incluye los parciales (completados con fallos).
 let BC_FILTER='todas';
+let BC_BYID={};  // id→job de la última carga (para el detalle: mensaje final + comparador de precios)
 const BC_FILTERS={
   todas: ()=>true,
   capturadas: b=>b.status==='captured',
@@ -3508,6 +3538,7 @@ async function loadBroadcasts(){
   try{
     const r=await api('/api/broadcasts');
     const todos=r.broadcasts||[];
+    BC_BYID={}; todos.forEach(b=>{ BC_BYID[b.id]=b; });  // mapa id→job para el detalle (mensaje final + comparador)
     const list=todos.filter(BC_FILTERS[BC_FILTER]||BC_FILTERS.todas);
     const rows=$('bc_rows'); rows.innerHTML='';
     // UX-fix: estado vacío CONTEXTUAL por filtro (antes con "Fallidas" sin resultados decía "Aún no hay difusiones").

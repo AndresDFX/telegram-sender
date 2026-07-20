@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from domain.markup import DEFAULT_CURRENCY_SYMBOLS, DEFAULT_MARKUP_PERCENTAGE, aplicar_markup
+from domain.markup import DEFAULT_CURRENCY_SYMBOLS, DEFAULT_MARKUP_PERCENTAGE, aplicar_markup, desglosar_precios
 
 # Patrones por defecto para quitar líneas del canal fuente: marca/branding + ubicación/horario.
 # Robusto a variantes (el formato del origen no siempre es el mismo). Se aplica por LÍNEA
@@ -101,6 +101,30 @@ def quitar_telefonos(texto: str, patrones: Sequence[str]) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(salida)).strip()
 
 
+def componer_con_desglose(
+    texto: str,
+    *,
+    markup_percentage: float = DEFAULT_MARKUP_PERCENTAGE,
+    currency_symbols: str = DEFAULT_CURRENCY_SYMBOLS,
+    strip_patterns: Sequence[str] = DEFAULT_LOCATION_PATTERNS,
+    footer: str = "",
+) -> tuple[str, list[dict]]:
+    """Como ``componer_mensaje`` pero devuelve también el DESGLOSE de precios (anterior→nuevo por
+    producto), calculado sobre el mismo texto limpio que se marca (fuente única, sin desalineación).
+    Devuelve ``(mensaje, desglose)``; ``("", [])`` si tras la limpieza no queda contenido."""
+    limpio = quitar_lineas(texto, strip_patterns)
+    limpio = quitar_telefonos(limpio, DEFAULT_PHONE_PATTERNS)  # M3: quita el teléfono, conserva producto/precio
+    con_markup = aplicar_markup(limpio, markup_percentage, currency_symbols=currency_symbols)
+    # M4: si la limpieza dejó el cuerpo vacío, NO componer (devolver solo el footer sería spam);
+    # el llamador (captura del canal) salta los mensajes vacíos.
+    if not con_markup.strip():
+        return "", []
+    desglose = desglosar_precios(limpio, con_markup, currency_symbols=currency_symbols)
+    if footer:
+        con_markup = f"{con_markup}\n\n{footer}"
+    return con_markup, desglose
+
+
 def componer_mensaje(
     texto: str,
     *,
@@ -109,13 +133,8 @@ def componer_mensaje(
     strip_patterns: Sequence[str] = DEFAULT_LOCATION_PATTERNS,
     footer: str = "",
 ) -> str:
-    limpio = quitar_lineas(texto, strip_patterns)
-    limpio = quitar_telefonos(limpio, DEFAULT_PHONE_PATTERNS)  # M3: quita el teléfono, conserva producto/precio
-    con_markup = aplicar_markup(limpio, markup_percentage, currency_symbols=currency_symbols)
-    # M4: si la limpieza dejó el cuerpo vacío, NO componer (devolver solo el footer sería spam);
-    # el llamador (captura del canal) salta los mensajes vacíos.
-    if not con_markup.strip():
-        return ""
-    if footer:
-        con_markup = f"{con_markup}\n\n{footer}"
-    return con_markup
+    mensaje, _ = componer_con_desglose(
+        texto, markup_percentage=markup_percentage, currency_symbols=currency_symbols,
+        strip_patterns=strip_patterns, footer=footer,
+    )
+    return mensaje
