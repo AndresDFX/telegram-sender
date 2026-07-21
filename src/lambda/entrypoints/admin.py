@@ -1359,6 +1359,12 @@ button.ghost{background:transparent;border:1px solid var(--bd2);color:var(--mut)
 button.ghost:hover{background:rgba(255,255,255,.05);color:var(--tx2);filter:none;box-shadow:none}
 button.danger{background:var(--danger);color:#fff;border-color:transparent}
 button.danger:hover{background:var(--danger-h);filter:none;box-shadow:0 6px 22px -8px rgba(192,43,36,.5)}
+/* Ritmo vertical uniforme: un botón de acción que sigue a CUALQUIER bloque hermano DIRECTO de la
+   card respira 14px, para que "Guardar…" no quede pegado al campo/opciones de arriba. Al exigir
+   hijo directo (>), NO afecta a los botones dentro de filas horizontales o toolbars (p. ej.
+   "Crear lista" input+botón, .compose-actions, .tbl-toolbar), que conservan su alineación. */
+.card > * + button{margin-top:14px}
+.card > * + .markup{margin-top:14px}
 
 /* ---------- markup widget ---------- */
 .markup{display:flex;align-items:center;gap:18px;background:var(--elev);border:1px solid var(--bd);border-radius:var(--r);padding:18px}
@@ -1491,7 +1497,7 @@ main>.card.show{display:block}
 .charcount{float:right;font-size:11px;color:var(--mut);font-weight:500;margin-top:-2px;font-variant-numeric:tabular-nums}
 
 /* selector de canales (chips toggle) */
-.chan-row{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 4px}
+.chan-row{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 6px}
 .pickbox{max-height:152px;overflow:auto;border:1px solid var(--bd-int);border-radius:var(--r-sm);background:var(--elev);margin-top:6px;padding:4px}
 .pickitem{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--tx2)}
 .pickitem:hover{background:rgba(255,255,255,.04)}
@@ -1710,7 +1716,7 @@ button.ok:hover{background:#46e0a9}
 /* etiqueta de seccion para encabezar grupos de tarjetas */
 .section-label{
   grid-column:1/-1;display:flex;align-items:center;gap:10px;
-  margin:6px 2px -4px;color:var(--mut);font-size:11px;font-weight:700;
+  margin:18px 2px -4px;color:var(--mut);font-size:11px;font-weight:700;
   letter-spacing:.8px;text-transform:uppercase;
 }
 .section-label::after{content:"";flex:1;height:1px;background:var(--bd)}
@@ -2026,7 +2032,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <input id="telethon_session" type="password" placeholder="(pega para unir/cambiar la cuenta)" style="margin-top:8px">
      <div class="hint">Alternativa manual: genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a esa cuenta: trátala como secreto.</div>
    </details>
-   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
+   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px">
      <button class="sec" onclick="saveAccount()">Guardar cuenta</button>
      <button class="danger" onclick="tlLogout()">🗑 Desconectar mi cuenta de Telegram</button>
      <span id="tl_logout_out" class="hint" style="margin-top:0"></span>
@@ -2305,7 +2311,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span class="ping"></span>
      <span>Cola:</span> <b id="bc_sqs_q">–</b> en cola · <b id="bc_sqs_v">–</b> enviándose · <b id="bc_sqs_d">–</b> atascados
      <span class="grow"></span>
-     <button class="danger" style="padding:3px 10px" onclick="queuePurge()" title="Descarta TODO lo que aún espera en la cola (no revierte lo ya entregado)">🗑 Vaciar cola</button>
+     <button class="danger" style="padding:6px 12px;font-size:12px" onclick="queuePurge()" title="Descarta TODO lo que aún espera en la cola (no revierte lo ya entregado)">🗑 Vaciar cola</button>
    </div>
    <div class="grid-tools"><input id="bc_search" class="gv-search" placeholder="🔎 Buscar en difusiones (mensaje, origen)…" aria-label="Buscar difusiones"></div>
    <div style="overflow-x:auto;margin-top:12px">
