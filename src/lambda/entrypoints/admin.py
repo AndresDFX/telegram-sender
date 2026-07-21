@@ -2855,8 +2855,11 @@ async function loadDashboard(){
           (fa?`<div style="height:${fp}%;background:var(--bad)"></div>`:'')+
           `<div style="flex:1;background:linear-gradient(180deg,var(--ac),var(--ac2))"></div></div>`; }).join('') : '<div class="hint">sin actividad aún</div>')+'</div>'+
       '<div class="hint" style="margin-top:4px;font-size:11px"><span style="color:var(--ac)">■</span> enviados · <span style="color:var(--bad)">■</span> fallidos</div>';
-    try{ const bcs=((await api('/api/broadcasts')).broadcasts||[]); const last=bcs[0];
-      if($('dash_last')) $('dash_last').innerHTML = last? ('Último envío: <b>'+bcEsc((last.text||'(imagen)').slice(0,48))+'</b> — '+(BC_STATUS[last.status]||last.status)+' · '+bcFmtTime(last.created_at)) : 'Aún no hay envíos.';
+    try{ const bcs=((await api('/api/broadcasts')).broadcasts||[]);
+      // "Último envío" = la difusión con envío real más reciente (last_sent_at), no la última CREADA
+      // (que puede ser una captura sin enviar y contradiría el rótulo). Cae a la más reciente si nada se envió.
+      const enviados=bcs.filter(b=>b.last_sent_at); const last=enviados.length? enviados.reduce((a,b)=>a.last_sent_at>=b.last_sent_at?a:b) : null;
+      if($('dash_last')) $('dash_last').innerHTML = last? ('Último envío: <b>'+bcEsc((last.text||'(imagen)').slice(0,48))+'</b> — '+(BC_STATUS[last.status]||last.status)+' · '+bcFmtTime(last.last_sent_at)) : 'Aún no hay envíos.';
       bcRenderLastCaptured(bcs);  /* UX-4: card "Última lista capturada" también se alimenta desde Inicio */ }catch(e){}
   }catch(e){ if($('dash_estado')) $('dash_estado').textContent='no se pudo cargar el resumen';
     ['k_sent','k_rate','k_pend','k_dlq'].forEach(id=>{const e2=$(id); if(e2) e2.classList.remove('kpi-load');}); }
