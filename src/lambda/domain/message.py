@@ -16,8 +16,8 @@ from domain.markup import DEFAULT_CURRENCY_SYMBOLS, DEFAULT_MARKUP_PERCENTAGE, a
 # (case-insensitive); los patrones de dirección exigen un número para no tocar líneas de
 # producto. NO marcan precios (eso lo hace el markup aparte).
 DEFAULT_LOCATION_PATTERNS = (
-    r"ipro[\s_\-]*parts",                  # marca: IPRO PARTS / IPROPARTS / ipro_parts / ipro-parts
-    r"@?\s*iproparts",                     # handle del canal (@iproparts)
+    r"ipr[oó][\s_\-]*parts",               # marca: IPRO/IPRÓ PARTS / IPROPARTS / ipro_parts (con o sin tilde)
+    r"@?\s*ipr[oó]parts",                  # handle del canal (@iproparts / @iprÓparts)
     r"ubicad",                             # UBICADOS EN ...
     r"direcci[oó]n",                       # Dirección: ...
     r"estamos\s+en",                       # "Estamos en ..."

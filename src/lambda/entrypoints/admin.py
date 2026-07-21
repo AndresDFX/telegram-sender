@@ -1372,7 +1372,11 @@ td b{font-weight:600;color:var(--tx)}
 /* Detalle de difusión (mensaje final que se envía + comparador de precios anterior→nuevo). */
 .det-sec{margin:0 0 16px}
 .det-h{font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mut);margin-bottom:7px}
-.det-msg{white-space:pre-wrap;max-height:280px;overflow:auto;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-sm);padding:12px;font-size:13px;color:var(--tx2);line-height:1.5}
+.det-msg{white-space:pre-wrap;max-height:300px;overflow:auto;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r-sm);padding:12px;font-size:13px;color:var(--tx2);line-height:1.5}
+/* Mensajes anterior/nuevo lado a lado (comparación); cada columna con su propio scroll. */
+.det-msgs{display:flex;gap:14px;align-items:stretch;margin:0 0 16px}
+.det-msgs>.det-sec{flex:1;min-width:0;margin:0}
+@media (max-width:640px){.det-msgs{flex-direction:column}}
 .det-tbl{width:100%;border-collapse:collapse;font-size:13px}
 .det-tbl th{text-align:left;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:6px 8px;border-bottom:1px solid var(--bd)}
 .det-tbl td{padding:7px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
@@ -1739,6 +1743,9 @@ tbody tr.sel-row td{background:rgba(var(--ac-rgb),.12)}
 .ds-overlay{position:fixed;inset:0;background:rgba(0,0,0,.66);display:flex;align-items:center;justify-content:center;z-index:1300;padding:20px;animation:dsFade .14s ease}
 @keyframes dsFade{from{opacity:0}to{opacity:1}}
 .ds-modal{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--bd2);border-radius:16px;box-shadow:0 24px 60px -16px rgba(0,0,0,.7);padding:22px;max-width:440px;width:100%;animation:dsPop .16s ease}
+.ds-modal.ds-wide{max-width:min(880px,96vw)}
+.ds-modal-body.det-body{max-height:80vh}
+@media (max-width:640px){.ds-modal.ds-wide{max-width:100%}}
 @keyframes dsPop{from{transform:translateY(10px) scale(.98);opacity:0}to{transform:none;opacity:1}}
 .ds-modal h3{margin:0 0 10px;font-size:17px}
 .ds-modal-body{color:var(--tx2);font-size:14px;line-height:1.55;white-space:pre-line;max-height:48vh;overflow:auto;overflow-wrap:anywhere;word-break:break-word}
@@ -2315,10 +2322,10 @@ function toast(m,v){ const t=$('toast'); t.textContent=m;
 // Modales (promesas): reemplazan confirm()/prompt() nativos por diálogos de marca, accesibles (Esc/Enter, foco).
 function dsModal(o){ o=o||{}; return new Promise(resolve=>{
   const ov=document.createElement('div'); ov.className='ds-overlay';
-  const d=document.createElement('div'); d.className='ds-modal'; d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true');
+  const d=document.createElement('div'); d.className='ds-modal'+(o.wide?' ds-wide':''); d.setAttribute('role','dialog'); d.setAttribute('aria-modal','true');
   d.innerHTML='<h3 id="ds_modal_title">'+bcEsc(o.title||'Confirmar')+'</h3>'+
     (o.message?'<div class="ds-modal-body">'+bcEsc(o.message)+'</div>':'')+
-    (o.html?'<div class="ds-modal-body">'+o.html+'</div>':'')+  /* o.html: HTML de confianza (lo arma el panel con valores ya escapados) */
+    (o.html?'<div class="ds-modal-body '+(o.bodyClass||'')+'">'+o.html+'</div>':'')+  /* o.html: HTML de confianza (lo arma el panel con valores ya escapados) */
     (o.input?'<input id="ds_modal_input" placeholder="'+bcEsc(o.placeholder||'')+'">':'')+
     '<div class="ds-modal-actions">'+(o.noCancel?'':'<button class="ghost" data-a="c">'+bcEsc(o.cancelText||'Cancelar')+'</button>')+
     '<button class="'+(o.danger?'danger':'')+'" data-a="k">'+bcEsc(o.okText||'Aceptar')+'</button></div>';
@@ -2336,7 +2343,7 @@ function dsModal(o){ o=o||{}; return new Promise(resolve=>{
 }); }
 function confirmModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'¿Confirmas?',message:message,okText:opts.okText||'Aceptar',cancelText:opts.cancelText,danger:!!opts.danger}); }
 function promptModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'Escribe un valor',message:message,input:true,placeholder:opts.placeholder,okText:opts.okText||'Aceptar'}); }
-function alertModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'Aviso',message:message,html:opts.html,okText:opts.okText||'Entendido',noCancel:true,danger:opts.danger}); }
+function alertModal(message,opts){ opts=opts||{}; return dsModal({title:opts.title||'Aviso',message:message,html:opts.html,okText:opts.okText||'Entendido',noCancel:true,danger:opts.danger,wide:opts.wide,bodyClass:opts.bodyClass}); }
 // Skeleton de carga reutilizable: filas placeholder con shimmer mientras llegan los datos (solo 1ª carga).
 function skelTable(id,cols,rows){ const t=$(id); if(!t) return; const r=rows||4, c=cols||3;
   t.innerHTML=Array.from({length:r},()=>'<tr class="skeleton">'+Array.from({length:c},()=>'<td><div class="sk-line"></div></td>').join('')+'</tr>').join(''); }
@@ -3540,13 +3547,17 @@ function bcDetail(id){
   // Fechas de la difusión (recibido / primer envío / último envío).
   const f=(lbl,t)=> '<div class="det-f"><span>'+lbl+'</span><b>'+(t?bcFmtTime(t):'—')+'</b></div>';
   let html='<div class="det-dates">'+f('📥 Recibido', b&&b.created_at)+f('🚀 Primer envío', b&&b.first_sent_at)+f('🏁 Último envío', b&&b.last_sent_at)+'</div>';
-  // Mensaje ANTERIOR (original del canal) solo si existe y difiere del que se envía.
-  if(orig && orig!==full){
+  // Mensaje ANTERIOR (original del canal) y el que SE ENVÍA, lado a lado (comparación, no apilados
+  // a lo largo). Cada caja tiene su propio scroll; en pantallas angostas se apilan.
+  const hayOrig = orig && orig!==full;
+  html+='<div class="det-msgs">';
+  if(hayOrig){
     html+='<div class="det-sec"><div class="det-h">📥 Mensaje anterior (original del canal)</div>'+
       '<div class="det-msg det-orig">'+bcEsc(orig)+'</div></div>';
   }
   html+='<div class="det-sec"><div class="det-h">📤 Mensaje que se envía</div>'+
     '<div class="det-msg">'+(full?bcEsc(full):'(sin texto / solo imagen)')+'</div></div>';
+  html+='</div>';
   if(diff.length){
     const filas=diff.map(f=>'<tr><td>'+bcEsc(f.producto||'')+'</td><td class="det-ant">'+bcEsc(f.anterior||'')+
       '</td><td class="det-arr">→</td><td class="det-nue">'+bcEsc(f.nuevo||'')+'</td></tr>').join('');
@@ -3555,7 +3566,7 @@ function bcDetail(id){
   } else {
     html+='<div class="det-sec"><div class="hint">💰 El comparador de precios (anterior→nuevo) aparece en las difusiones NUEVAS del canal. Para capturas anteriores a esta función no se guardó el precio original.</div></div>';
   }
-  alertModal('',{title:'Detalle de la difusión', html: html});
+  alertModal('',{title:'Detalle de la difusión', html: html, wide:true, bodyClass:'det-body'});
 }
 // Compat: filas viejas que aún llamen bcMsgDetail(this) con data-full.
 function bcMsgDetail(el){ alertModal(bcEsc((el.getAttribute('data-full')||'').trim())||'(sin texto)',{title:'Mensaje completo', html:''}); }

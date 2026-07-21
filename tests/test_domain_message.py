@@ -44,6 +44,8 @@ class ComponerMensajeTests(unittest.TestCase):
         for variante in (
             "🔥 IPRO PARTS 🔥\nA06 $100.000", "IPROPARTS\nA06 $100.000", "ipro parts\nA06 $100.000",
             "ipro_parts\nA06 $100.000", "IPRO-PARTS\nA06 $100.000", "@iproparts\nA06 $100.000",
+            # con TILDE (así lo publica el canal en el encabezado): antes no casaba y colaba la marca
+            "👩🏻‍💻 IPRÓ PARTS 👩🏻‍💻\nA06 $100.000", "@IPRÓPARTS\nA06 $100.000",
         ):
             out = componer_mensaje(variante, markup_percentage=0, footer="")
             self.assertNotIn("PARTS", out.upper())
