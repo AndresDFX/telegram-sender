@@ -1,7 +1,8 @@
 # Replica — Roadmap (qué falta para avanzar)
 
-> _Actualizado 2026-06-11. Reemplaza la hoja de ruta original de 2026-06-07 (diseño webhook 1:1),
-> hoy superada. El histórico queda en el historial de git._
+> _Actualizado 2026-07-20 (panel UX renovado: nombres sin jerga, buscador/paginación/eliminar-todos,
+> borrar = desencolar, cola en vivo, detalle enriquecido, responsive). Reemplaza la hoja original de
+> 2026-06-07 (diseño webhook 1:1), hoy superada. El histórico queda en el historial de git._
 
 **Estado actual:** la plataforma **funciona y está desplegada** (AWS + Render), hoy **pausada**
 (`sending_enabled=False`). Núcleo sólido. Lo que sigue es lo que falta para **operar con confianza**
@@ -20,7 +21,10 @@ búsqueda por nombre/número · **estados de envío** (tabla Broadcasts) · **en
 secuencial** (dispatcher EventBridge, un lote a la vez) con **ventana horaria**, **delay aleatorio
 (jitter)** y **tamaño de lote** configurables · **interruptor maestro** (activar/desactivar) ·
 **cancelar** pendientes/por-envío · monitor de envíos fraccionados con el mensaje completo · gestión
-de bot/cuenta (bot o userbot) · panel admin moderno (Basic Auth). 163 tests.
+de bot/cuenta (bot o userbot) · panel admin moderno (Basic Auth) · **design system de grids**
+(buscador + paginación + eliminar-todos), **borrar = desencolar**, **cola de envío en vivo + vaciar**,
+**detalle enriquecido** (mensaje anterior + comparador de precios + fechas), **matriz de estado**,
+**nomenclatura sin jerga** y **diseño responsive**. 313 tests.
 
 ---
 
@@ -51,8 +55,8 @@ de bot/cuenta (bot o userbot) · panel admin moderno (Basic Auth). 163 tests.
   40 burst, freno a fuerza bruta independiente del contenedor) **+ expiración de sesión** (8 h).
 - 🔜 **Secretos a SSM/Secrets Manager** — *follow-up acotado* (los params ya son `NoEcho`; migrar a
   SecureString es un cambio de despliegue que conviene hacer con cuidado en una ventana aparte).
-- 🔜 **Cambio de contraseña desde el panel** — *follow-up* (requiere almacenar hash + ruta de auth
-  alterna; se difiere para no arriesgar el acceso en producción).
+- ✅ **Cambio de contraseña desde el panel** — Ajustes → 👤 Acceso; + recuperación por correo (Resend)
+  con «¿Olvidaste tu contraseña?» (`auth/{forgot,reset,change-password}`).
 
 ---
 

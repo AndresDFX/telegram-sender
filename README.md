@@ -136,37 +136,46 @@ y endpoints (`/status`, `/qr`, `/pair`, `/reset`, `/reconnect`, `/sync`, `/send`
 
 `AdminUrl` (HTTP Basic Auth: `AdminUser`/`AdminPassword`). El panel es un único HTML/CSS/JS embebido
 (`_PAGE` en `entrypoints/admin.py`). Sobre todas las pestañas, una **barra global de estado de envíos**
-siempre visible muestra si los envíos automáticos están **ACTIVOS** (verde) o **EN PAUSA** (rojo) con acción
+siempre visible muestra si los envíos automáticos están **ACTIVOS** (verde) o **EN PAUSA** (ámbar) con acción
 directa para activar/pausar (la pausa solo frena lo automático; el envío manual sigue disponible; al activar
 avisa cuántas difusiones hay en cola). El header muestra: la **identidad de Telegram que envía** (en userbot, el
 **teléfono** de la cuenta con ✓ si la sesión es válida o **«renovar»** clicable si caducó/se revocó → lleva a
 Ajustes → 🔌 Conexiones; en modo bot, `@usuario · ID`), el **canal fuente** al que está integrado
 (`📡 @canal`), el **número de WhatsApp conectado**, y un badge con el **rol** del usuario.
 
-Cinco pestañas (orientadas a verbo, rediseño julio 2026):
+Cinco pestañas (orientadas a verbo, rediseño julio 2026). **Nomenclatura sin jerga** para usuarios no
+técnicos y **responsive** (funciona en celular). **Design system de grids:** casi todas las tablas traen
+**buscador + paginación + eliminar todos** (helper reutilizable `GV`; ver §5).
 
-- **🏠 Inicio**: KPIs de 30 días clicables (enviados, tasa, lotes pendientes, DLQ) + mini-gráfico + **sala
-  de control**: switches «Recopilar listas del canal» y «Envíos automáticos activos», **«Lista del envío
-  automático»** por canal, card **«Última lista capturada»** (con «Enviar a…») y primeros pasos.
+- **🏠 Inicio**: KPIs de 30 días clicables (enviados, tasa, **por enviar**, **atascados**) + mini-gráfico +
+  **sala de control**: switches «**Capturar** listas del canal» y «Envíos automáticos activos», **«Lista del
+  envío automático»** por canal, card **«Última lista capturada»** (con «Enviar a…») y primeros pasos.
 - **✍️ Enviar**: compositor **único** (texto + imagen + canales + «Enviar a» + previsualización + contador
-  4096) con selector **«¿Cuándo se envía?»**: **⚡ Ahora / 📅 Una vez el… / 🔁 Recurrente** (diario/semanal).
+  4096) con selector **«¿Cuándo se envía?»**: **⚡ Ahora / 📅 Una vez / 🔁 Se repite** (diario/semanal).
   El botón cambia a «Programar» según el modo; no hay formulario de programación aparte.
-- **📡 Actividad**: **Historial** (estado + barras «en vivo», borrado individual/masivo, clic → texto
-  completo, error clickeable, y **filtro segmentado** Todas / 📥 Capturadas / En curso / Enviadas / Fallidas
-  + botón **«Enviar a…»** en las capturadas) · **Envíos fraccionados** (monitor de planes) · **⏰ Programados**
-  (recurrentes: pausar/reanudar/borrar) · **⚠️ Problemas** (cola SQS + DLQ). Borrado masivo consistente.
-- **👥 Contactos** (sub-nav **✈️ Telegram / 🟢 WhatsApp**): **Destinatarios** con **filtro Todos / ✅ Incluidos
-  / ⛔ Excluidos** y contador; **listas de distribución** (whitelist/blacklist); **auto-exclusión por patrón
-  de nombre** (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`); en WhatsApp además auto-excluidos
-  por fallos.
-- **⚙️ Ajustes** (sub-nav): **🔌 Conexiones** (Telegram bot/userbot, WhatsApp reenvío + QR/pairing) · **📥
-  Captura** (canal fuente, markup %, símbolos, footer, patrones, imagen, **probar procesamiento**) · **📤
-  Ritmo y horarios** (anti-baneo lote/delays, ventanas, **zona horaria como select legible**) · **👤 Acceso**
-  (usuarios con roles, correo de recuperación Resend, cambio de contraseña) · **🛠️ Sistema** (auditoría).
+- **📡 Actividad**: **Historial** con **matriz de estado** (filtros con conteo: Todas / 📥 Capturadas /
+  🆕 Creadas / ⏳ En proceso / ✅ Enviadas / ⚠️ Con fallos), buscador + paginación, columna **Fechas**
+  (recibido/1º/último envío) y **detalle enriquecido** al tocar el mensaje (📥 mensaje anterior original |
+  📤 mensaje que se envía, lado a lado + 💰 comparador de precios). **Borrar = desencolar** (individual /
+  seleccionados / **eliminar todas**: detiene lo pendiente). · **Envíos por partes** (monitor de planes) ·
+  **⏰ Programados** (pausar/reanudar/borrar) · **⚠️ Problemas**: **Cola de envío en vivo** (en cola /
+  enviándose / atascados) con **Vaciar cola** y **Envíos atascados** (reintentar/descartar).
+- **👥 Contactos** (sub-nav **✈️ Telegram / 🟢 WhatsApp**): **Contactos** con buscador + paginación,
+  **filtro Todos / ✅ Incluidos / ⛔ Excluidos** y contador; pastillas «Excluido por nombre / Incluido a
+  mano»; **Listas de contactos** (a quién enviar: todos / solo las listas marcadas / todos excepto);
+  bloque «**⛔ Excluir si el nombre contiene…**» (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`);
+  en WhatsApp además auto-excluidos por fallos.
+- **⚙️ Ajustes** (sub-nav): **🔌 Conexiones** (Telegram por bot o «mi cuenta personal», WhatsApp reenvío +
+  QR/código; «Conectar bot») · **📥 Captura** (canal de Telegram, markup %, símbolos, «texto al final del
+  mensaje», «textos a eliminar de cada lista», imagen, «probar cómo queda una lista») · **📤 Ritmo y
+  horarios** (anti-baneo «mensajes por grupo»/«pausa entre mensajes», ventanas, **zona horaria como select
+  legible**) · **👤 Acceso** (usuarios con roles, correo de recuperación Resend, cambio de contraseña) ·
+  **🛠️ Auditoría**.
 
-API (Basic Auth) bajo `/admin/api/`: `me`, `config`, `subscribers`, `image`, `queue`, `dlq[/redrive|/purge]`,
-`audit`, `users[/role|/delete]`, `metrics`, `broadcast` (envío manual), `broadcast/preview`, `broadcasts[/delete]`,
-`plans[/cancel|/delete]`, `schedules[/toggle|/delete]`, `auth/{forgot,reset,change-password}`,
+API (Basic Auth) bajo `/admin/api/`: `me`, `config`, `subscribers`, `image`, `queue[/purge]`, `dlq[/redrive|/purge]`,
+`audit[/delete]`, `users[/role|/delete]` (delete acepta `{all}`), `metrics`, `broadcast` (envío manual),
+`broadcast/preview`, `broadcasts[/delete]` (delete acepta `id`|`ids`|`finished`|`all`, y **desencola** el plan),
+`plans[/cancel|/delete]` (delete acepta `pid`|`pids`|`finished`|`all`), `schedules[/toggle|/delete]`, `auth/{forgot,reset,change-password}`,
 `telethon/{send-code,sign-in,logout}`, `whatsapp/{status,contacts,pair,reset,reconnect,sync,blocked}`,
 `telegram/{me,account,webhook}` (`account` = estado de la sesión userbot: válida o a renovar). Endpoints
 **públicos** (sin auth, con anti-fuerza-bruta): `auth/forgot`, `auth/reset`.
@@ -224,6 +233,14 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
   servicio (WhatsApp) reportan progreso vía `broadcast_id`.
 - **Recuperación de contraseña por correo**: vía **Resend** (`RESEND_API_KEY`/`MAIL_FROM`, capa gratis
   100/día) con fallback a SNS; ver `adapters/email_sender.py`.
+- **Design system de grids (panel)**: helper reutilizable `GV` (`gvInit(key,cfg)` + `gvSet(key,array)`) que
+  da **buscador + paginación** consistentes a difusiones, envíos por partes, programados, usuarios y auditoría
+  (contactos ya traían los suyos), más **eliminar todos** donde es seguro (los endpoints `*/delete {all}`).
+  El listado del backend sube su límite (broadcasts/plans 1000, audit 500) para paginar client-side.
+  **Borrar = desencolar**: `/api/broadcasts/delete` borra también el plan (pid == broadcast_id) → corta el
+  dispatcher y el worker descarta los lotes en vuelo. **Móvil**: `@media(max-width:620px)` reforzado (nav
+  envuelve, tap targets ≥44px, inputs 16px anti-zoom iOS, columna Fechas oculta) y **ritmo de espaciado**
+  uniforme (`.card > * + button` da aire a los botones de acción).
 
 ---
 
@@ -231,7 +248,7 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
 
 ```powershell
 docker compose -f docker/docker-compose.yml up --build     # stack local (DynamoDB + webhook inline)
-python -m unittest discover -s tests                        # 207 tests (sin AWS; boto3 perezoso + fakes)
+python -m unittest discover -s tests                        # 313 tests (sin AWS; boto3 perezoso + fakes)
 ```
 
 Los tests cubren markup, composición, recipients/listas + exclusión por patrón, cliente Telegram
@@ -259,11 +276,13 @@ Servicio WhatsApp: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`, `BROADCASTS_TABLE`, 
 ## 8. Estado actual y pendientes
 
 - ✅ Telegram (bot+userbot), WhatsApp (Baileys), listas, **exclusión por patrón de nombre**, estados,
-  envío manual, **programado y fraccionado**, **recopilación separada del envío** (captura + preview a
+  envío manual, **programado y fraccionado**, **captura separada del envío** (captura + preview a
   Mensajes Guardados, envío auto a lista elegida por canal), **correo Resend**, panel moderno
-  (filtros, borrado individual/masivo, barra de estado) — desplegado y verificado.
+  (matriz de estado, buscador/paginación/eliminar-todos, borrar = desencolar, cola en vivo + vaciar,
+  detalle enriquecido con mensaje anterior + comparador + fechas, nomenclatura sin jerga, responsive) —
+  desplegado y verificado.
 - ✅ Despliegue reproducible (`package-lambda.ps1` + `deploy.ps1`); **CI en GitHub Actions** (tests en cada
-  push; deploy gated por `DEPLOY_ENABLED`); **244 tests**.
+  push; deploy gated por `DEPLOY_ENABLED`); **313 tests**.
 - ⏳ Secretos en SSM/Secrets Manager; encriptación KMS de la tabla config; rate-limit distribuido del login.
 - ⚠️ WhatsApp/userbot: riesgo de baneo por envío masivo — usar listas pequeñas y delays altos.
 

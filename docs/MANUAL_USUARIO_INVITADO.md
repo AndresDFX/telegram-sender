@@ -1,10 +1,13 @@
 # Manual — Usar Replica con el mismo canal del administrador
 
-`Para: un usuario NUEVO del panel · No requiere conocimientos técnicos · Actualizado: 2026-07-19`
+`Para: un usuario NUEVO del panel · No requiere conocimientos técnicos · Actualizado: 2026-07-20`
 
 Este manual explica cómo una segunda persona usa la plataforma **Replica** aprovechando el mismo
 canal de origen que ya tiene configurado el administrador: ver las listas que se capturan del canal,
 enviarlas a sus contactos y programar envíos — sin tocar nada de la configuración técnica.
+
+> El panel funciona bien en **computador y en el celular** (el menú, las tablas y los formularios se
+> adaptan a la pantalla). Puedes operar todo desde el teléfono.
 
 ---
 
@@ -37,10 +40,10 @@ va a alguien, a quién y cuándo.
 
 | Compartido (una sola configuración para todos) | Personal (solo tuyo) |
 |---|---|
-| **Canal de origen** y su captura automática | **Tus patrones de exclusión** por nombre (ej. `FAM`) |
+| **Canal de origen** y su captura automática | **Tus reglas** de excluir por nombre (ej. `FAM`) |
 | **Historial** de envíos y listas capturadas | **Tus contactos excluidos** por número/id |
-| **Listas guardadas** de destinatarios (TG/WA) | Tus **excepciones** a los patrones |
-| Aumento de precio (markup), pie de mensaje, imagen | Tu contraseña y tu correo |
+| **Listas de contactos** guardadas (TG/WA) | Tus **excepciones** (incluidos a mano) |
+| Aumento de precio (markup), texto final, imagen | Tu contraseña y tu correo |
 | Conexiones (bot, cuenta Telegram, WhatsApp) | |
 | Interruptores de **captura** y **envío automático** | |
 | Ventanas horarias y ritmo anti-baneo | |
@@ -52,12 +55,22 @@ Dos consecuencias importantes:
   las exclusiones de todos los usuarios. Si tú excluyes a alguien, tampoco recibirá los envíos que
   haga el administrador (y viceversa). Coordina antes de excluir contactos compartidos.
 
-## 4. Ver lo que llega del canal
+## 4. Ver lo que llega del canal (📡 Actividad → Historial)
 
-- **📡 Actividad → Historial**: cada lista capturada aparece como fila con estado
-  **📥 Capturada (no enviada)**. Usa el filtro segmentado (Todas / **📥 Capturadas** / En curso /
-  Enviadas / Fallidas) para ver solo lo capturado. Clic en la fila para ver el **texto completo**
-  (ya con el aumento de precio aplicado).
+Cada lista capturada aparece como una fila con estado **📥 Capturada (no enviada)**.
+
+- **Matriz de estado (filtros con conteo):** arriba de la tabla hay una barra que filtra y muestra
+  cuántas hay de cada tipo: **Todas · 📥 Capturadas · 🆕 Creadas · ⏳ En proceso · ✅ Enviadas ·
+  ⚠️ Con fallos**. Toca una para ver solo ese grupo.
+- **Buscador y paginación:** usa la caja **🔎 Buscar** para encontrar una lista por su texto u origen,
+  y las flechas **‹ ›** de abajo para pasar de página cuando hay muchas.
+- **Detalle de la difusión (toca el mensaje):** se abre una ventana con todo lo importante:
+  - **Fechas**: 📥 recibido · 🚀 primer envío · 🏁 último envío.
+  - **📥 Mensaje anterior (original del canal)**: el texto tal como llegó (con ubicación, teléfonos y
+    marca) — a la izquierda.
+  - **📤 Mensaje que se envía**: el texto ya limpio (sin ubicación/teléfonos/marca), con el aumento de
+    precio y el texto final — a la derecha.
+  - **💰 Comparador de precios**: precio anterior → precio nuevo, producto por producto.
 - En **🏠 Inicio** tienes un atajo: la card **"Última lista capturada"** muestra la captura más
   reciente sin salir de la sala de control.
 - Si una fila dice *"📷 La publicación original incluye una imagen (este texto es su caption)"*, el
@@ -72,15 +85,15 @@ Dos consecuencias importantes:
 2. Pega el texto (puedes copiarlo desde el detalle de una captura) y añade imagen si quieres
    (archivo o URL).
 3. Marca el/los **canales** (Telegram y/o WhatsApp).
-4. En **Enviar a**, elige una **lista guardada** o busca y marca contactos concretos.
-   ⚠️ Evita el modo "todos": el pie de página y las guardias existen porque enviar a toda la agenda
+4. En **Enviar a**, elige una **lista de contactos** guardada o busca y marca contactos concretos.
+   ⚠️ Evita el modo "todos": el texto final y las guardias existen porque enviar a toda la agenda
    por error es el mayor riesgo de la plataforma.
 5. En **¿Cuándo se envía?** elige el modo:
    - **⚡ Ahora**: el botón dice **Enviar** y la lista sale de inmediato (aunque el sistema esté
      "EN PAUSA": la pausa solo frena lo automático).
-   - **📅 Una vez el…**: elige fecha y hora; el botón cambia a **Programar**. Se interpreta en la
+   - **📅 Una vez**: elige fecha y hora; el botón cambia a **Programar**. Se interpreta en la
      zona horaria configurada del sistema (Colombia), no en la de tu navegador.
-   - **🔁 Recurrente**: para envíos que se repiten (ver §7).
+   - **🔁 Se repite**: para envíos que se repiten (ver §7).
 6. Sigue el progreso en **📡 Actividad → Historial** (barras por canal, errores visibles por fila).
 
 Notas:
@@ -88,31 +101,52 @@ Notas:
 - El texto manual va **tal cual** lo escribes (sin markup automático); las capturas ya lo traen aplicado.
 - WhatsApp manual exige elegir lista (no permite "toda la agenda").
 
-## 6. Crear tu propia lista de destinatarios
+## 6. Crear tu propia lista de contactos
 
-1. **👥 Contactos → Telegram** (o WhatsApp): busca contactos, márcalos y pulsa **Crear lista**
-   con un nombre claro (ej. `Clientes Pedro`).
+1. **👥 Contactos → Telegram** (o WhatsApp): usa el **🔎 buscador** para encontrar contactos,
+   márcalos y pulsa **➕ Nueva lista con los marcados** con un nombre claro (ej. `Clientes Pedro`).
 2. Esa lista queda disponible para todos los usuarios en el compositor **✍️ Enviar** (en cualquiera
    de sus modos).
-3. ⚠️ **No renombres ni borres listas que no creaste**: si una lista está elegida como destino del
-   envío automático y desaparece, el sistema deja de difundir y lo marca como error en el job.
+3. Para elegir a quién enviar, marca ☑ las listas que quieras usar y abajo elige **¿A quién se envía?**:
+   *Todos mis contactos*, *Solo las listas marcadas* o *Todos, excepto las listas marcadas*.
+4. ⚠️ **No renombres ni borres listas que no creaste**: si una lista está elegida como destino del
+   envío automático y desaparece, el sistema deja de difundir y lo marca como error.
 
-## 7. Programar envíos recurrentes
+Para **dejar de enviarle a alguien** no hace falta borrar el contacto: márcalo y usa **Excluir
+marcados**, o escribe una regla en **"⛔ Excluir si el nombre contiene…"** (una palabra por línea,
+ej. `FAM`). Es reversible.
+
+## 7. Programar envíos que se repiten
 
 No hay un formulario aparte: todo se hace desde el compositor único **✍️ Enviar**.
 
-- **Recurrente** (diario / semanal): en **¿Cuándo se envía?** elige **🔁 Recurrente**, define la
-  frecuencia y la hora. Escribe el texto, marca canales y elige una **lista guardada** como destino
-  (los recurrentes solo admiten listas, no contactos sueltos). Si añades imagen, usa una **URL
-  estable** (no un archivo suelto), porque el envío se repetirá en el tiempo. El botón dirá
+- **Se repite** (diario / semanal): en **¿Cuándo se envía?** elige **🔁 Se repite**, define la
+  frecuencia y la hora. Escribe el texto, marca canales y elige una **lista de contactos** como destino
+  (los repetidos solo admiten listas, no contactos sueltos). Si añades imagen, usa una **URL
+  fija** (un enlace web, no un archivo suelto), porque el envío se repetirá en el tiempo. El botón dirá
   **Programar**.
-- **Una sola vez a fecha/hora**: usa en cambio el modo **📅 Una vez el…** (ver §5).
+- **Una sola vez a fecha/hora**: usa en cambio el modo **📅 Una vez** (ver §5).
 
-Ambos respetan la ventana horaria y el ritmo anti-baneo del sistema. Para gestionar los recurrentes
-ya creados ve a **📡 Actividad → Programados**: ahí aparece la lista de recurrentes y puedes
-**pausar / reanudar / borrar** los tuyos.
+Ambos respetan la ventana horaria y el ritmo anti-baneo del sistema. Para gestionar los repetidos
+ya creados ve a **📡 Actividad → Programados**: ahí aparece la lista y puedes **pausar / reanudar /
+borrar** los tuyos (también con buscador y paginación).
 
-## 8. El envío AUTOMÁTICO (tocar con cuidado)
+## 8. Detener, borrar y limpiar envíos
+
+- **Borrar una difusión = detenerla.** Al borrar una fila del **Historial** (individual, con
+  «🗑 Borrar seleccionados» o «🗑 Eliminar todas»), además de quitarla de la tabla se **detiene lo que
+  quede pendiente por enviar** (se desencola). No revierte lo que ya se entregó.
+- **📡 Actividad → Problemas** muestra la **Cola de envío** en vivo: cuántos mensajes están *en cola*,
+  *enviándose ahora* y *atascados* (los que fallaron tras varios reintentos). Puedes **reintentar** los
+  atascados o, en una emergencia, **🗑 Vaciar cola** (descarta lo que aún espera; no revierte lo ya
+  enviado).
+- **Envíos por partes** (📡 Actividad): los envíos grandes salen en grupos, de a uno, con pausas. Ahí
+  ves el progreso y puedes **cancelar** o **borrar** los tuyos.
+
+> Casi todas las tablas del panel tienen **buscador**, **paginación** y **eliminar todos**, para que
+> manejar muchas filas sea fácil.
+
+## 9. El envío AUTOMÁTICO (tocar con cuidado)
 
 La sala de control **🏠 Inicio** muestra si el envío automático está **EN PAUSA** o **ACTIVO** (el
 estado EN PAUSA se ve en **ámbar**; el rojo se reserva solo para fallos):
@@ -125,31 +159,32 @@ estado EN PAUSA se ve en **ámbar**; el rojo se reserva solo para fallos):
   sin acordarlo con el administrador. Al activar, el panel te muestra exactamente a cuántas personas
   les llegará — léelo antes de confirmar.
 
-## 9. Lo que NO debes tocar (a menos que seas tú el responsable)
+## 10. Lo que NO debes tocar (a menos que seas tú el responsable)
 
-- **Ajustes → 🔌 Conexiones** (cuenta Telegram bot/userbot, WhatsApp por QR/pairing, tokens): si se
-  desconecta la cuenta, se caen la captura y los envíos de todos.
-- **Fuente del canal** (Ajustes → 📥 Captura): cambiarla redirige TODA la captura a otro canal.
-- **Aumento de precio, imagen de la lista y patrones de limpieza** (Ajustes → 📥 Captura): afectan lo
-  que ven los clientes de todos los usuarios.
+- **Ajustes → 🔌 Conexiones** (cuenta de Telegram por bot o por *mi cuenta personal*, WhatsApp por
+  QR/código, tokens): si se desconecta la cuenta, se caen la captura y los envíos de todos.
+- **Canal de Telegram** (Ajustes → 📥 Captura): cambiarlo redirige TODA la captura a otro canal.
+- **Aumento de precio, imagen de la lista y textos a eliminar de cada lista** (Ajustes → 📥 Captura):
+  afectan lo que ven los clientes de todos los usuarios.
 - **Anti-baneo y ventanas horarias** (Ajustes → 📤 Ritmo y horarios): protegen las cuentas contra
   bloqueos de Telegram/WhatsApp.
 
-## 10. Problemas comunes
+## 11. Problemas comunes
 
 | Síntoma | Qué mirar |
 |---|---|
-| "No llegan capturas nuevas" | ¿La captura está activa? (🏠 Inicio → switch **"Recopilar listas del canal"**). ¿El canal publicó algo con texto? Los posts SOLO-imagen sin caption no se capturan. |
+| "No llegan capturas nuevas" | ¿La captura está activa? (🏠 Inicio → switch **"Capturar listas del canal"**). ¿El canal publicó algo con texto? Los posts SOLO-imagen sin caption no se capturan. |
 | "Mi envío no salió" | Ábrelo en **📡 Actividad → Historial**: cada fila muestra la razón del fallo. ¿Elegiste lista/destinatarios? ¿Era programado y aún no llega la hora (zona horaria del sistema)? |
 | "A un contacto no le llegó" | Puede estar excluido — recuerda que se aplican las exclusiones de TODOS los usuarios, o el contacto bloqueó al remitente. |
+| "Hay envíos atascados" | 📡 Actividad → Problemas: **reintenta** los atascados; si algo quedó pegado, **Vaciar cola**. |
 | "El panel me bloqueó el ingreso" | 5 intentos fallidos bloquean 5 minutos. Espera y reintenta, o usa el reseteo por correo. |
 | "Sale 'EN PAUSA' (en ámbar) en 🏠 Inicio" | Es el estado del envío AUTOMÁTICO. Tus envíos manuales salen igual. |
 
-## 11. Buenas prácticas
+## 12. Buenas prácticas
 
 - Antes de un envío grande, pruébalo contigo mismo o con la cuenta de prueba.
-- Usa **listas nombradas** en vez de marcar contactos sueltos: reproducible y auditable.
+- Usa **listas de contactos nombradas** en vez de marcar contactos sueltos: reproducible y auditable.
 - No hagas envíos masivos seguidos por fuera de la ventana horaria: el ritmo anti-baneo existe para
   proteger el número/cuenta de todos.
-- Todo queda en la **auditoría** (quién hizo qué y cuándo) — opera como si tu nombre quedara en cada
-  acción, porque queda.
+- Todo queda en la **auditoría** (Ajustes → 🛠️ Auditoría: quién hizo qué y cuándo) — opera como si tu
+  nombre quedara en cada acción, porque queda.

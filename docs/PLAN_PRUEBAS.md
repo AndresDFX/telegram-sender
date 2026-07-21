@@ -1,6 +1,6 @@
 # Plan de pruebas — Replica (Telegram/WhatsApp broadcasting)
 
-`Actualizado: 2026-07-19 · Suite: 286 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
+`Actualizado: 2026-07-20 · Suite: 313 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
 
 Este plan cubre **qué probar, cómo y con qué criterio de aceptación** en los tres niveles que tiene el
 proyecto: (1) suite automatizada, (2) smoke post-deploy y (3) pruebas E2E manuales por flujo. Incluye
@@ -13,7 +13,7 @@ cambio futuro no los reintroduzca sin que nadie lo note.
 
 | Nivel | Qué valida | Cuándo corre | Herramienta |
 |-------|------------|--------------|-------------|
-| **Unitaria** (286 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
+| **Unitaria** (313 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
 | **Sintaxis del servicio Node** | `index.js` y `dynamoAuth.js` parsean | Local, antes de commit | `node --check whatsapp-service/src/*.js` |
 | **Smoke post-deploy** | El stack desplegado responde y está cableado | Tras cada deploy relevante | Checklist §3 (manual/CLI) |
 | **E2E manual** | Flujos completos de negocio con cuentas de prueba | Antes de activar envío real / tras cambios grandes | Checklist §4 (panel + Telegram/WhatsApp reales) |
@@ -101,9 +101,9 @@ prueba con SOLO esas cuentas; `sending_enabled=False` salvo en el caso que lo pr
    difunde a todos ni cierra como "enviado" vacío silencioso.
 
 ### F4 — Programación y fraccionado
-1. Crear un **recurrente** (daily/weekly) desde **✍️ Enviar → 🔁 Recurrente** → ✅ dispara a su hora,
+1. Crear un **repetido** (daily/weekly) desde **✍️ Enviar → 🔁 Se repite** → ✅ dispara a su hora,
    respeta ventana y avanza `next_run` aunque el envío falle (A2 — no re-dispara en bucle). El envío
-   único NO se crea como horario desde el panel: es el modo **📅 Una vez el…** de ✍️ Enviar (aparece en
+   único NO se crea como horario desde el panel: es el modo **📅 Una vez** de ✍️ Enviar (aparece en
    **📡 Actividad → Historial**, no en Programados). Un schedule `type=once` puro solo se crea por API.
 2. Envío fraccionado (lista > batch_size): ✅ el dispatcher libera UN lote por tick; el progreso
    avanza por lotes; cancelar pendientes detiene los lotes en vuelo (worker los descarta).
@@ -129,9 +129,24 @@ prueba con SOLO esas cuentas; `sending_enabled=False` salvo en el caso que lo pr
    no re-vincula sobre sesión a medias). Render retoma la sesión desde DynamoDB tras vincular local.
 3. `/blocked/clear` + `/reconnect` inmediato: ✅ los opt-outs limpiados NO reviven (M19).
 
-### F8 — Gestión de datos del panel
-1. Borrado masivo/selectivo en **📡 Actividad → Historial / Programados** y **👥 Contactos → listas**: ✅ borra lo seleccionado.
-2. ✅ "Borrar terminados" NO borra un fraccionado largo aún en vuelo (M8) ni las listas capturadas (M27).
+### F8 — Gestión de datos del panel (grids: buscador + paginación + eliminar todos)
+1. Borrado masivo/selectivo en **📡 Actividad → Historial / Programados** y **👥 Contactos → listas**: ✅ borra lo seleccionado y **las filas desaparecen del grid al instante** (no reaparecen: `_scan_todo` usa `ConsistentRead` + quitado optimista del DOM).
+2. ✅ "Limpiar terminados" NO borra un envío por partes largo aún en vuelo (M8) ni las listas capturadas (M27).
+3. **Design system de grids** (difusiones, envíos por partes, programados, usuarios, auditoría):
+   - ✅ El **🔎 buscador** filtra por texto (mensaje/origen/estado/usuario según el grid) y el **paginador ‹ ›** recorre páginas (25/pág).
+   - ✅ **Eliminar todos** borra todo el grid con confirmación. En **usuarios** conserva al admin principal y al usuario actual (sin lockout); **auditoría** deja registrado el propio borrado; **contactos NO** tiene eliminar-todos (audiencia por incluir/excluir).
+
+### F9 — Borrar = desencolar · cola en vivo · detalle enriquecido
+1. **Borrar detiene el envío**: con un envío por partes en curso, borrar su difusión en **Historial** (o «Eliminar todas») ✅ borra también el plan (pid == broadcast_id) → el dispatcher deja de despachar y el worker descarta los lotes ya en vuelo (no siguen llegando). No revierte lo ya entregado.
+2. **Cola de envío en vivo** (**📡 Actividad → Problemas**): ✅ muestra *en cola / enviándose ahora / atascados* y se refresca solo. `profundidades()` incluye `en_vuelo` (NotVisible), no solo visibles.
+3. **Vaciar cola** (principal): ✅ descarta lo encolado; un segundo intento en <60s devuelve "en progreso" sin reventar (`PurgeQueueInProgress` manejado). **Reintentar/Descartar** en «Envíos atascados» (DLQ) siguen operando.
+4. **Detalle enriquecido** (tocar el mensaje en Historial): ✅ ventana ancha con **fechas** (recibido/1º/último envío), **📥 mensaje anterior (original)** y **📤 mensaje que se envía** lado a lado, y **💰 comparador de precios** (anterior→nuevo); en móvil se apilan. Difusiones de canal traen anterior+comparador; el manual va crudo (sin ellos).
+5. **Marca acento-insensible**: ✅ el encabezado «IPRÓ PARTS» (con tilde) NO aparece en el «mensaje que se envía» (`test_quita_marca_ipro_parts`).
+
+### F10 — Responsive (móvil)
+1. Abrir el panel en un teléfono (o DevTools ~390px): ✅ la nav de 5 pestañas **envuelve** (no corta «Ajustes»); sub-nav y filtros a ancho completo; botones/tap targets cómodos (≥44px).
+2. ✅ Al enfocar un campo NO hace zoom automático (iOS: inputs a 16px); la caja de login no desborda; en el Historial la columna **Fechas** se oculta (su info sigue en el detalle).
+3. ✅ Ritmo de espaciado: los botones de acción («Guardar…») no quedan pegados al campo de arriba.
 
 ---
 
@@ -151,7 +166,7 @@ prueba con SOLO esas cuentas; `sending_enabled=False` salvo en el caso que lo pr
 | M10/M30 | Doble-conteo invisible si el dedup cae por infra | `test_m10_…` (métrica EMF) + alarma `…-dedup-infra` | §3.8 |
 | M26/B12 | Lockout roto; códigos de pairing fantasma | `test_lockout…` | F6.2 / F7.1 |
 | Poller dedup_key | Reintento del poller (fallo de HWM/timeout) duplica la difusión del mismo post | `test_poller_pasa_dedup_key_determinista` (poll_channel) | F1 (retry) |
-| «Una vez» diferido | Un 📅 «Una vez el…» sale YA (no se difiere) con el fraccionado apagado o sin store de planes | `test_diferido_crea_plan_aunque_el_fraccionado_este_apagado`, `test_diferido_sin_store_de_planes_se_rechaza` (broadcasting) | F4.1 |
+| «Una vez» diferido | Un 📅 «Una vez» sale YA (no se difiere) con el fraccionado apagado o sin store de planes | `test_diferido_crea_plan_aunque_el_fraccionado_este_apagado`, `test_diferido_sin_store_de_planes_se_rechaza` (broadcasting) | F4.1 |
 | tz UTC=0 | Offset horario 0 (UTC) tratado como ausente → ventana y `next_run` mal calculados | `test_dentro_y_fuera_utc` (scheduling), `test_zona_horaria_utc_menos_5` (schedules) | F4.1 / F2.2 |
 | Init pestaña Enviar | La pestaña ✍️ Enviar carga en blanco (sin compositor ni listas) al entrar directo | — (panel/SPA, sin suite) | F2.1 |
 
