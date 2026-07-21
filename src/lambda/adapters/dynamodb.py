@@ -1138,6 +1138,17 @@ class DynamoDbPlanStore:
                     pass
         return n
 
+    def borrar_todos(self) -> int:
+        """Borra TODOS los planes (meta + lotes de cada uno). Devuelve cuántos planes se borraron."""
+        n = 0
+        for p in self.listar(limit=100000):
+            try:
+                self.borrar(p["pid"])
+                n += 1
+            except Exception:
+                pass
+        return n
+
     def listar(self, limit: int = 20) -> list[dict]:
         """Planes (PLAN) más recientes, con su bitácora, para la vista de programación."""
         from boto3.dynamodb.conditions import Attr
@@ -1229,6 +1240,23 @@ class DynamoDbAuditStore:
              "user": a.get("user", "")}
             for a in items[:limit]
         ]
+
+    def borrar_todos(self) -> int:
+        """Vacía la bitácora (scan + borrado por lotes). Devuelve cuántos registros se borraron."""
+        n = 0
+        t = self._t()
+        start = None
+        while True:
+            kwargs = {"ProjectionExpression": "id", "ExclusiveStartKey": start} if start else {"ProjectionExpression": "id"}
+            resp = t.scan(**kwargs)
+            with t.batch_writer() as bw:
+                for a in resp.get("Items", []):
+                    bw.delete_item(Key={"id": a["id"]})
+                    n += 1
+            start = resp.get("LastEvaluatedKey")
+            if not start:
+                break
+        return n
 
 
 class DynamoDbScheduleStore:

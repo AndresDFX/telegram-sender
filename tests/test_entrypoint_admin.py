@@ -84,9 +84,10 @@ class FakeQueueStats:
 class FakeBroadcastStore:
     def __init__(self):
         self.borrados = []
+        self.items = []
 
     def listar(self, limit=30):
-        return []
+        return list(self.items)
 
     def borrar(self, bid):
         self.borrados.append(bid)
@@ -98,9 +99,14 @@ class FakeBroadcastStore:
 class FakePlanStoreAdmin:
     def __init__(self):
         self.borrados = []
+        self.todos_borrado = 0
 
     def borrar(self, pid):
         self.borrados.append(pid)
+
+    def borrar_todos(self):
+        self.todos_borrado += 1
+        return 3
 
     def activos(self):
         return []
@@ -115,6 +121,11 @@ class FakeAudit:
 
     def listar(self, limit=50):
         return list(reversed(self.entries))[:limit]
+
+    def borrar_todos(self):
+        n = len(self.entries)
+        self.entries = []
+        return n
 
 
 class FakeImageStore:
@@ -244,6 +255,38 @@ class AdminTests(unittest.TestCase):
         admin.lambda_handler(_event("POST", "/admin/api/broadcasts/delete", {"ids": ["b1", "b2"]}), None)
         self.assertEqual(admin.plan_store.borrados, ["b1", "b2"])
         self.assertEqual(admin.broadcast_store.borrados, ["b1", "b2"])
+
+    def test_broadcasts_delete_all(self):
+        # {all:true} borra TODAS las difusiones (y desencola cada plan).
+        admin.broadcast_store.items = [{"id": "b1"}, {"id": "b2"}, {"id": "b3"}]
+        resp = admin.lambda_handler(_event("POST", "/admin/api/broadcasts/delete", {"all": True}), None)
+        self.assertEqual(json.loads(resp["body"])["deleted"], 3)
+        self.assertEqual(sorted(admin.broadcast_store.borrados), ["b1", "b2", "b3"])
+        self.assertEqual(sorted(admin.plan_store.borrados), ["b1", "b2", "b3"])  # cada uno desencolado
+
+    def test_plans_delete_all(self):
+        resp = admin.lambda_handler(_event("POST", "/admin/api/plans/delete", {"all": True}), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(admin.plan_store.todos_borrado, 1)
+
+    def test_audit_delete_all(self):
+        admin.audit_store.entries = [{"ts": 1, "action": "x", "detail": "", "user": "admin"},
+                                     {"ts": 2, "action": "y", "detail": "", "user": "admin"}]
+        resp = admin.lambda_handler(_event("POST", "/admin/api/audit/delete", {"all": True}), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(json.loads(resp["body"])["deleted"], 2)
+        # Las 2 previas se borraron; la propia limpieza queda registrada (bitácora del borrado).
+        self.assertEqual([e["action"] for e in admin.audit_store.entries], ["audit:limpiar"])
+
+    def test_users_delete_all_protege_admin_y_actual(self):
+        # {all:true} borra todos MENOS el admin principal y el usuario actual (sin lockout).
+        admin.config.users = {"admin": {"role": "admin"}, "otro": {"role": "user"}, "tercero": {"role": "user"}}
+        resp = admin.lambda_handler(_event("POST", "/admin/api/users/delete", {"all": True}), None)
+        self.assertEqual(resp["statusCode"], 200)
+        # 'admin' es el usuario actual (auth admin:secret123) Y el principal → se conserva.
+        self.assertIn("admin", admin.config.users)
+        self.assertNotIn("otro", admin.config.users)
+        self.assertNotIn("tercero", admin.config.users)
 
     def test_get_queue(self):
         resp = admin.lambda_handler(_event("GET", "/admin/api/queue"), None)

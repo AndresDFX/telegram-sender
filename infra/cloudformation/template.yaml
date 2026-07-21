@@ -1041,6 +1041,8 @@ Resources:
                 Action:
                   - dynamodb:PutItem # registrar acción en auditoría
                   - dynamodb:Scan # listar auditoría
+                  - dynamodb:DeleteItem # limpiar auditoría (eliminar todos)
+                  - dynamodb:BatchWriteItem # limpiar auditoría por lotes
                 Resource:
                   - !GetAtt AuditTable.Arn
               - Effect: Allow

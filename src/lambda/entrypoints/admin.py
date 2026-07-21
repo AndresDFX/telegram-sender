@@ -147,7 +147,7 @@ def _planes_con_progreso() -> list[dict]:
     """Planes fraccionados con, por cada lote despachado, cuántos mensajes se han enviado.
     El progreso real se deriva de los contadores del job (Broadcasts) por canal."""
     salida = []
-    for p in plan_store.listar():
+    for p in plan_store.listar(limit=1000):  # el panel pagina/busca client-side sobre el listado completo
         bid = p.get("broadcast_id")
         prog = broadcast_store.progreso(bid) if bid else {"tg": 0, "wa": 0}
         log = []
@@ -616,7 +616,20 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if sub == "/api/users/delete" and method == "POST":
             if not _es_admin(event):
                 return _json({"error": "Solo un administrador puede borrar usuarios."}, 403)
-            username = str(_body(event).get("username", "")).strip()
+            cuerpo_u = _body(event)
+            if cuerpo_u.get("all"):
+                # Eliminar TODOS los usuarios EXCEPTO el administrador principal y el usuario actual
+                # (evita quedarte sin acceso / auto-lockout). Devuelve cuántos se borraron.
+                users = config.get_users() or {}
+                protegidos = {admin_user(), _usuario_actual(event)}
+                a_borrar = [u for u in list(users) if u not in protegidos]
+                for u in a_borrar:
+                    del users[u]
+                if a_borrar:
+                    config.set_users(users)
+                _audit("user:borrar", f"todos {len(a_borrar)}")
+                return _json({"ok": True, "deleted": len(a_borrar)})
+            username = str(cuerpo_u.get("username", "")).strip()
             users = config.get_users() or {}
             if username not in users:
                 return _json({"error": "Usuario no encontrado."}, 400)
@@ -746,11 +759,17 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             _audit("dlq_purge")
             return _json(queue_stats.dlq_purgar())
         if sub == "/api/broadcasts" and method == "GET":
-            return _json({"broadcasts": broadcast_store.listar()})
+            return _json({"broadcasts": broadcast_store.listar(limit=1000)})  # el panel pagina/busca client-side
         if sub == "/api/metrics" and method == "GET":
             return _json(broadcast_store.metricas(30))
         if sub == "/api/audit" and method == "GET":
-            return _json({"audit": audit_store.listar(50)})
+            return _json({"audit": audit_store.listar(500)})  # el panel pagina/busca client-side
+        if sub == "/api/audit/delete" and method == "POST":
+            if not _es_admin(event):
+                return _json({"error": "Solo un administrador puede limpiar la auditoría."}, 403)
+            n = audit_store.borrar_todos()
+            _audit("audit:limpiar", f"{n} registros")  # deja constancia de la propia limpieza
+            return _json({"ok": True, "deleted": n})
         if sub == "/api/plans" and method == "GET":
             return _json({"plans": _planes_con_progreso()})
         if sub == "/api/plans/cancel" and method == "POST":
@@ -764,6 +783,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json({"ok": True, "canceled": n})
         if sub == "/api/plans/delete" and method == "POST":
             cuerpo = _body(event)
+            if cuerpo.get("all"):
+                n = plan_store.borrar_todos()
+                _audit("plans:borrar", f"todos {n}")
+                return _json({"ok": True, "deleted": n})
             if cuerpo.get("finished"):
                 n = plan_store.borrar_terminados()
                 _audit("plans:borrar", f"terminados {n}")
@@ -1066,6 +1089,20 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     pass  # sin plan asociado (captura/inmediato) o fallo puntual: igual borramos el registro
                 broadcast_store.borrar(x)
 
+            if cuerpo.get("all"):
+                # Eliminar TODAS las difusiones (incluye capturadas y en curso). Cada una se desencola
+                # (borra su plan) antes de quitar el registro, igual que el borrado normal.
+                n = 0
+                try:
+                    for j in broadcast_store.listar(limit=100000):
+                        try:
+                            _borrar_difusion(str(j.get("id"))); n += 1
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                _audit("broadcasts:borrar", f"todas {n}")
+                return _json({"ok": True, "deleted": n})
             ids = cuerpo.get("ids")
             if isinstance(ids, list) and ids:
                 n = 0
@@ -1417,6 +1454,12 @@ td b{font-weight:600;color:var(--tx)}
 .sqs-strip .ping{width:8px;height:8px;border-radius:50%;background:var(--mut);flex:none}
 .sqs-strip.hot{border-color:rgba(var(--ac-rgb),.5);background:rgba(var(--ac-rgb),.08)}
 .sqs-strip.hot .ping{background:var(--ok);animation:ping 1.8s infinite}
+/* Design system de grids: barra de herramientas (buscador) + pager reutilizables. */
+.grid-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.grid-tools .gv-search{flex:1;min-width:180px;margin:0}
+.gv-pager{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:10px;min-height:1px}
+.gv-pager .gv-nav{padding:4px 12px;font-size:15px;line-height:1;min-width:34px}
+.gv-pager .gv-nav[disabled]{opacity:.4;cursor:default}
 
 /* ---------- stats ---------- */
 .stats{display:flex;gap:14px;flex-wrap:wrap}
@@ -2011,8 +2054,14 @@ th.selcol,td.selcol{width:34px;text-align:center}
   </div>
   <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Auditoría <span id="audit_n" class="hint"></span></h2>
    <div class="hint">Últimas acciones realizadas en el panel (config, envíos, cancelaciones, DLQ).</div>
+   <div class="grid-tools"><input id="audit_search" class="gv-search" placeholder="🔎 Buscar en auditoría (acción, detalle, usuario)…" aria-label="Buscar auditoría"></div>
    <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>cuándo</th><th>usuario</th><th>acción</th><th>detalle</th></tr></thead><tbody id="audit_rows"></tbody></table></div>
-   <button class="ghost" style="margin-top:12px" onclick="loadAudit()">Refrescar</button>
+   <div class="gv-pager" id="audit_pager"></div>
+   <div class="tbl-toolbar">
+     <button class="danger" onclick="clearAudit()" title="Borrar toda la bitácora de auditoría">🗑 Limpiar auditoría</button>
+     <span class="grow"></span>
+     <button class="ghost" onclick="loadAudit()">Refrescar</button>
+   </div>
   </div>
   <div class="card" data-tab="fuentes" data-sub="tg"><h2>Destinatarios<span class="help" tabindex="0" data-tip="Contactos a los que envías por Telegram. Filtra por estado (Todos/Incluidos/Excluidos). Marca y usa Excluir/Incluir; incluir un contacto que coincide con un patrón crea una EXCEPCIÓN (se envía pese al patrón).">ⓘ</span> <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
@@ -2221,24 +2270,29 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span class="grow"></span>
      <button class="danger" style="padding:3px 10px" onclick="queuePurge()" title="Descarta TODOS los lotes que aún esperan en la cola (no revierte lo ya entregado)">🗑 Purgar cola</button>
    </div>
+   <div class="grid-tools"><input id="bc_search" class="gv-search" placeholder="🔎 Buscar en difusiones (mensaje, origen)…" aria-label="Buscar difusiones"></div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="bc_table"><thead><tr><th class="selcol"><input type="checkbox" id="bc_selall" onchange="bcSelAll(this.checked)"></th><th>Mensaje</th><th>Estado</th><th>Fechas</th><th>Progreso</th><th></th></tr></thead>
        <tbody id="bc_rows"></tbody></table>
    </div>
+   <div class="gv-pager" id="bc_pager"></div>
    <div class="empty-state" id="bc_empty" style="display:none"><div class="ico">📨</div><h3>Aún no hay difusiones</h3><p>Cuando la <b>captura</b> esté activa, cada lista del canal aparecerá aquí <b>sin enviarse</b> — tú decides a quién va. También puedes escribir una ahora mismo.</p><button style="margin-top:8px" onclick="showTab('enviar')">✍️ Componer un envío</button></div>
    <div class="tbl-toolbar">
      <button class="danger" id="bc_delsel" onclick="bcDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
      <button class="danger" onclick="bcClearFinished()">🗑 Limpiar terminados</button>
+     <button class="danger" onclick="bcDeleteAll()" title="Eliminar TODAS las difusiones del historial">🗑 Eliminar todas</button>
      <span class="grow"></span>
      <button class="sec" onclick="loadBroadcasts()">Refrescar</button>
    </div>
   </div>
   <div class="card" data-tab="envios" data-sub="programados"><h2>📅 Mensajes programados <span id="sg_n" class="hint"></span></h2>
    <div class="hint">Envíos recurrentes creados desde <b>✍️ Enviar → 🔁 Recurrente</b>; aquí los pausas, reanudas o borras.</div>
+   <div class="grid-tools"><input id="sg_search" class="gv-search" placeholder="🔎 Buscar programados (nombre o mensaje)…" aria-label="Buscar programados"></div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="sg_table"><thead><tr><th class="selcol"><input type="checkbox" id="sg_selall" onchange="sgSelAll(this.checked)"></th><th>Mensaje</th><th>Canales</th><th>Cuándo</th><th>Próximo</th><th></th></tr></thead>
        <tbody id="sg_rows"></tbody></table>
    </div>
+   <div class="gv-pager" id="sg_pager"></div>
    <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Los recurrentes (diario/semanal) se crean en el compositor.</p><button style="margin-top:8px" onclick="showTab('enviar');try{document.querySelector('input[name=bc_mode][value=rec]').checked=true;bcMode();}catch(e){}">🔁 Crear recurrente</button></div>
    <div class="tbl-toolbar">
      <button class="danger" id="sg_delsel" onclick="sgDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
@@ -2249,7 +2303,10 @@ th.selcol,td.selcol{width:34px;text-align:center}
   </div>
   <div class="card accent" id="usr_card" data-tab="ajustes" data-sub="acceso" style="display:none"><h2>👥 Usuarios del panel <span id="usr_n" class="hint"></span></h2>
    <div class="hint">Cada usuario entra con sus propias credenciales (independientes). El correo se usa para recuperar la contraseña. Solo un <b>administrador</b> ve esta sección y gestiona usuarios; los usuarios normales pueden hacer todo lo demás.</div>
+   <div class="grid-tools"><input id="usr_search" class="gv-search" placeholder="🔎 Buscar usuarios (usuario, correo, rol)…" aria-label="Buscar usuarios"></div>
    <div style="overflow-x:auto;margin-top:12px"><table id="usr_table"><thead><tr><th>Usuario</th><th>Correo</th><th>Rol</th><th></th></tr></thead><tbody id="usr_rows"></tbody></table></div>
+   <div class="gv-pager" id="usr_pager"></div>
+   <div class="tbl-toolbar"><button class="danger" onclick="deleteAllUsers()" title="Eliminar todos excepto el administrador principal y tú">🗑 Eliminar todos</button></div>
    <div class="section-label" style="margin-top:14px">Crear usuario</div>
    <div class="row">
      <div><label>Usuario o correo</label><input id="usr_new_name" placeholder="nuevo@correo.com"></div>
@@ -2320,12 +2377,15 @@ th.selcol,td.selcol{width:34px;text-align:center}
   </div>
   <div class="card" data-tab="envios" data-sub="historial"><h2>📦 Envíos fraccionados<span class="help" tabindex="0" data-tip="Las difusiones grandes se dividen en lotes que salen de a uno, con pausas (anti-baneo). Aquí ves el progreso por canal; puedes cancelar o borrar planes.">ⓘ</span> <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
    <div class="hint">De cada lote programado se muestra <b>cuántos mensajes se han enviado</b>. El sistema procesa un lote a la vez, en orden.</div>
+   <div class="grid-tools"><input id="pl_search" class="gv-search" placeholder="🔎 Buscar envíos fraccionados (mensaje, estado)…" aria-label="Buscar envíos fraccionados"></div>
    <div id="pl_list" style="margin-top:12px"></div>
+   <div class="gv-pager" id="pl_pager"></div>
    <div class="bc-empty" id="pl_empty" style="display:none">No hay envíos programados todavía. Crea uno en <b>Enviar</b> o espera al próximo del canal.</div>
    <div class="tbl-toolbar">
      <label class="sel-all"><input type="checkbox" id="pl_selall" onchange="plSelAll(this.checked)"> Seleccionar todos</label>
      <button class="danger" id="pl_delsel" onclick="plDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
      <button class="ghost" onclick="plClearFinished()">🧹 Borrar terminados</button>
+     <button class="danger" onclick="plDeleteAll()" title="Eliminar TODOS los envíos fraccionados">🗑 Eliminar todos</button>
      <span class="grow"></span>
      <button class="sec" onclick="loadPlans()">Refrescar</button>
    </div>
@@ -2380,6 +2440,34 @@ function alertModal(message,opts){ opts=opts||{}; return dsModal({title:opts.tit
 // Skeleton de carga reutilizable: filas placeholder con shimmer mientras llegan los datos (solo 1ª carga).
 function skelTable(id,cols,rows){ const t=$(id); if(!t) return; const r=rows||4, c=cols||3;
   t.innerHTML=Array.from({length:r},()=>'<tr class="skeleton">'+Array.from({length:c},()=>'<td><div class="sk-line"></div></td>').join('')+'</tr>').join(''); }
+// ============ Design system de grids: buscador + paginación reutilizables (GV) ============
+// Cada grid registra una vez su config con gvInit(key,cfg) y en su loader llama gvSet(key,array).
+// El helper filtra (búsqueda de texto + filtro extra opcional), pagina y delega el pintado de la
+// página en cfg.render(items,meta); pinta un pager en cfg.pagerId. Estado por grid en GV[key].
+const GV={};
+function gvInit(key,cfg){
+  const g=Object.assign({all:[],q:'',page:0,size:cfg.size||20},cfg); GV[key]=g;
+  const si=cfg.searchId&&$(cfg.searchId);
+  if(si&&!si._gv){ si._gv=1; si.addEventListener('input',()=>{ const s=GV[key]; s.q=si.value.trim(); s.page=0; gvRender(key); }); }
+}
+function gvSet(key,all){ const g=GV[key]; if(!g) return; g.all=Array.isArray(all)?all:[]; gvRender(key); }
+function gvList(key){ const g=GV[key]; if(!g) return []; let l=g.all; const q=(g.q||'').toLowerCase();
+  if(q&&g.search) l=l.filter(it=>g.search(it,q)); if(g.extra){ const ex=g.extra(); if(ex) l=l.filter(ex); } return l; }
+function gvRender(key){ const g=GV[key]; if(!g) return;
+  const l=gvList(key); const total=l.length; const pages=Math.max(1,Math.ceil(total/g.size));
+  if(g.page>=pages) g.page=pages-1; if(g.page<0) g.page=0;
+  const items=l.slice(g.page*g.size,(g.page+1)*g.size);
+  try{ g.render(items,{total,pages,page:g.page,q:g.q,all:g.all.length}); }catch(e){}
+  gvPager(key,total,pages);
+}
+function gvPager(key,total,pages){ const g=GV[key]; const el=g&&g.pagerId&&$(g.pagerId); if(!el) return;
+  if(!g.all.length){ el.innerHTML=''; return; }
+  const info=total? ('Página '+(g.page+1)+' de '+pages+' · '+total+' resultado'+(total===1?'':'s')) : 'sin resultados';
+  el.innerHTML='<button class="ghost gv-nav" '+(g.page<=0?'disabled':'')+' onclick="gvPage(\''+key+'\',-1)" aria-label="Anterior">‹</button>'
+    +'<span class="hint">'+info+'</span>'
+    +'<button class="ghost gv-nav" '+(g.page>=pages-1?'disabled':'')+' onclick="gvPage(\''+key+'\',1)" aria-label="Siguiente">›</button>';
+}
+function gvPage(key,d){ const g=GV[key]; if(!g) return; g.page=Math.max(0,g.page+d); gvRender(key); }
 async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':'+p);
   try{ const r=await fetch(BASE+'/api/me',{headers:hdr()});
     if(!r.ok){ const j=await r.json().catch(()=>({})); const er=new Error(j.error||''); er.status=r.status; throw er; }
@@ -2422,19 +2510,30 @@ async function loadMe(){
 function roleBadge(rol){ return rol==='admin'
   ? '<span class="pill active" style="padding:2px 8px">Administrador</span>'
   : '<span class="pill inactive" style="padding:2px 8px">Usuario</span>'; }
+function usrRow(u){ const me=u.username===USR_ME; const rol=u.role||'admin';
+  const toggle = (rol==='admin')
+    ? `<button class="ghost" style="padding:4px 9px" onclick="setUserRole('${bcEsc(u.username)}','user')" title="Quitar permisos de administrador">↓ a usuario</button>`
+    : `<button class="ghost" style="padding:4px 9px" onclick="setUserRole('${bcEsc(u.username)}','admin')" title="Dar permisos de administrador">↑ a admin</button>`;
+  return `<tr><td><b>${bcEsc(u.username)}</b>${me?' <span class="hint">(tú)</span>':''}</td><td>${bcEsc(u.email||'—')}</td>`+
+    `<td>${roleBadge(rol)}</td>`+
+    `<td style="text-align:right;white-space:nowrap">${(u.username==='admin')?'<span class="hint">principal</span>':(toggle+' '+(me?'':`<button class="danger" style="padding:4px 9px" onclick="deleteUser('${bcEsc(u.username)}')">🗑</button>`))}</td></tr>`; }
+function usrGvInit(){ if(GV.usr) return; gvInit('usr',{ size:25, searchId:'usr_search', pagerId:'usr_pager',
+  search:(u,q)=> ((u.username||'')+' '+(u.email||'')+' '+(u.role||'')).toLowerCase().includes(q),
+  render:(items,meta)=>{ $('usr_rows').innerHTML = items.length? items.map(usrRow).join('') : ('<tr><td colspan="4" class="hint">'+(meta.q?'Sin resultados.':'Sin usuarios.')+'</td></tr>'); } }); }
 async function loadUsers(){
   if(!IS_ADMIN) return;
+  usrGvInit();
   { const _u=$('usr_rows'); if(_u && !_u.children.length) skelTable('usr_rows',4,3); }
   try{ const r=await api('/api/users'); USR_ME=r.me||''; const list=r.users||[];
     $('usr_n').textContent='· '+list.length;
-    $('usr_rows').innerHTML=list.map(u=>{ const me=u.username===USR_ME; const rol=u.role||'admin';
-      const toggle = (rol==='admin')
-        ? `<button class="ghost" style="padding:4px 9px" onclick="setUserRole('${bcEsc(u.username)}','user')" title="Quitar permisos de administrador">↓ a usuario</button>`
-        : `<button class="ghost" style="padding:4px 9px" onclick="setUserRole('${bcEsc(u.username)}','admin')" title="Dar permisos de administrador">↑ a admin</button>`;
-      return `<tr><td><b>${bcEsc(u.username)}</b>${me?' <span class="hint">(tú)</span>':''}</td><td>${bcEsc(u.email||'—')}</td>`+
-        `<td>${roleBadge(rol)}</td>`+
-        `<td style="text-align:right;white-space:nowrap">${(u.username==='admin')?'<span class="hint">principal</span>':(toggle+' '+(me?'':`<button class="danger" style="padding:4px 9px" onclick="deleteUser('${bcEsc(u.username)}')">🗑</button>`))}</td></tr>`; }).join('');
+    gvSet('usr', list);
   }catch(e){}
+}
+async function deleteAllUsers(){
+  const n=(GV.usr&&GV.usr.all.length)||0;
+  if(!await confirmModal('¿Eliminar TODOS los usuarios excepto el administrador principal y tú? No podrás recuperarlos.',{danger:true,okText:'Eliminar todos'})) return;
+  try{ const r=await api('/api/users/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({all:true})}); toast('✓ '+(r.deleted||0)+' eliminados'); loadUsers(); }
+  catch(e){ toast(e.message||'Error al eliminar',true); }
 }
 async function createUser(){
   const username=$('usr_new_name').value.trim(), email=$('usr_new_email').value.trim(), pw=$('usr_new_pw').value;
@@ -2794,12 +2893,22 @@ async function clearBlocked(){
   catch(e){ toast('No se pudieron reincluir los contactos',true); }
 }
 // --- Auditoría (acciones del panel) ---
+function auditRow(x){ return `<tr><td>${bcFmtTime(x.ts)}</td><td>${bcEsc(x.user)}</td><td><b>${bcEsc(x.action)}</b></td><td style="color:var(--mut)">${bcEsc(x.detail)}</td></tr>`; }
+function auditGvInit(){ if(GV.audit) return; gvInit('audit',{ size:25, searchId:'audit_search', pagerId:'audit_pager',
+  search:(x,q)=> ((x.action||'')+' '+(x.detail||'')+' '+(x.user||'')).toLowerCase().includes(q),
+  render:(items,meta)=>{ const t=$('audit_rows'); if(!t) return;
+    t.innerHTML = items.length? items.map(auditRow).join('') : ('<tr><td colspan="4" class="hint">'+(meta.q?'Sin resultados.':'Sin registros aún.')+'</td></tr>'); } }); }
 async function loadAudit(){
+  auditGvInit();
   try{ const r=await api('/api/audit'); const a=r.audit||[];
     if($('audit_n')) $('audit_n').textContent='· '+a.length;
-    const t=$('audit_rows'); if(!t) return;
-    t.innerHTML = a.length ? a.map(x=>`<tr><td>${bcFmtTime(x.ts)}</td><td>${bcEsc(x.user)}</td><td><b>${bcEsc(x.action)}</b></td><td style="color:var(--mut)">${bcEsc(x.detail)}</td></tr>`).join('') : '<tr><td colspan="4" class="hint">Sin registros aún.</td></tr>';
+    gvSet('audit', a);
   }catch(e){}
+}
+async function clearAudit(){
+  if(!await confirmModal('¿Limpiar TODA la auditoría? Se borra la bitácora de acciones. No se puede deshacer.',{danger:true,okText:'Limpiar'})) return;
+  try{ const r=await api('/api/audit/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({all:true})}); toast('✓ '+(r.deleted||0)+' registros borrados'); loadAudit(); }
+  catch(e){ toast(e.message||'No se pudo limpiar',true); }
 }
 // --- Estado de conexiones (Telegram bot + WhatsApp) en el header ---
 // Estado de SINCRONIZACIÓN de cada cuenta. Si la cuenta NO está sincronizada/conectada, las
@@ -3485,16 +3594,10 @@ function sgDesc(s){
 }
 function sgWhen(ep){ if(!ep) return '—'; try{ return new Date(ep*1000).toLocaleString('es',{dateStyle:'medium',timeStyle:'short'}); }catch(e){ return '—'; } }
 function sgChans(s){ return [s.telegram?ICO_TG:'', s.whatsapp?ICO_WA:''].filter(Boolean).join(' ')||'—'; }
-async function loadSchedules(){
-  { const _s=$('sg_rows'); if(_s && !_s.children.length) skelTable('sg_rows',5,3); }
-  let data;
-  try{ data=(await api('/api/schedules')).schedules||[]; }catch(e){ return; }
-  $('sg_n').textContent=data.length?('· '+data.length):'';
-  $('sg_empty').style.display=data.length?'none':'block';
-  $('sg_rows').innerHTML=data.map(s=>{
-    const msg=bcEsc((s.name||s.text||'').slice(0,48))||'(sin texto)';
-    const tag=s.enabled?'<span class="pill done">activo</span>':'<span class="pill inactive">pausado</span>';
-    return `<tr>
+function sgRow(s){
+  const msg=bcEsc((s.name||s.text||'').slice(0,48))||'(sin texto)';
+  const tag=s.enabled?'<span class="pill done">activo</span>':'<span class="pill inactive">pausado</span>';
+  return `<tr>
       <td class="selcol"><input type="checkbox" class="sgsel" data-sid="${s.sid}" onchange="sgSelChanged()"></td>
       <td><b>${msg}</b><div class="hint" style="margin-top:2px">${tag}</div></td>
       <td>${sgChans(s)}</td>
@@ -3504,8 +3607,18 @@ async function loadSchedules(){
         <button class="sec" style="padding:5px 10px" onclick="sgToggle('${s.sid}',${s.enabled?'false':'true'})">${s.enabled?'Pausar':'Activar'}</button>
         <button class="danger" style="padding:5px 10px;margin-left:6px" onclick="sgDelete('${s.sid}')">Borrar</button>
       </td></tr>`;
-  }).join('');
-  if($('sg_selall')) $('sg_selall').checked=false; sgSelChanged();
+}
+function sgGvInit(){ if(GV.sg) return; gvInit('sg',{ size:25, searchId:'sg_search', pagerId:'sg_pager',
+  search:(s,q)=> ((s.name||'')+' '+(s.text||'')).toLowerCase().includes(q),
+  render:(items,meta)=>{ $('sg_rows').innerHTML=items.map(sgRow).join(''); if($('sg_selall')) $('sg_selall').checked=false; sgSelChanged(); } }); }
+async function loadSchedules(){
+  sgGvInit();
+  { const _s=$('sg_rows'); if(_s && !_s.children.length) skelTable('sg_rows',5,3); }
+  let data;
+  try{ data=(await api('/api/schedules')).schedules||[]; }catch(e){ return; }
+  $('sg_n').textContent=data.length?('· '+data.length):'';
+  $('sg_empty').style.display=data.length?'none':'block';
+  gvSet('sg', data);
 }
 function sgSelAll(v){ document.querySelectorAll('.sgsel').forEach(c=>c.checked=v); sgSelChanged(); }
 function sgSelectedSids(){ return [...document.querySelectorAll('.sgsel:checked')].map(c=>c.getAttribute('data-sid')).filter(Boolean); }
@@ -3629,8 +3742,30 @@ const BC_FILTERS={
 };
 function bcSetFilter(v){ BC_FILTER=v;
   document.querySelectorAll('.card[data-sub="historial"] .segf button').forEach(x=>{ const on=x.dataset.v===v; x.classList.toggle('on',on); x.setAttribute('aria-pressed',on?'true':'false'); });
-  loadBroadcasts(); }
+  if(GV.bc){ GV.bc.page=0; gvRender('bc'); } else loadBroadcasts(); }
+// Design system: buscador + paginación del grid de difusiones (filtro segmentado = filtro 'extra').
+function bcGvInit(){ if(GV.bc) return; gvInit('bc',{ size:25, searchId:'bc_search', pagerId:'bc_pager',
+  search:(b,q)=> ((b.text||'')+' '+(b.full_text||'')+' '+(b.original_text||'')+' '+(b.source||'')).toLowerCase().includes(q),
+  extra:()=> BC_FILTERS[BC_FILTER]||BC_FILTERS.todas,
+  render: renderBcPage }); }
+function renderBcPage(items, meta){
+  const rows=$('bc_rows'); if(!rows) return; rows.innerHTML='';
+  const emp=$('bc_empty'); if(emp){ emp.style.display=meta.total?'none':'block';
+    if(!meta.total){ const h=emp.querySelector('h3'), p=emp.querySelector('p'), btn=emp.querySelector('button');
+      if(meta.q){ if(h) h.textContent='Sin resultados'; if(p) p.textContent='Ninguna difusión coincide con «'+meta.q+'».'; if(btn) btn.style.display='none'; }
+      else { const MSG={ todas:['Aún no hay difusiones','Cuando la captura esté activa, cada lista del canal aparecerá aquí sin enviarse.'],
+        capturadas:['Sin listas capturadas','La captura del canal dejará aquí las listas nuevas, sin enviarlas.'],
+        creada:['Nada recién creado','Las difusiones registradas y aún sin despachar aparecerán aquí.'],
+        encurso:['No hay envíos en curso','Los envíos en progreso aparecerán aquí mientras se despachan.'],
+        enviadas:['Sin envíos completados todavía','Cuando una difusión termine, la verás aquí.'],
+        fallidas:['Sin difusiones con fallos 🎉','No hay envíos con errores en este momento.'] };
+        const m=MSG[BC_FILTER]||MSG.todas; if(h) h.textContent=m[0]; if(p) p.textContent=m[1];
+        if(btn) btn.style.display = BC_FILTER==='todas' ? '' : 'none'; } } }
+  items.forEach(b=>{ rows.appendChild(bcRow(b)); });
+  if($('bc_selall')) $('bc_selall').checked=false; bcSelChanged();
+}
 async function loadBroadcasts(){
+  bcGvInit();
   { const _b=$('bc_rows'); if(_b && !_b.children.length) skelTable('bc_rows',6,4); }
   try{
     const r=await api('/api/broadcasts');
@@ -3639,24 +3774,11 @@ async function loadBroadcasts(){
     // Matriz de estado: conteo por segmento (se pinta en cada botón del filtro).
     document.querySelectorAll('.card[data-sub="historial"] .seg-n').forEach(el=>{
       const f=BC_FILTERS[el.dataset.c]; el.textContent = f? '('+todos.filter(f).length+')' : ''; });
-    const list=todos.filter(BC_FILTERS[BC_FILTER]||BC_FILTERS.todas);
-    const rows=$('bc_rows'); rows.innerHTML='';
-    // UX-fix: estado vacío CONTEXTUAL por filtro (antes con "Fallidas" sin resultados decía "Aún no hay difusiones").
-    const emp=$('bc_empty'); emp.style.display=list.length?'none':'block';
-    if(!list.length){ const h=emp.querySelector('h3'), p=emp.querySelector('p');
-      const MSG={ todas:['Aún no hay difusiones','Cuando la captura esté activa, cada lista del canal aparecerá aquí sin enviarse.'],
-        capturadas:['Sin listas capturadas','La captura del canal dejará aquí las listas nuevas, sin enviarlas.'],
-        creada:['Nada recién creado','Las difusiones registradas y aún sin despachar aparecerán aquí.'],
-        encurso:['No hay envíos en curso','Los envíos en progreso aparecerán aquí mientras se despachan.'],
-        enviadas:['Sin envíos completados todavía','Cuando una difusión termine, la verás aquí.'],
-        fallidas:['Sin difusiones con fallos 🎉','No hay envíos con errores en este momento.'] };
-      const m=MSG[BC_FILTER]||MSG.todas; if(h) h.textContent=m[0]; if(p) p.textContent=m[1];
-      emp.querySelector('button').style.display = BC_FILTER==='todas' ? '' : 'none'; }
-    let active=false;
-    list.forEach(b=>{ rows.appendChild(bcRow(b)); if(b.status==='queued'||b.status==='sending') active=true; });
-    if($('bc_selall')) $('bc_selall').checked=false; bcSelChanged();
-    const live=$('bc_live'); live.classList.toggle('on', active);
-    $('bc_live_t').textContent = active ? 'en vivo' : 'al día';
+    // Indicador en vivo: basado en TODAS (no solo la página visible).
+    const active=todos.some(b=>b.status==='queued'||b.status==='sending');
+    const live=$('bc_live'); if(live) live.classList.toggle('on', active);
+    if($('bc_live_t')) $('bc_live_t').textContent = active ? 'en vivo' : 'al día';
+    gvSet('bc', todos);   // filtra (segmento + búsqueda), pagina y pinta la página vía renderBcPage
     bcRenderLastCaptured(todos);
   }catch(e){ /* silencioso: no romper el polling por un fallo puntual */ }
 }
@@ -3697,6 +3819,12 @@ async function bcDeleteSelected(){
   if(!await confirmModal('¿Borrar DEFINITIVAMENTE '+ids.length+' envío(s)? Se quitan de la tabla y se DETIENE lo que quede pendiente por enviar (se desencola). No revierte lo ya entregado.',{danger:true,okText:'Borrar'})) return;
   try{ const r=await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})}); bcQuitarFilas(ids); toast('✓ '+(r.deleted||0)+' borrados y desencolados'); loadBroadcasts(); loadQueue&&loadQueue(); }
   catch(e){ toast('Error al borrar',true); }
+}
+async function bcDeleteAll(){
+  const n=(GV.bc&&GV.bc.all.length)||0; if(!n){ toast('No hay difusiones para borrar',true); return; }
+  if(!await confirmModal('¿Eliminar TODAS las difusiones ('+n+')? Se borran del historial (incluidas capturadas) y se DETIENE lo pendiente por enviar. No revierte lo ya entregado.',{danger:true,okText:'Eliminar todas'})) return;
+  try{ const r=await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({all:true})}); toast('✓ '+(r.deleted||0)+' eliminadas'); loadBroadcasts(); loadQueue&&loadQueue(); }
+  catch(e){ toast('Error al eliminar',true); }
 }
 function bcStartPolling(){
   if(BC_TIMER) return;
@@ -3776,14 +3904,24 @@ async function plClearFinished(){
   try{ const r=await api('/api/plans/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({finished:true})}); toast('✓ '+(r.deleted||0)+' borrados'); loadPlans(); }
   catch(e){ toast('Error al borrar',true); }
 }
+async function plDeleteAll(){
+  const n=(GV.pl&&GV.pl.all.length)||0; if(!n){ toast('No hay envíos fraccionados',true); return; }
+  if(!await confirmModal('¿Eliminar TODOS los envíos fraccionados ('+n+'), incluidos los pendientes/en curso? Se detiene lo que quede por despachar. No revierte lo ya entregado.',{danger:true,okText:'Eliminar todos'})) return;
+  try{ const r=await api('/api/plans/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({all:true})}); toast('✓ '+(r.deleted||0)+' eliminados'); loadPlans(); loadQueue&&loadQueue(); }
+  catch(e){ toast('Error al eliminar',true); }
+}
+function plGvInit(){ if(GV.pl) return; gvInit('pl',{ size:15, searchId:'pl_search', pagerId:'pl_pager',
+  search:(p,q)=> ((p.text||'')+' '+(p.status||'')+' '+(p.broadcast_id||'')).toLowerCase().includes(q),
+  render:(items,meta)=>{ $('pl_list').innerHTML = items.length? items.map(plCard).join('') : ('<div class="hint" style="padding:8px 0">'+(meta.q?'Sin resultados.':'Sin envíos fraccionados.')+'</div>');
+    if($('pl_selall')) $('pl_selall').checked=false; plSelChanged(); } }); }
 async function loadPlans(){
+  plGvInit();
   try{
     const r=await api('/api/plans'); const list=r.plans||[];
     $('pl_empty').style.display=list.length?'none':'block';
-    $('pl_list').innerHTML=list.map(plCard).join('');
-    if($('pl_selall')) $('pl_selall').checked=false; plSelChanged();
     const active=list.some(p=>p.status==='pending'||p.status==='running');
     $('pl_live').classList.toggle('on',active); $('pl_live_t').textContent=active?'en vivo':'al día';
+    gvSet('pl', list);
   }catch(e){ /* silencioso */ }
 }
 let PL_TIMER=null;
