@@ -1841,9 +1841,8 @@ a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visib
   h1{font-size:18px}
   html,body{overflow-x:hidden;max-width:100%}
   main,.card{max-width:100%}
-  .nav{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;justify-content:flex-start;-webkit-overflow-scrolling:touch}
-  .nav button{flex:0 0 auto}
-  .nav button.on::after{display:none}
+  .nav{flex-wrap:wrap;overflow-x:visible;justify-content:center}
+  .nav button{flex:0 1 auto}
   /* B24: el mensaje vuelve a truncar con ellipsis (antes max-width:none lo desbordaba) */
   .bc-msg{max-width:60vw}
   /* B23: el banner global de estado se apila y los botones ocupan el ancho */
@@ -1857,6 +1856,44 @@ a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visib
   .tbl-scroll{max-height:60vh;overscroll-behavior:contain}
 }
 th.selcol,td.selcol{width:34px;text-align:center}
+/* ===== Mejora móvil general (última capa: gana a reglas previas por orden) ===== */
+@media (max-width:620px){
+  /* Nav de 5 pestañas: envolver a 2 filas en vez de scroll horizontal (se ven todas) */
+  .nav{flex-wrap:wrap;overflow-x:visible;justify-content:center;gap:6px}
+  .nav button{flex:0 1 auto;min-height:44px}
+  .nav button.on::after{display:block}
+  /* Sub-nav + segmentado: ancho completo, objetivos táctiles ≥44px */
+  .subnav{width:100%} .subnav .hint{display:none}
+  .subnav button{flex:1 1 auto;min-height:44px;padding:10px 12px;font-size:12.5px;justify-content:center}
+  .segf{display:flex;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .segf button{flex:1 0 auto;white-space:nowrap;min-height:44px;padding:10px 10px}
+  /* iOS: fuente ≥16px en campos evita el zoom automático al enfocar */
+  input,textarea,select{font-size:16px}
+  /* Login nunca desborda en pantallas <372px */
+  #login .box{width:100%;max-width:372px}
+  /* Chips de canal/modo: llenan ancho y alto táctil */
+  .chan{min-height:44px}
+  .chan-row .chan{flex:1 1 auto;justify-content:center}
+  /* Imagen: vista previa debajo de los campos (no los aprieta) */
+  .img-slot{flex-direction:column} .img-slot .preview{max-width:100%}
+  /* Paginador de grids: botones táctiles y separados */
+  .gv-pager{gap:14px} .gv-pager .gv-nav{min-width:44px;min-height:44px;padding:10px 14px}
+  /* Historial: ocultar la columna Fechas (la info sigue en el detalle) */
+  #bc_table th:nth-child(4),#bc_table td:nth-child(4){display:none}
+  /* Ayuda ⓘ: objetivo más grande y tooltip como barra inferior legible al tocar */
+  .help{width:24px;height:24px;font-size:13px}
+  .help::after{position:fixed;left:12px;right:12px;bottom:16px;top:auto;width:auto;max-width:none;transform:none;text-align:left}
+  .help::before{display:none}
+  /* Barra de acciones de Contactos: 2 botones por fila, parejos */
+  .act-bar button{flex:1 1 calc(50% - 6px)}
+  /* Pastillas de estado pueden envolver (no ensanchan la columna) */
+  td .pill{white-space:normal}
+  /* KPIs: no recortar el tooltip ⓘ que vive dentro de la tarjeta */
+  .stat{overflow:visible}
+  .stat::after{left:8px;right:8px}
+  /* Tablas dentro de .tbl-scroll conservan su propio scroll (evita doble scroll) */
+  .tbl-scroll table{display:table;width:100%}
+}
 </style></head><body>
 <!-- Iconos de marca reutilizables (Telegram / WhatsApp) para mostrar junto a la info de cada canal. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -1902,8 +1939,8 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="stats" style="margin-top:14px">
      <div class="stat"><b id="k_sent">–</b><span>enviados (30 días)</span></div>
      <div class="stat"><b id="k_rate">–</b><span>tasa de éxito <span class="help" tabindex="0" data-tip="Histórica de los últimos 30 días, sobre los envíos contabilizados. No es el estado actual.">ⓘ</span></span></div>
-     <div class="stat" role="button" tabindex="0" style="cursor:pointer" title="Ver los envíos en curso" onclick="showTab('envios');showSub('envios','historial')"><b id="k_pend">–</b><span>lotes pendientes</span></div>
-     <div class="stat" role="button" tabindex="0" style="cursor:pointer" title="Ver la cola y la DLQ" onclick="showTab('envios');showSub('envios','problemas')"><b id="k_dlq">–</b><span>en DLQ <span class="help" tabindex="0" data-tip="Lotes atascados ahora mismo (cola de fallidos SQS). Es un conteo APROXIMADO: puede tardar unos segundos en actualizarse tras reintentar/descartar, y convivir con una tasa de éxito alta (la tasa es histórica).">ⓘ</span></span></div>
+     <div class="stat" role="button" tabindex="0" style="cursor:pointer" title="Ver lo que falta por enviar" onclick="showTab('envios');showSub('envios','historial')"><b id="k_pend">–</b><span>por enviar</span></div>
+     <div class="stat" role="button" tabindex="0" style="cursor:pointer" title="Ver los envíos atascados" onclick="showTab('envios');showSub('envios','problemas')"><b id="k_dlq">–</b><span>atascados <span class="help" tabindex="0" data-tip="Envíos que fallaron tras varios reintentos y esperan que los reintentes o descartes. Es un conteo aproximado: puede tardar unos segundos en actualizarse.">ⓘ</span></span></div>
    </div>
    <div id="dash_serie" style="margin-top:16px"></div>
    <div id="dash_last" class="hint" style="margin-top:14px"></div>
@@ -1915,9 +1952,9 @@ th.selcol,td.selcol{width:34px;text-align:center}
   </div>
   <!-- UX-5: SALA DE CONTROL: los interruptores del negocio (capturar / enviar automático /
        lista destino) viven en Inicio, no enterrados en Ajustes. -->
-  <div class="card accent" data-tab="inicio"><h2>Recopilación automática<span class="help" tabindex="0" data-tip="Lee el canal fuente y guarda cada lista nueva (con markup y footer) para que la VEAS, sin enviarla a nadie. Es independiente del ENVÍO: puedes recopilar con el envío apagado.">ⓘ</span></h2>
+  <div class="card accent" data-tab="inicio"><h2>Captura automática<span class="help" tabindex="0" data-tip="Lee el canal de Telegram y guarda cada lista nueva (con markup y footer) para que la VEAS, sin enviarla a nadie. Es independiente del ENVÍO: puedes capturar con el envío apagado.">ⓘ</span></h2>
    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-     <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="capture_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleCapture()"> <b>Recopilar listas del canal</b></label>
+     <label style="display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--tx)"><input type="checkbox" id="capture_enabled" style="width:auto;transform:scale(1.3)" onchange="toggleCapture()"> <b>Capturar listas del canal</b></label>
      <span id="cap_badge" class="pill">—</span>
    </div>
    <div class="hint" style="margin-top:10px">Lee el <b>canal fuente configurado</b> y registra cada lista nueva para que la <b>veas</b>, <b>sin enviarla a nadie</b>. Mientras el <b>envío automático</b> esté apagado, cada lista capturada aparece en <b>📡 Actividad</b> como <b>📥 Capturada</b> y se te manda a tus <b>Mensajes Guardados</b> de Telegram. Es independiente del envío.</div>
@@ -1950,18 +1987,18 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div id="dash_steps" style="margin-top:10px">cargando…</div>
   </div>
   <div class="card" data-tab="fuentes" style="padding:14px 18px"><div class="subnav" data-subnav="fuentes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="tg" onclick="showSub('fuentes','tg')"><svg class="ico"><use href="#i-tg"></use></svg> Telegram</button><button data-sub="wa" onclick="showSub('fuentes','wa')"><svg class="ico"><use href="#i-wa"></use></svg> WhatsApp</button></div></div>
-  <div class="card" data-tab="ajustes" style="padding:14px 18px"><div class="subnav" data-subnav="ajustes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="conexiones" onclick="showSub('ajustes','conexiones')">🔌 Conexiones</button><button data-sub="captura" onclick="showSub('ajustes','captura')">📥 Captura</button><button data-sub="envio" onclick="showSub('ajustes','envio')">📤 Ritmo y horarios</button><button data-sub="acceso" onclick="showSub('ajustes','acceso')">👤 Acceso</button><button data-sub="sistema" onclick="showSub('ajustes','sistema')">🛠️ Sistema</button></div></div>
+  <div class="card" data-tab="ajustes" style="padding:14px 18px"><div class="subnav" data-subnav="ajustes"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="conexiones" onclick="showSub('ajustes','conexiones')">🔌 Conexiones</button><button data-sub="captura" onclick="showSub('ajustes','captura')">📥 Captura</button><button data-sub="envio" onclick="showSub('ajustes','envio')">📤 Ritmo y horarios</button><button data-sub="acceso" onclick="showSub('ajustes','acceso')">👤 Acceso</button><button data-sub="sistema" onclick="showSub('ajustes','sistema')">🛠️ Auditoría</button></div></div>
   <div class="card accent" data-tab="ajustes" data-sub="conexiones"><h2><svg class="ico"><use href="#i-tg"></use></svg> Cuenta de Telegram<span class="help" tabindex="0" data-tip="Dos modos: Bot (envía a quienes te dan /start) o Userbot (envía desde TU cuenta a tus contactos, vía Telethon). El userbot llega a más gente pero tiene más riesgo de baneo.">ⓘ</span></h2>
    <label>Modo de envío</label>
-   <select id="send_mode"><option value="bot">Bot — a suscriptores que dan /start</option><option value="userbot">Userbot — desde mi cuenta a mis contactos</option></select>
+   <select id="send_mode"><option value="bot">Bot — a suscriptores que dan /start</option><option value="userbot">Mi cuenta personal — a mis contactos</option></select>
 
    <div class="section-label">Bot (crea o usa otro bot)</div>
    <label>Token del bot <span id="bot_status" class="hint"></span></label>
    <input id="bot_token" type="password" placeholder="(pega el token de @BotFather)">
-   <div class="hint">Crea un bot en <code>@BotFather</code> (<code>/newbot</code>), pega su token, pulsa <b>Guardar cuenta</b> y luego <b>Registrar webhook</b> para conectarlo a la plataforma.</div>
+   <div class="hint">Crea un bot en <code>@BotFather</code> (<code>/newbot</code>), pega su token, pulsa <b>Guardar cuenta</b> y luego <b>Conectar bot</b>.</div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
      <button class="sec" onclick="tgVerify()">Verificar bot</button>
-     <button class="sec" onclick="tgWebhook()">Registrar webhook</button>
+     <button class="sec" onclick="tgWebhook()">Conectar bot</button>
      <span id="tg_state" class="hint" style="margin-top:0"></span>
    </div>
 
@@ -1979,7 +2016,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div id="tl_step2" style="display:none;margin-top:10px">
      <div class="row">
        <div><label>Código recibido</label><input id="tl_code" inputmode="numeric" placeholder="12345"></div>
-       <div id="tl_pwd_wrap" style="display:none"><label>Contraseña (verificación en 2 pasos)</label><input id="tl_password" type="password" placeholder="contraseña 2FA"></div>
+       <div id="tl_pwd_wrap" style="display:none"><label>Contraseña (verificación en 2 pasos)</label><input id="tl_password" type="password" placeholder="tu contraseña de Telegram"></div>
      </div>
      <button id="tl_confirm" onclick="tlSignIn()" style="margin-top:8px">Confirmar y conectar</button>
      <span id="tl_status" class="hint" style="margin-left:10px"></span>
@@ -1991,7 +2028,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </details>
    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px">
      <button class="sec" onclick="saveAccount()">Guardar cuenta</button>
-     <button class="danger" onclick="tlLogout()">🗑 Limpiar sesión userbot</button>
+     <button class="danger" onclick="tlLogout()">🗑 Desconectar mi cuenta de Telegram</button>
      <span id="tl_logout_out" class="hint" style="margin-top:0"></span>
    </div>
   </div>
@@ -2026,10 +2063,10 @@ th.selcol,td.selcol{width:34px;text-align:center}
   </div>
   <div class="card" data-tab="ajustes" data-sub="captura"><h2>Canal y mensaje<span class="help" tabindex="0" data-tip="Canal público de Telegram que se sondea (t.me/s/canal) y la limpieza del mensaje: líneas a quitar (ubicación/teléfono), símbolos de moneda y footer de WhatsApp.">ⓘ</span></h2>
    <div class="hint" style="margin-top:-4px">La <b>recopilación</b> del canal y el <b>envío</b> a tus contactos son interruptores <b>separados</b> que viven en <b>🏠 Inicio</b>. Con la recopilación activa se guarda y se ve cada lista publicada (en <b>📡 Actividad</b>); el envío automático se controla aparte.</div>
-   <label>Canal fuente (username sin @)</label><input id="source_channel">
+   <label>Canal de Telegram (nombre de usuario, sin @)</label><input id="source_channel">
    <label>Símbolos de moneda</label><input id="currency_symbols">
-   <label>Footer WhatsApp (se añade al final de cada lista)</label><textarea id="whatsapp_footer"></textarea>
-   <label>Patrones a quitar (ubicación), uno por línea</label><textarea id="strip_patterns"></textarea>
+   <label>Texto al final del mensaje (se añade a cada lista)</label><textarea id="whatsapp_footer"></textarea>
+   <label>Textos a eliminar de cada lista (ej. ubicación, marca), uno por línea</label><textarea id="strip_patterns"></textarea>
    <button onclick="saveCfg()">Guardar cambios</button>
   </div>
   <!-- UX-2: orden narrativo del sub Fuente: Canal → Aumento → Imagen → Probar (antes el markup iba primero, sin contexto). -->
@@ -2045,7 +2082,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>…o URL externa</label><input id="image_url" placeholder="https://...">
    <button class="sec" onclick="saveCfg()">Guardar URL</button>
   </div>
-  <div class="card" data-tab="ajustes" data-sub="captura"><h2>Probar procesamiento del mensaje<span class="help" tabindex="0" data-tip="Pega un texto de ejemplo del canal y mira cómo quedaría YA procesado (markup, limpieza y footer) sin enviar nada.">ⓘ</span></h2>
+  <div class="card" data-tab="ajustes" data-sub="captura"><h2>Probar cómo queda una lista<span class="help" tabindex="0" data-tip="Pega un texto de ejemplo del canal y mira cómo quedaría YA procesado (con markup, limpieza y texto final) sin enviar nada.">ⓘ</span></h2>
    <div class="hint">Pega un mensaje tal como lo publica el canal y mira cómo quedará <b>ya procesado</b> (markup aplicado, sin ubicación/marca/teléfonos, con footer). Así verificas las reglas antes de enviar.</div>
    <textarea id="pp_in" style="min-height:90px;margin-top:10px" placeholder="Pega aquí el texto original del canal..."></textarea>
    <button class="sec" style="margin-top:8px" onclick="probarProcesado()">Procesar</button>
@@ -2053,7 +2090,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div id="pp_out" style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-top:4px;min-height:40px;font-size:13px;color:var(--tx2)">—</div>
   </div>
   <div class="card" data-tab="ajustes" data-sub="sistema"><h2>Auditoría <span id="audit_n" class="hint"></span></h2>
-   <div class="hint">Últimas acciones realizadas en el panel (config, envíos, cancelaciones, DLQ).</div>
+   <div class="hint">Últimas acciones realizadas en el panel (configuración, envíos, cancelaciones, errores).</div>
    <div class="grid-tools"><input id="audit_search" class="gv-search" placeholder="🔎 Buscar en auditoría (acción, detalle, usuario)…" aria-label="Buscar auditoría"></div>
    <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>cuándo</th><th>usuario</th><th>acción</th><th>detalle</th></tr></thead><tbody id="audit_rows"></tbody></table></div>
    <div class="gv-pager" id="audit_pager"></div>
@@ -2063,7 +2100,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="ghost" onclick="loadAudit()">Refrescar</button>
    </div>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="tg"><h2>Destinatarios<span class="help" tabindex="0" data-tip="Contactos a los que envías por Telegram. Filtra por estado (Todos/Incluidos/Excluidos). Marca y usa Excluir/Incluir; incluir un contacto que coincide con un patrón crea una EXCEPCIÓN (se envía pese al patrón).">ⓘ</span> <span id="subcount" class="hint"></span></h2>
+  <div class="card" data-tab="fuentes" data-sub="tg"><h2>Contactos de Telegram<span class="help" tabindex="0" data-tip="Contactos a los que envías por Telegram. Filtra por estado (Todos/Incluidos/Excluidos), marca y usa Excluir/Incluir. Los excluidos no reciben las listas.">ⓘ</span> <span id="subcount" class="hint"></span></h2>
    <div class="hint">Busca, navega y usa los botones para incluir/excluir en masa. Los excluidos NO reciben las listas.</div>
    <div style="margin-top:8px"><button class="sec" onclick="tgRefreshContacts()">🔄 Actualizar nombres</button><span class="help" tabindex="0" data-tip="Relee tus contactos de Telegram EN VIVO y actualiza los nombres aquí. Úsalo si cambiaste un nombre en tu agenda (p. ej. Google Contacts) y quieres que se refleje. (Sin esto, se refrescan solos cada ~30 min.)">ⓘ</span></div>
    <input id="subsearch" placeholder="🔎 Buscar por nombre o número..." oninput="onSearch()" style="margin-top:10px">
@@ -2076,20 +2113,20 @@ th.selcol,td.selcol{width:34px;text-align:center}
      </div>
    </div>
    <div class="excl-pat">
-     <label style="margin:0 0 6px">⛔ Auto-excluir por patrón de nombre</label>
-     <div class="hint" style="margin:0 0 8px">Un patrón por línea. Cualquier contacto cuyo nombre <b>contenga</b> un patrón (sin distinguir mayúsculas) queda excluido solo de los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>. Son <b>tus</b> patrones (por usuario); los envíos excluyen con la <b>unión</b> de los de todos los usuarios.</div>
+     <label style="margin:0 0 6px">⛔ Excluir si el nombre contiene…</label>
+     <div class="hint" style="margin:0 0 8px">Una palabra o texto por línea. Todo contacto cuyo nombre lo <b>contenga</b> (sin importar mayúsculas) dejará de recibir los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>. Son <b>tus</b> reglas (por usuario); los envíos excluyen con la <b>unión</b> de las de todos.</div>
      <textarea id="tg_excl_pat" style="min-height:62px" placeholder="FAM&#10;#"></textarea>
-     <button class="sec" style="margin-top:8px" onclick="saveExclPatterns('telegram')">Guardar patrones</button>
+     <button class="sec" style="margin-top:8px" onclick="saveExclPatterns('telegram')">Guardar</button>
    </div>
-   <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
-     <button class="sec" onclick="toggleAll(true)">Marcar página</button>
-     <button class="sec" onclick="toggleAll(false)">Desmarcar</button>
+   <div class="act-bar" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+     <button class="sec" onclick="toggleAll(true)">Marcar esta página</button>
+     <button class="sec" onclick="toggleAll(false)">Quitar marcas</button>
      <button class="sec" onclick="bulk('excluir')">Excluir marcados</button>
      <button class="sec" onclick="bulk('incluir')">Incluir marcados</button>
-     <button class="sec" onclick="createListFromGrid('telegram')">➕ Lista con marcados</button>
-     <button class="sec" onclick="createListFromIncluded('telegram')">➕ Lista con incluidos</button>
-     <button class="ghost" onclick="bulkFiltered('excluir')">Excluir filtrados</button>
-     <button class="ghost" onclick="bulkFiltered('incluir')">Incluir filtrados</button>
+     <button class="sec" onclick="createListFromGrid('telegram')">➕ Nueva lista con los marcados</button>
+     <button class="sec" onclick="createListFromIncluded('telegram')">➕ Nueva lista con los incluidos</button>
+     <button class="ghost" onclick="bulkFiltered('excluir')">Excluir todas las coincidencias</button>
+     <button class="ghost" onclick="bulkFiltered('incluir')">Incluir todas las coincidencias</button>
    </div>
    <div class="tbl-scroll"><table><thead><tr><th><input type="checkbox" id="selall" onchange="toggleAll(this.checked)"></th><th>nombre</th><th>estado</th></tr></thead><tbody id="subs"></tbody></table></div>
    <div class="hint" id="subsempty" style="display:none;margin-top:12px">Sin destinatarios (modo bot: nadie dio /start; modo userbot: la cuenta no tiene contactos).</div>
@@ -2099,22 +2136,22 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="sec" onclick="nextPage()">▶</button>
    </div>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="tg"><h2>Listas de distribución · Telegram<span class="help" tabindex="0" data-tip="Agrupa contactos en listas con nombre y elige el modo: Todos, Solo estas listas (whitelist) o Excepto estas listas (blacklist).">ⓘ</span></h2>
-   <div class="hint">Agrupa contactos en listas con nombre y elige a quién enviar. "+ marcados" usa los contactos marcados arriba en <b>Destinatarios</b>.</div>
+  <div class="card" data-tab="fuentes" data-sub="tg"><h2>Listas de contactos · Telegram<span class="help" tabindex="0" data-tip="Agrupa contactos en listas con nombre y elige a quién enviar: a todos, solo a las listas marcadas, o a todos menos las marcadas.">ⓘ</span></h2>
+   <div class="hint">Agrupa contactos en listas con nombre y elige a quién enviar. "+ marcados" usa los contactos marcados arriba en <b>Contactos</b>.</div>
    <div id="tg_lists" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;margin-top:10px"><input id="tg_newlist" placeholder="Nombre de nueva lista"><button class="sec" onclick="addList('telegram')">Crear lista</button></div>
-   <div style="margin-top:12px"><b>Modo de envío:</b><br>
-     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_telegram" value="all" style="width:auto"> Todos</label>
-     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_telegram" value="only" style="width:auto"> Solo listas activas</label>
-     <label style="display:inline-flex;align-items:center;gap:6px;width:auto"><input type="radio" name="mode_telegram" value="except" style="width:auto"> Excluir listas activas</label>
+   <div style="margin-top:12px"><b>¿A quién se envía?</b> <span class="hint">Marca ☑ arriba las listas que quieras usar.</span><br>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_telegram" value="all" style="width:auto"> Todos mis contactos</label>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_telegram" value="only" style="width:auto"> Solo las listas marcadas</label>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto"><input type="radio" name="mode_telegram" value="except" style="width:auto"> Todos, excepto las listas marcadas</label>
    </div>
    <button onclick="saveLists('telegram')">Guardar listas Telegram</button>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="wa"><h2>Destinatarios WhatsApp<span class="help" tabindex="0" data-tip="Contactos de WhatsApp (cárgalos del servicio conectado). Filtra por estado y marca para Excluir/Incluir; incluir un contacto que coincide con un patrón crea una EXCEPCIÓN.">ⓘ</span> <span id="wa_c_count" class="hint"></span></h2>
+  <div class="card" data-tab="fuentes" data-sub="wa"><h2>Contactos de WhatsApp<span class="help" tabindex="0" data-tip="Contactos de WhatsApp (cárgalos del servicio conectado). Filtra por estado, marca y usa Excluir/Incluir. Los excluidos no reciben las difusiones por WhatsApp.">ⓘ</span> <span id="wa_c_count" class="hint"></span></h2>
    <div class="hint">Carga tus contactos (servicio conectado), busca por nombre, y marca para <b>excluir/incluir</b>. Los excluidos NO reciben las difusiones por WhatsApp.</div>
    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
      <button class="sec" onclick="loadWaContacts()">Cargar contactos de WhatsApp</button>
-     <button class="sec" onclick="waSyncContacts()">🔄 Sincronizar nombres</button>
+     <button class="sec" onclick="waSyncContacts()">🔄 Actualizar nombres</button>
      <span class="help" tabindex="0" data-tip="Re-sincroniza tu cuenta de WhatsApp para traer cambios de nombre de la agenda (p. ej. Google Contacts). Tras sincronizar, recarga los contactos para ver los nombres nuevos.">ⓘ</span>
    </div>
    <input id="wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="renderWa()" style="margin-top:10px">
@@ -2127,20 +2164,20 @@ th.selcol,td.selcol{width:34px;text-align:center}
      </div>
    </div>
    <div class="excl-pat">
-     <label style="margin:0 0 6px">⛔ Auto-excluir por patrón de nombre</label>
-     <div class="hint" style="margin:0 0 8px">Un patrón por línea. Cualquier contacto cuyo nombre <b>contenga</b> un patrón (sin distinguir mayúsculas) queda excluido solo de los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>. Son <b>tus</b> patrones (por usuario); los envíos excluyen con la <b>unión</b> de los de todos los usuarios.</div>
+     <label style="margin:0 0 6px">⛔ Excluir si el nombre contiene…</label>
+     <div class="hint" style="margin:0 0 8px">Una palabra o texto por línea. Todo contacto cuyo nombre lo <b>contenga</b> (sin importar mayúsculas) dejará de recibir los envíos. Ej.: <code>FAM</code> (familia), <code>#</code>. Son <b>tus</b> reglas (por usuario); los envíos excluyen con la <b>unión</b> de las de todos.</div>
      <textarea id="wa_excl_pat" style="min-height:62px" placeholder="FAM&#10;#"></textarea>
-     <button class="sec" style="margin-top:8px" onclick="saveExclPatterns('whatsapp')">Guardar patrones</button>
+     <button class="sec" style="margin-top:8px" onclick="saveExclPatterns('whatsapp')">Guardar</button>
    </div>
-   <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
-     <button class="sec" onclick="waToggleAll(true)">Marcar página</button>
-     <button class="sec" onclick="waToggleAll(false)">Desmarcar</button>
+   <div class="act-bar" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+     <button class="sec" onclick="waToggleAll(true)">Marcar esta página</button>
+     <button class="sec" onclick="waToggleAll(false)">Quitar marcas</button>
      <button class="sec" onclick="waBulk('excluir')">Excluir marcados</button>
      <button class="sec" onclick="waBulk('incluir')">Incluir marcados</button>
-     <button class="ghost" onclick="waBulkFiltered('excluir')">Excluir filtrados</button>
-     <button class="ghost" onclick="waBulkFiltered('incluir')">Incluir filtrados</button>
-     <button class="sec" onclick="createListFromGrid('whatsapp')">➕ Lista con marcados</button>
-     <button class="sec" onclick="createListFromIncluded('whatsapp')">➕ Lista con incluidos</button>
+     <button class="ghost" onclick="waBulkFiltered('excluir')">Excluir todas las coincidencias</button>
+     <button class="ghost" onclick="waBulkFiltered('incluir')">Incluir todas las coincidencias</button>
+     <button class="sec" onclick="createListFromGrid('whatsapp')">➕ Nueva lista con los marcados</button>
+     <button class="sec" onclick="createListFromIncluded('whatsapp')">➕ Nueva lista con los incluidos</button>
    </div>
    <div class="tbl-scroll"><table><thead><tr><th></th><th>nombre</th><th>estado</th></tr></thead><tbody id="wa_subs"></tbody></table></div>
    <div style="display:flex;gap:12px;align-items:center;margin-top:10px"><button class="sec" onclick="waPrev()">◀</button><span id="wa_pageinfo" class="hint"></span><button class="sec" onclick="waNext()">▶</button></div>
@@ -2153,22 +2190,22 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button class="ghost" onclick="clearBlocked()">Reincluir a todos</button>
    </div>
   </div>
-  <div class="card" data-tab="fuentes" data-sub="wa"><h2>Listas de distribución · WhatsApp<span class="help" tabindex="0" data-tip="Agrupa contactos de WhatsApp en listas y elige el modo: Todos, Solo estas listas (whitelist) o Excepto estas listas (blacklist).">ⓘ</span></h2>
-   <div class="hint">"+ marcados" usa los contactos marcados arriba en <b>Destinatarios WhatsApp</b>.</div>
+  <div class="card" data-tab="fuentes" data-sub="wa"><h2>Listas de contactos · WhatsApp<span class="help" tabindex="0" data-tip="Agrupa contactos de WhatsApp en listas y elige a quién enviar: a todos, solo a las listas marcadas, o a todos menos las marcadas.">ⓘ</span></h2>
+   <div class="hint">"+ marcados" usa los contactos marcados arriba en <b>Contactos de WhatsApp</b>.</div>
    <div id="wa_lists" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;margin-top:10px"><input id="wa_newlist" placeholder="Nombre de nueva lista"><button class="sec" onclick="addList('whatsapp')">Crear lista</button></div>
-   <div style="margin-top:12px"><b>Modo de envío:</b><br>
-     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_whatsapp" value="all" style="width:auto"> Todos</label>
-     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_whatsapp" value="only" style="width:auto"> Solo listas activas</label>
-     <label style="display:inline-flex;align-items:center;gap:6px;width:auto"><input type="radio" name="mode_whatsapp" value="except" style="width:auto"> Excluir listas activas</label>
+   <div style="margin-top:12px"><b>¿A quién se envía?</b> <span class="hint">Marca ☑ arriba las listas que quieras usar.</span><br>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_whatsapp" value="all" style="width:auto"> Todos mis contactos</label>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto;margin-right:14px"><input type="radio" name="mode_whatsapp" value="only" style="width:auto"> Solo las listas marcadas</label>
+     <label style="display:inline-flex;align-items:center;gap:6px;width:auto"><input type="radio" name="mode_whatsapp" value="except" style="width:auto"> Todos, excepto las listas marcadas</label>
    </div>
    <button onclick="saveLists('whatsapp')">Guardar listas WhatsApp</button>
   </div>
   <div class="card" data-tab="envios" style="padding:14px 18px"><div class="subnav" data-subnav="envios"><span class="hint" style="margin:0 8px 0 0">Ver:</span><button data-sub="historial" onclick="showSub('envios','historial')">📡 Historial</button><button data-sub="programados" onclick="showSub('envios','programados')">⏰ Programados</button><button data-sub="problemas" onclick="showSub('envios','problemas')">⚠️ Problemas</button></div></div>
   <div class="card" data-tab="enviar"><h2>✍️ Componer y enviar<span class="help" tabindex="0" data-tip="Redacta un mensaje propio y envíalo ya (o prográmalo). Respeta listas y exclusiones de cada canal. WhatsApp exige elegir una lista; el texto de Telegram no puede pasar de 4096 caracteres.">ⓘ</span></h2>
-   <div class="hint">Escribe un mensaje y envíalo de inmediato a los canales seleccionados. Respeta las listas y exclusiones configuradas en cada canal.</div>
+   <div class="hint">Escribe un mensaje y envíalo ahora o prográmalo a los canales seleccionados. Respeta las listas y exclusiones configuradas en cada canal.</div>
    <label>Mensaje <span id="bc_count" class="charcount">0 caracteres</span></label>
-   <textarea id="bc_text" style="min-height:120px" placeholder="Escribe aquí el mensaje a difundir..." oninput="bcCount()"></textarea>
+   <textarea id="bc_text" style="min-height:120px" placeholder="Escribe aquí el mensaje…" oninput="bcCount()"></textarea>
 
    <label>Imagen (opcional)</label>
    <div class="img-slot">
@@ -2191,7 +2228,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <div id="bc_tg_wrap"><div class="hint" style="margin-top:0">Telegram — busca y marca contactos</div>
        <input id="bc_tg_search" placeholder="🔎 Buscar por nombre o número..." oninput="bcRenderPick('tg')">
        <div id="bc_tg_pick" class="pickbox"></div>
-       <div class="hint" style="margin-top:6px">o una lista: <select id="bc_tg_list" onchange="bcPrev()"><option value="">(según configuración)</option></select></div>
+       <div class="hint" style="margin-top:6px">o una lista: <select id="bc_tg_list" onchange="bcPrev()"><option value="">(según Contactos)</option></select></div>
      </div>
      <div id="bc_wa_wrap" style="display:none"><div class="hint" style="margin-top:0">WhatsApp — busca y marca contactos</div>
        <input id="bc_wa_search" placeholder="🔎 Buscar por nombre o número..." oninput="bcRenderPick('wa')">
@@ -2205,12 +2242,12 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <!-- UX-6: UN solo compositor con 3 modos; adiós al formulario duplicado de "Programar un mensaje". -->
    <div class="chan-row">
      <label class="chan on" id="bc_mode_now"><input type="radio" name="bc_mode" value="now" checked onchange="bcMode()" class="sr-only">⚡ Ahora</label>
-     <label class="chan" id="bc_mode_once"><input type="radio" name="bc_mode" value="once" onchange="bcMode()" class="sr-only">📅 Una vez el…</label>
-     <label class="chan" id="bc_mode_rec"><input type="radio" name="bc_mode" value="rec" onchange="bcMode()" class="sr-only">🔁 Recurrente</label>
+     <label class="chan" id="bc_mode_once"><input type="radio" name="bc_mode" value="once" onchange="bcMode()" class="sr-only">📅 Una vez</label>
+     <label class="chan" id="bc_mode_rec"><input type="radio" name="bc_mode" value="rec" onchange="bcMode()" class="sr-only">🔁 Se repite</label>
    </div>
    <div id="bc_once_box" style="display:none;margin-top:10px">
      <input type="datetime-local" id="bc_sched" style="max-width:260px">
-     <div class="hint">Se difiere hasta entonces y luego se gotea por lotes. Hora en <b class="tz-lbl">Colombia · Bogotá (UTC-5)</b> — <a href="javascript:void 0" onclick="goStep('ajustes','envio')">cambiar</a>.</div>
+     <div class="hint">Se guarda y se envía en esa fecha y hora, poco a poco para no saturar los canales. Hora en <b class="tz-lbl">Colombia · Bogotá (UTC-5)</b> — <a href="javascript:void 0" onclick="goStep('ajustes','envio')">cambiar</a>.</div>
    </div>
    <div id="bc_rec_box" style="display:none;margin-top:10px">
      <div class="chan-row">
@@ -2220,7 +2257,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <div id="sg_time_box" style="margin-top:10px"><label style="margin-top:0">Hora</label><input type="time" id="sg_at" value="09:00" style="max-width:160px"></div>
      <div id="sg_days_box" style="margin-top:10px;display:none"><label style="margin-top:0">Días</label><div class="chan-row" id="sg_days"></div></div>
      <input id="sg_name" placeholder="Nombre (opcional), p. ej. Lista de la mañana" maxlength="80" style="margin-top:10px">
-     <div class="hint" style="margin-top:8px">Recurrente envía a la <b>lista elegida arriba</b> por canal (los contactos marcados a mano no aplican) y la imagen debe ser una <b>URL estable</b> (una imagen subida caduca en 1 h). Hora en <b class="tz-lbl">Colombia · Bogotá (UTC-5)</b>. Gestiona los creados en <b>📡 Actividad → Programados</b>.</div>
+     <div class="hint" style="margin-top:8px">Los envíos que se repiten van a la <b>lista elegida arriba</b> por canal (los contactos marcados a mano no aplican) y la imagen debe estar en una <b>URL fija</b> (un enlace web); las que subes aquí dejan de verse tras 1 hora. Hora en <b class="tz-lbl">Colombia · Bogotá (UTC-5)</b>. Gestiónalos en <b>📡 Actividad → Programados</b>.</div>
    </div>
 
    <div class="compose-actions">
@@ -2230,19 +2267,19 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span id="bc_status" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de envío (SQS) <span class="live" style="margin-left:auto"><span class="ping"></span>en vivo</span></h2>
-   <div class="stats"><div class="stat"><b id="q_p">–</b><span>lotes programados pendientes</span></div>
-     <div class="stat"><b id="q_b">–</b><span>en cola SQS (esperando)</span></div>
-     <div class="stat"><b id="q_v">–</b><span>en vuelo (entregándose)</span></div>
-     <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
-   <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1. <b>En vuelo</b> = lotes que el worker está entregando ahora. Se actualiza cada pocos segundos.</div>
+  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de envío <span class="live" style="margin-left:auto"><span class="ping"></span>en vivo</span></h2>
+   <div class="stats"><div class="stat"><b id="q_p">–</b><span>en espera de turno</span></div>
+     <div class="stat"><b id="q_b">–</b><span>en cola (por salir)</span></div>
+     <div class="stat"><b id="q_v">–</b><span>enviándose ahora</span></div>
+     <div class="stat"><b id="q_d">–</b><span>fallidos (no se entregaron)</span></div></div>
+   <div class="hint" style="margin-top:10px">Cuando envías poco a poco, los mensajes esperan su turno y salen de a uno; por eso "en cola" suele ser 0 o 1. <b>Enviándose ahora</b> = lo que se está entregando en este momento. Se actualiza cada pocos segundos.</div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
      <button class="ghost" onclick="loadQueue()">Refrescar</button>
-     <button class="danger" onclick="queuePurge()" title="Descarta TODOS los lotes que aún esperan en la cola (no revierte lo ya entregado)">🗑 Purgar cola</button>
+     <button class="danger" onclick="queuePurge()" title="Descarta TODO lo que aún espera en la cola (no revierte lo ya entregado)">🗑 Vaciar cola</button>
    </div>
   </div>
-  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
-   <div class="hint">Lotes que agotaron reintentos. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
+  <div class="card" data-tab="envios" data-sub="problemas"><h2>Envíos atascados<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (vuelven a la cola) o descartarlos. Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
+   <div class="hint">Mensajes que se intentaron varias veces y no salieron. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
    <div id="dlq_list" style="margin-top:10px"></div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
      <button class="ghost" onclick="loadDlq()">Ver / refrescar</button>
@@ -2266,9 +2303,9 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <!-- Estado de la cola SQS en vivo (se refresca con el mismo poll del grid). Purga = detener todo lo encolado. -->
    <div class="sqs-strip" id="bc_sqs" style="margin-top:10px">
      <span class="ping"></span>
-     <span>Cola SQS:</span> <b id="bc_sqs_q">–</b> en cola · <b id="bc_sqs_v">–</b> en vuelo · <b id="bc_sqs_d">–</b> en DLQ
+     <span>Cola:</span> <b id="bc_sqs_q">–</b> en cola · <b id="bc_sqs_v">–</b> enviándose · <b id="bc_sqs_d">–</b> atascados
      <span class="grow"></span>
-     <button class="danger" style="padding:3px 10px" onclick="queuePurge()" title="Descarta TODOS los lotes que aún esperan en la cola (no revierte lo ya entregado)">🗑 Purgar cola</button>
+     <button class="danger" style="padding:3px 10px" onclick="queuePurge()" title="Descarta TODO lo que aún espera en la cola (no revierte lo ya entregado)">🗑 Vaciar cola</button>
    </div>
    <div class="grid-tools"><input id="bc_search" class="gv-search" placeholder="🔎 Buscar en difusiones (mensaje, origen)…" aria-label="Buscar difusiones"></div>
    <div style="overflow-x:auto;margin-top:12px">
@@ -2286,14 +2323,14 @@ th.selcol,td.selcol{width:34px;text-align:center}
    </div>
   </div>
   <div class="card" data-tab="envios" data-sub="programados"><h2>📅 Mensajes programados <span id="sg_n" class="hint"></span></h2>
-   <div class="hint">Envíos recurrentes creados desde <b>✍️ Enviar → 🔁 Recurrente</b>; aquí los pausas, reanudas o borras.</div>
+   <div class="hint">Envíos que se repiten, creados desde <b>✍️ Enviar → 🔁 Se repite</b>; aquí los pausas, reanudas o borras.</div>
    <div class="grid-tools"><input id="sg_search" class="gv-search" placeholder="🔎 Buscar programados (nombre o mensaje)…" aria-label="Buscar programados"></div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="sg_table"><thead><tr><th class="selcol"><input type="checkbox" id="sg_selall" onchange="sgSelAll(this.checked)"></th><th>Mensaje</th><th>Canales</th><th>Cuándo</th><th>Próximo</th><th></th></tr></thead>
        <tbody id="sg_rows"></tbody></table>
    </div>
    <div class="gv-pager" id="sg_pager"></div>
-   <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Los recurrentes (diario/semanal) se crean en el compositor.</p><button style="margin-top:8px" onclick="showTab('enviar');try{document.querySelector('input[name=bc_mode][value=rec]').checked=true;bcMode();}catch(e){}">🔁 Crear recurrente</button></div>
+   <div class="empty-state" id="sg_empty" style="display:none"><div class="ico">⏰</div><h3>Sin mensajes programados</h3><p>Los envíos que se repiten (diario/semanal) se crean en el compositor.</p><button style="margin-top:8px" onclick="showTab('enviar');try{document.querySelector('input[name=bc_mode][value=rec]').checked=true;bcMode();}catch(e){}">🔁 Crear uno que se repita</button></div>
    <div class="tbl-toolbar">
      <button class="danger" id="sg_delsel" onclick="sgDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
      <button class="danger" onclick="sgDeleteAll()">🗑 Borrar todos</button>
@@ -2321,7 +2358,7 @@ th.selcol,td.selcol{width:34px;text-align:center}
   </div>
   <div class="card" data-tab="ajustes" data-sub="acceso"><h2>✉️ Correo de recuperación<span class="help" tabindex="0" data-tip="Servicio gratis (Resend, 100/día) para enviar el código de «¿Olvidaste tu contraseña?». Sin API key, el código se intenta enviar por el correo de alertas de AWS (SNS).">ⓘ</span> <span id="mail_status" class="hint"></span></h2>
    <div class="hint">Servicio gratis para entregar el código cuando alguien usa «¿Olvidaste tu contraseña?». Crea una cuenta en <b>resend.com</b> (100 correos/día gratis), genera una API key y pégala aquí. Sin esto, el código se intenta enviar por el correo de alertas de AWS (SNS).</div>
-   <label>Remitente (From)</label>
+   <label>Remitente</label>
    <input id="mail_from" placeholder="Replica &lt;onboarding@resend.dev&gt;">
    <div class="hint">Para enviar a cualquier destinatario, verifica tu dominio en Resend. <code>onboarding@resend.dev</code> solo entrega al correo con el que te registraste.</div>
    <label>API key de Resend</label>
@@ -2333,10 +2370,10 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <label>Nueva contraseña (mínimo 8)</label><input id="cp_new" type="password">
    <div style="margin-top:10px"><button onclick="changePassword()">Cambiar contraseña</button> <span id="cp_status" class="hint" style="margin-left:10px"></span></div>
   </div>
-  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Anti-baneo · lotes y ritmo<span class="help" tabindex="0" data-tip="Tamaño de lote (máx 150) y delays ALEATORIOS entre mensajes para no parecer spam y reducir el riesgo de baneo. Envío fraccionado = un lote a la vez.">ⓘ</span></h2>
-   <label style="display:flex;align-items:center;gap:8px;margin-top:0"><input type="checkbox" id="scheduling_enabled" style="width:auto"> Envío fraccionado y secuencial (procesa un lote a la vez)</label>
+  <div class="card accent" data-tab="ajustes" data-sub="envio"><h2>Anti-baneo · ritmo de envío<span class="help" tabindex="0" data-tip="Cuántos mensajes por grupo (máx 150) y pausas ALEATORIAS entre mensajes para no parecer spam y reducir el riesgo de baneo. «Poco a poco» = un grupo a la vez.">ⓘ</span></h2>
+   <label style="display:flex;align-items:flex-start;gap:8px;margin-top:0"><input type="checkbox" id="scheduling_enabled" style="width:auto;margin-top:2px"> Enviar poco a poco (un grupo a la vez)</label>
    <div class="row">
-     <div><label>Tamaño de lote (máx 150)</label><input id="batch_size" type="number" min="1" max="150"></div>
+     <div><label>Mensajes por grupo (máx 150)</label><input id="batch_size" type="number" min="1" max="150"></div>
      <div><label>Zona horaria de TODOS los horarios<span class="help" tabindex="0" data-tip="Gobierna la ventana de envío, los mensajes programados y los envíos diferidos. Los horarios se interpretan en ESTA zona, no en la del navegador de cada usuario.">ⓘ</span></label>
        <select id="window_tz" onchange="tzSyncLabels()">
          <option value="-300">Colombia · Bogotá (UTC-5)</option>
@@ -2348,12 +2385,12 @@ th.selcol,td.selcol{width:34px;text-align:center}
        </select></div>
    </div>
    <div class="row">
-     <div><label>Delay Telegram mín (s)</label><input id="tg_delay_min" type="number" step="0.1" min="0"></div>
-     <div><label>Delay Telegram máx (s)</label><input id="tg_delay_max" type="number" step="0.1" min="0"></div>
+     <div><label>Pausa entre mensajes · Telegram, mín (seg)</label><input id="tg_delay_min" type="number" step="0.1" min="0"></div>
+     <div><label>Pausa entre mensajes · Telegram, máx (seg)</label><input id="tg_delay_max" type="number" step="0.1" min="0"></div>
    </div>
    <div class="row">
-     <div><label>Delay WhatsApp mín (ms)</label><input id="wa_delay_min" type="number" step="100" min="0"></div>
-     <div><label>Delay WhatsApp máx (ms)</label><input id="wa_delay_max" type="number" step="100" min="0"></div>
+     <div><label>Pausa entre mensajes · WhatsApp, mín (mseg)</label><input id="wa_delay_min" type="number" step="100" min="0"></div>
+     <div><label>Pausa entre mensajes · WhatsApp, máx (mseg)</label><input id="wa_delay_max" type="number" step="100" min="0"></div>
    </div>
    <div class="callout">El delay entre mensajes es <b>aleatorio</b> dentro del rango (evita patrones predecibles). El dispatcher libera <b>un lote por minuto</b> y espera a que termine el anterior antes de soltar el siguiente.</div>
    <button onclick="saveSched()">Guardar anti-baneo</button>
@@ -2375,17 +2412,17 @@ th.selcol,td.selcol{width:34px;text-align:center}
    <div class="hint" style="margin-top:10px">Fuera del horario, los lotes de ese canal quedan <b>encolados</b> y salen al reabrir su ventana.</div>
    <button onclick="saveSched()">Guardar horarios</button>
   </div>
-  <div class="card" data-tab="envios" data-sub="historial"><h2>📦 Envíos fraccionados<span class="help" tabindex="0" data-tip="Las difusiones grandes se dividen en lotes que salen de a uno, con pausas (anti-baneo). Aquí ves el progreso por canal; puedes cancelar o borrar planes.">ⓘ</span> <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
+  <div class="card" data-tab="envios" data-sub="historial"><h2>📦 Envíos por partes<span class="help" tabindex="0" data-tip="Las difusiones grandes se dividen en grupos que salen de a uno, con pausas (para no saturar). Aquí ves el progreso por canal; puedes cancelarlos o borrarlos.">ⓘ</span> <span class="live" id="pl_live" style="margin-left:auto"><span class="ping"></span><span id="pl_live_t">en vivo</span></span></h2>
    <div class="hint">De cada lote programado se muestra <b>cuántos mensajes se han enviado</b>. El sistema procesa un lote a la vez, en orden.</div>
-   <div class="grid-tools"><input id="pl_search" class="gv-search" placeholder="🔎 Buscar envíos fraccionados (mensaje, estado)…" aria-label="Buscar envíos fraccionados"></div>
+   <div class="grid-tools"><input id="pl_search" class="gv-search" placeholder="🔎 Buscar envíos por partes (mensaje, estado)…" aria-label="Buscar envíos por partes"></div>
    <div id="pl_list" style="margin-top:12px"></div>
    <div class="gv-pager" id="pl_pager"></div>
-   <div class="bc-empty" id="pl_empty" style="display:none">No hay envíos programados todavía. Crea uno en <b>Enviar</b> o espera al próximo del canal.</div>
+   <div class="bc-empty" id="pl_empty" style="display:none">No hay envíos por partes todavía. Crea uno en <b>Enviar</b> o espera al próximo del canal.</div>
    <div class="tbl-toolbar">
      <label class="sel-all"><input type="checkbox" id="pl_selall" onchange="plSelAll(this.checked)"> Seleccionar todos</label>
      <button class="danger" id="pl_delsel" onclick="plDeleteSelected()" disabled>🗑 Borrar seleccionados</button>
      <button class="ghost" onclick="plClearFinished()">🧹 Borrar terminados</button>
-     <button class="danger" onclick="plDeleteAll()" title="Eliminar TODOS los envíos fraccionados">🗑 Eliminar todos</button>
+     <button class="danger" onclick="plDeleteAll()" title="Eliminar TODOS los envíos por partes">🗑 Eliminar todos</button>
      <span class="grow"></span>
      <button class="sec" onclick="loadPlans()">Refrescar</button>
    </div>
@@ -2619,7 +2656,7 @@ function renderCaptureState(on){
   const b=$('cap_badge'); if(b){ b.className='pill '+(on?'active':'paused'); b.textContent = on?'ACTIVA':'PAUSADA'; } }  // UX-2: pausa=ámbar (rojo solo fallos)
 async function setCapture(on){
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({capture_enabled:on})});
-    renderCaptureState(on); toast(on?'✓ Recopilación ACTIVADA':'⏸ Recopilación PAUSADA — no se leerán listas nuevas', on?'info':'warn'); }
+    renderCaptureState(on); toast(on?'✓ Captura ACTIVADA':'⏸ Captura PAUSADA — no se leerán listas nuevas', on?'info':'warn'); }
   catch(e){ toast('Error al cambiar la recopilación',true); renderCaptureState(!on); } }
 function toggleCapture(){ return setCapture($('capture_enabled').checked); }
 // Info de DESTINATARIOS por usuario (patrones, excepciones y exclusiones manuales, ambos canales):
@@ -2730,7 +2767,7 @@ async function saveSched(){
   if(ww && (!HHMM.test(was)||!HHMM.test(wae))){ toast('Horario de WhatsApp inválido — usa HH:MM (p. ej. 08:00)',true); return; }
   // M11: el lote vacío ya no se coerce silenciosamente a 150 (el valor más agresivo).
   const bs=parseInt($('batch_size').value,10);
-  if(!Number.isFinite(bs)||bs<1||bs>150){ toast('Tamaño de lote inválido (1–150)',true); return; }
+  if(!Number.isFinite(bs)||bs<1||bs>150){ toast('Mensajes por grupo inválido (1–150)',true); return; }
   const tdmin=parseFloat($('tg_delay_min').value), tdmax=parseFloat($('tg_delay_max').value);
   const wdmin=parseInt($('wa_delay_min').value,10), wdmax=parseInt($('wa_delay_max').value,10);
   if([tdmin,tdmax].some(x=>!Number.isFinite(x)||x<0)){ toast('Delays de Telegram inválidos',true); return; }
@@ -2861,7 +2898,7 @@ async function probarProcesado(){
 async function loadDlq(){
   try{ const r=await api('/api/dlq'); const n=r.depth||0; $('dlq_n').textContent='· '+n+' fallido(s)';
     const L=$('dlq_list'); const s=r.sample||[];
-    L.innerHTML = n? (s.map(m=>`<div class="bc-meta" style="padding:6px 0;border-bottom:1px solid var(--bd)">lote ${m.batch_index??'?'} · ${m.chat_ids||0} dest · ${bcEsc((m.text||'').slice(0,50))}</div>`).join('') + (n>s.length?`<div class="hint">…y ${n-s.length} más</div>`:'')) : '<div class="hint">Sin mensajes fallidos. 🎉</div>';
+    L.innerHTML = n? (s.map(m=>`<div class="bc-meta" style="padding:6px 0;border-bottom:1px solid var(--bd)">grupo ${m.batch_index??'?'} · ${m.chat_ids||0} contactos · ${bcEsc((m.text||'').slice(0,50))}</div>`).join('') + (n>s.length?`<div class="hint">…y ${n-s.length} más</div>`:'')) : '<div class="hint">Sin mensajes atascados. 🎉</div>';
   }catch(e){ $('dlq_n').textContent='· error'; }
 }
 async function dlqRedrive(){
@@ -2877,8 +2914,8 @@ async function dlqPurge(){
 // Purga la cola PRINCIPAL: descarta los lotes que aún esperan (emergencia: detener todo lo encolado).
 // AWS solo permite un purge por cola cada 60s (el backend devuelve 'en_progreso' si se repite).
 async function queuePurge(){
-  if(!await confirmModal('¿Purgar la cola de envío? Se descartan TODOS los lotes que aún esperan en la cola y NO se entregarán. No revierte lo ya enviado. (Los lotes que el worker está entregando en este instante pueden completarse.)',{danger:true,okText:'Purgar cola'})) return;
-  try{ const r=await api('/api/queue/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast(r&&r.detalle? ('ℹ '+r.detalle):'✓ Cola purgada'); setTimeout(()=>{ loadQueue(); loadBroadcasts&&loadBroadcasts(); },1500); }
+  if(!await confirmModal('¿Vaciar la cola de envío? Se descarta TODO lo que aún espera en la cola y NO se entregará. No revierte lo ya enviado. (Lo que se está entregando en este instante puede completarse.)',{danger:true,okText:'Vaciar cola'})) return;
+  try{ const r=await api('/api/queue/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast(r&&r.detalle? ('ℹ '+r.detalle):'✓ Cola vaciada'); setTimeout(()=>{ loadQueue(); loadBroadcasts&&loadBroadcasts(); },1500); }
   catch(e){ toast(e.message||'No se pudo purgar la cola',true); }
 }
 // --- Opt-out WhatsApp: contactos auto-excluidos por fallos ---
@@ -3065,7 +3102,7 @@ function render(){
   slice.forEach(s=>{ const id=String(s.chatId); const exM=EXCLUDED.has(id); const matchP=nameMatchesPatterns(s.name, EXCL_PAT_TG);
     const exP=!exM && matchP && !EXCEPT_TG.has(id); const exc=!exM && matchP && EXCEPT_TG.has(id);
     const label=s.name||'(sin nombre)'; const tr=document.createElement('tr');
-    const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido · patrón</span>':(exc?'<span class="pill exc-ok">Incluido · excepción</span>':'<span class="pill active">Incluido</span>'));
+    const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido por nombre</span>':(exc?'<span class="pill exc-ok">Incluido a mano</span>':'<span class="pill active">Incluido</span>'));
     tr.innerHTML=`<td><input type="checkbox" class="selrow" data-id="${s.chatId}"></td>`+
       `<td><b>${bcEsc(label)}</b><div class="hint" style="margin-top:2px;font-size:11px">${bcEsc(s.phone||s.chatId||'')}</div></td>`+
       `<td>${pill}</td>`;
@@ -3264,7 +3301,7 @@ function renderWa(){
   $('wa_c_count').textContent = WA_DEST.length ? `· ${f.length} en vista · ${inc} incluidos · ${exCount} excluidos` : '';
   slice.forEach(c=>{ const id=String(c.id||''); const exM=WA_EXCLUDED.has(id); const matchP=nameMatchesPatterns(waName(c), WA_EXCL_PAT);
     const exP=!exM && matchP && !WA_EXCEPT.has(id); const exc=!exM && matchP && WA_EXCEPT.has(id); const tr=document.createElement('tr');
-    const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido · patrón</span>':(exc?'<span class="pill exc-ok">Incluido · excepción</span>':'<span class="pill active">Incluido</span>'));
+    const pill = exM?'<span class="pill inactive">Excluido</span>':(exP?'<span class="pill pat">Excluido por nombre</span>':(exc?'<span class="pill exc-ok">Incluido a mano</span>':'<span class="pill active">Incluido</span>'));
     tr.innerHTML=`<td><input type="checkbox" class="wsel" data-id="${id}"></td><td><b>${bcEsc(waName(c))}</b><div class="hint" style="margin-top:2px;font-size:11px">📞 ${bcEsc(waNum(c)||id)}</div></td>`+
       `<td>${pill}</td>`; t.appendChild(tr); });
   $('wa_pageinfo').textContent=f.length?`página ${WA_PAGE+1} de ${pages}`:'sin resultados'; }
@@ -3388,7 +3425,7 @@ function bcFillLists(){
   const fill=(sel,arr,first)=>{ const cur=sel.value;
     sel.innerHTML='<option value="">'+first+'</option>'+ (arr||[]).map(l=>`<option value="${bcEsc(l.name)}">${bcEsc(l.name)} (${(l.ids||[]).length})</option>`).join('');
     sel.value=cur; };
-  fill($('bc_tg_list'), (LISTS&&LISTS.telegram)||[], '(según configuración)');
+  fill($('bc_tg_list'), (LISTS&&LISTS.telegram)||[], '(según Contactos)');
   fill($('bc_wa_list'), (LISTS&&LISTS.whatsapp)||[], '— elige una lista —');
   bcRenderPick('tg'); bcRenderPick('wa');
 }
@@ -3563,7 +3600,7 @@ function sgFillLists(){
   const fill=(sel,arr,first)=>{ if(!sel) return; const cur=sel.value;
     sel.innerHTML='<option value="">'+first+'</option>'+(arr||[]).map(l=>`<option value="${bcEsc(l.name)}">${bcEsc(l.name)} (${(l.ids||[]).length})</option>`).join('');
     sel.value=cur; };
-  fill($('sg_tg_list'),(LISTS&&LISTS.telegram)||[],'(según configuración)');
+  fill($('sg_tg_list'),(LISTS&&LISTS.telegram)||[],'(según Contactos)');
   fill($('sg_wa_list'),(LISTS&&LISTS.whatsapp)||[],'— elige una lista —');
 }
 const SG_DAYFULL=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
@@ -3859,19 +3896,19 @@ function plBatchLine(e){
 function plCard(p){
   const txt=(p.text||'').trim()||'(solo imagen)';
   const st=String(p.status||'pending'); const lab=PL_ST[st]||st; const pill=PL_PILL[st]||'queued';
-  const tgI=(p.tg&&p.tg.total)?`${ICO_TG} ${p.tg.next|0}/${p.tg.batches|0} lotes despachados`:'';
-  const waI=(p.wa&&p.wa.enabled)?`${ICO_WA} ${p.wa.next|0}/${p.wa.batches|0} lotes despachados`+(!p.wa.resolved?' (resolviendo…)':''):'';
-  const lines=(p.log||[]).map(plBatchLine).join('') || '<div class="hint" style="margin-top:6px">Aún sin lotes despachados (esperando ventana/turno).</div>';
+  const tgI=(p.tg&&p.tg.total)?`${ICO_TG} ${p.tg.next|0}/${p.tg.batches|0} partes enviadas`:'';
+  const waI=(p.wa&&p.wa.enabled)?`${ICO_WA} ${p.wa.next|0}/${p.wa.batches|0} partes enviadas`+(!p.wa.resolved?' (preparando contactos…)':''):'';
+  const lines=(p.log||[]).map(plBatchLine).join('') || '<div class="hint" style="margin-top:6px">Aún sin partes enviadas (esperando turno).</div>';
   const activo=(st==='pending'||st==='running');
-  const cancelBtn=activo?`<button class="danger" style="padding:6px 12px" onclick="cancelPlan('${p.pid}')">🛑 Cancelar este envío</button>`:'';
+  const cancelBtn=activo?`<button class="danger" style="padding:6px 12px" onclick="cancelPlan('${p.pid}')">🛑 Cancelar</button>`:'';
   // Mensaje EXACTO que se envía (ya procesado: markup, sin IPRO PARTS, footer). Scrollable para revisar.
   return `<div class="card pl-card" data-pid="${p.pid}" style="margin-bottom:12px;background:var(--elev);padding:16px">`+
-    `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center">`+
+    `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">`+
       `<label style="display:flex;align-items:center;gap:9px;margin:0"><input type="checkbox" class="plsel" data-pid="${p.pid}" onchange="plSelChanged()" style="width:auto"><span class="pill ${pill}">${lab}</span></label>`+
       `<span style="display:flex;gap:8px;align-items:center">${cancelBtn}<button class="danger" style="padding:6px 10px" title="Borrar definitivamente" onclick="plDelete('${p.pid}')">🗑</button></span></div>`+
-    `<div class="bc-meta" style="margin:6px 0">${bcFmtTime(p.created_at)} · lote ${p.batch_size|0} ${tgI?'· '+tgI:''} ${waI?'· '+waI:''}</div>`+
+    `<div class="bc-meta" style="margin:6px 0">${bcFmtTime(p.created_at)} · grupo de ${p.batch_size|0} ${tgI?'· '+tgI:''} ${waI?'· '+waI:''}</div>`+
     `<div style="margin:6px 0;padding:10px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;max-height:170px;overflow:auto;white-space:pre-wrap;font-size:12px;color:var(--tx2);line-height:1.5">${bcEsc(txt)}</div>`+
-    `<div class="hint" style="margin:8px 0 2px">Progreso por lote:</div>`+
+    `<div class="hint" style="margin:8px 0 2px">Progreso por partes:</div>`+
     lines+`</div>`;
 }
 async function cancelPlan(pid){
