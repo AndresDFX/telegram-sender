@@ -154,13 +154,43 @@ class SqsQueueStats(QueueStats):
     def profundidades(self) -> dict:
         client = self._client()
 
-        def depth(url: str | None) -> int:
+        def attrs(url: str | None) -> tuple[int, int]:
+            """(en_cola, en_vuelo) = (visibles esperando, no-visibles = tomados por el worker)."""
             if not url:
-                return 0
-            resp = client.get_queue_attributes(QueueUrl=url, AttributeNames=["ApproximateNumberOfMessages"])
-            return int(resp["Attributes"].get("ApproximateNumberOfMessages", 0))
+                return 0, 0
+            resp = client.get_queue_attributes(
+                QueueUrl=url,
+                AttributeNames=["ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible"],
+            )
+            a = resp.get("Attributes", {})
+            return (int(a.get("ApproximateNumberOfMessages", 0)),
+                    int(a.get("ApproximateNumberOfMessagesNotVisible", 0)))
 
-        return {"broadcast": depth(self._url), "dlq": depth(self._dlq)}
+        b_cola, b_vuelo = attrs(self._url)
+        d_cola, d_vuelo = attrs(self._dlq)
+        # Claves 'broadcast'/'dlq' = mensajes EN COLA (visibles), por compatibilidad con el panel;
+        # 'en_vuelo'/'dlq_en_vuelo' = lotes que el worker está procesando ahora mismo (no visibles).
+        return {
+            "broadcast": b_cola,
+            "en_vuelo": b_vuelo,
+            "dlq": d_cola,
+            "dlq_en_vuelo": d_vuelo,
+        }
+
+    def purgar_principal(self) -> dict:
+        """Vacía la cola PRINCIPAL de broadcast (descarta los lotes aún no entregados). Emergencia:
+        detiene de golpe TODO lo encolado. Los lotes EN VUELO (ya tomados por el worker) no se ven
+        afectados por PurgeQueue; terminarán su entrega. AWS solo permite un purge por cola cada 60s."""
+        if not self._url:
+            return {"error": "sin cola"}
+        try:
+            self._client().purge_queue(QueueUrl=self._url)
+        except Exception as e:
+            msg = str(e).lower()
+            if any(t in msg for t in ("inprogress", "in progress", "already")):
+                return {"ok": True, "purge": "en_progreso", "detalle": "Ya se purgó hace poco; espera ~60s para repetir."}
+            raise
+        return {"ok": True, "purged": True}
 
     def dlq_muestra(self, n: int = 5) -> list[dict]:
         """Muestra (sin borrar) hasta n mensajes de la DLQ para inspección en el panel."""
@@ -205,8 +235,14 @@ class SqsQueueStats(QueueStats):
         return {"ok": True, "redrive": "iniciado"}
 
     def dlq_purgar(self) -> dict:
-        """Vacía la DLQ (descarta los mensajes fallidos)."""
+        """Vacía la DLQ (descarta los mensajes fallidos). AWS solo permite un purge por cola cada 60s."""
         if not self._dlq:
             return {"error": "sin DLQ"}
-        self._client().purge_queue(QueueUrl=self._dlq)
+        try:
+            self._client().purge_queue(QueueUrl=self._dlq)
+        except Exception as e:
+            msg = str(e).lower()
+            if any(t in msg for t in ("inprogress", "in progress", "already")):
+                return {"ok": True, "purge": "en_progreso", "detalle": "Ya se purgó hace poco; espera ~60s para repetir."}
+            raise
         return {"ok": True, "purged": True}

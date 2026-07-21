@@ -701,8 +701,11 @@ class DynamoDbBroadcastStore:
     def _scan_todo(self) -> list[dict]:
         items, start = [], None
         while True:  # paginar para no perder los más recientes si la tabla supera 1MB
+            # ConsistentRead: tras borrar un envío, el re-listado inmediato del panel NO debe devolver
+            # el item recién borrado (con Scan eventualmente consistente reaparecía en el grid unos
+            # segundos). La tabla es pequeña; el coste 2x RCU es despreciable.
             kwargs = {"ExclusiveStartKey": start} if start else {}
-            resp = self._t().scan(**kwargs)
+            resp = self._t().scan(ConsistentRead=True, **kwargs)
             items.extend(resp.get("Items", []))
             start = resp.get("LastEvaluatedKey")
             if not start:

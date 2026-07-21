@@ -723,6 +723,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _json({"ok": True})
         if sub == "/api/queue" and method == "GET":
             return _json(queue_stats.profundidades())
+        if sub == "/api/queue/purge" and method == "POST":
+            _audit("queue_purge")
+            return _json(queue_stats.purgar_principal())
         if sub == "/api/preview/process" and method == "POST":
             cfg = config.get()
             texto = str(_body(event).get("text", ""))
@@ -1051,12 +1054,24 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 n = broadcast_store.borrar_terminados(excluir_ids=activos)
                 _audit("broadcasts:borrar", f"terminados {n}")
                 return _json({"ok": True, "deleted": n})
+            # Borrar = DESENCOLAR: además de quitar el registro, DETIENE el envío pendiente. Como el
+            # plan se crea con el mismo id que la difusión (pid == broadcast_id), borrar el plan corta
+            # el dispatcher (desaparece de activos()) y hace que el worker descarte los lotes ya en
+            # vuelo en SQS (plans.descartar → plan inexistente ⇒ ack sin enviar). No-op seguro si la
+            # difusión no tenía plan (captura / envío inmediato): borrar por pid sin items no borra nada.
+            def _borrar_difusion(x: str) -> None:
+                try:
+                    plan_store.borrar(x)  # detiene el envío en curso (pid == bid)
+                except Exception:
+                    pass  # sin plan asociado (captura/inmediato) o fallo puntual: igual borramos el registro
+                broadcast_store.borrar(x)
+
             ids = cuerpo.get("ids")
             if isinstance(ids, list) and ids:
                 n = 0
                 for x in ids:
                     try:
-                        broadcast_store.borrar(str(x)); n += 1
+                        _borrar_difusion(str(x)); n += 1
                     except Exception:
                         pass
                 _audit("broadcasts:borrar", f"masivo {n}")
@@ -1064,7 +1079,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             bid = str(cuerpo.get("id", "")).strip()
             if not bid:
                 return _json({"error": "id requerido"}, 400)
-            broadcast_store.borrar(bid)
+            _borrar_difusion(bid)
             _audit("broadcasts:borrar", bid)
             return _json({"ok": True})
         if sub == "/api/broadcast/preview" and method == "POST":
@@ -1395,6 +1410,13 @@ td b{font-weight:600;color:var(--tx)}
 .fechas .fch-i{display:inline-block;width:16px}
 /* conteo por segmento del filtro (matriz de estado). */
 .segf .seg-n{font-weight:700;opacity:.75;font-size:11px}
+/* Tira de estado SQS en vivo (Historial): en cola / en vuelo / DLQ + purga. */
+.sqs-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--tx2);background:var(--elev);border:1px solid var(--bd);border-radius:var(--r-sm);padding:8px 12px}
+.sqs-strip .grow{flex:1;min-width:8px}
+.sqs-strip b{color:var(--tx);font-variant-numeric:tabular-nums}
+.sqs-strip .ping{width:8px;height:8px;border-radius:50%;background:var(--mut);flex:none}
+.sqs-strip.hot{border-color:rgba(var(--ac-rgb),.5);background:rgba(var(--ac-rgb),.08)}
+.sqs-strip.hot .ping{background:var(--ok);animation:ping 1.8s infinite}
 
 /* ---------- stats ---------- */
 .stats{display:flex;gap:14px;flex-wrap:wrap}
@@ -2159,12 +2181,16 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <span id="bc_status" class="hint" style="margin-top:0"></span>
    </div>
   </div>
-  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de mensajes</h2>
+  <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de envío (SQS) <span class="live" style="margin-left:auto"><span class="ping"></span>en vivo</span></h2>
    <div class="stats"><div class="stat"><b id="q_p">–</b><span>lotes programados pendientes</span></div>
-     <div class="stat"><b id="q_b">–</b><span>en cola SQS (en vuelo)</span></div>
+     <div class="stat"><b id="q_b">–</b><span>en cola SQS (esperando)</span></div>
+     <div class="stat"><b id="q_v">–</b><span>en vuelo (entregándose)</span></div>
      <div class="stat"><b id="q_d">–</b><span>en DLQ (fallidos)</span></div></div>
-   <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1 (el lote en vuelo). Mira el detalle en <b>📡 Actividad → Historial</b>.</div>
-   <button class="ghost" style="margin-top:14px" onclick="loadQueue()">Refrescar</button>
+   <div class="hint" style="margin-top:10px">Con el envío fraccionado, los lotes esperan en la <b>programación</b> y se liberan de a uno; por eso "en cola SQS" suele ser 0 o 1. <b>En vuelo</b> = lotes que el worker está entregando ahora. Se actualiza cada pocos segundos.</div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+     <button class="ghost" onclick="loadQueue()">Refrescar</button>
+     <button class="danger" onclick="queuePurge()" title="Descarta TODOS los lotes que aún esperan en la cola (no revierte lo ya entregado)">🗑 Purgar cola</button>
+   </div>
   </div>
   <div class="card" data-tab="envios" data-sub="problemas"><h2>Cola de fallidos (DLQ)<span class="help" tabindex="0" data-tip="Mensajes que fallaron tras varios reintentos. Puedes reintentarlos (redrive) o descartarlos (purgar). Útil para diagnosticar problemas de envío.">ⓘ</span> <span id="dlq_n" class="hint"></span></h2>
    <div class="hint">Lotes que agotaron reintentos. Puedes <b>reintentarlos</b> (vuelven a la cola) o <b>descartarlos</b>.</div>
@@ -2188,6 +2214,13 @@ th.selcol,td.selcol{width:34px;text-align:center}
      <button data-v="fallidas" aria-pressed="false" onclick="bcSetFilter('fallidas')">⚠️ Con fallos <b class="seg-n" data-c="fallidas"></b></button>
    </div>
    <div id="bc_pausa" class="callout warn" style="display:none;margin:10px 0 0">⏸ El envío automático está <b>EN PAUSA</b>: las nuevas listas del canal se capturan pero no se difunden hasta reactivarlo en 🏠 Inicio.</div>
+   <!-- Estado de la cola SQS en vivo (se refresca con el mismo poll del grid). Purga = detener todo lo encolado. -->
+   <div class="sqs-strip" id="bc_sqs" style="margin-top:10px">
+     <span class="ping"></span>
+     <span>Cola SQS:</span> <b id="bc_sqs_q">–</b> en cola · <b id="bc_sqs_v">–</b> en vuelo · <b id="bc_sqs_d">–</b> en DLQ
+     <span class="grow"></span>
+     <button class="danger" style="padding:3px 10px" onclick="queuePurge()" title="Descarta TODOS los lotes que aún esperan en la cola (no revierte lo ya entregado)">🗑 Purgar cola</button>
+   </div>
    <div style="overflow-x:auto;margin-top:12px">
      <table id="bc_table"><thead><tr><th class="selcol"><input type="checkbox" id="bc_selall" onchange="bcSelAll(this.checked)"></th><th>Mensaje</th><th>Estado</th><th>Fechas</th><th>Progreso</th><th></th></tr></thead>
        <tbody id="bc_rows"></tbody></table>
@@ -2698,7 +2731,13 @@ async function uploadImg(){ const f=$('imgfile').files[0]; if(!f) return;
       $('imgprev').src=r.result; $('imgprev').style.display='block'; toast('✓ Imagen subida'); }
     catch(e){ toast('Error al subir',true); } }; r.readAsDataURL(f); }
 async function loadQueue(){
-  try{ const q=await api('/api/queue'); $('q_b').textContent=q.broadcast; $('q_d').textContent=q.dlq; }catch(e){}
+  try{ const q=await api('/api/queue');
+    const enc=q.broadcast|0, vuelo=q.en_vuelo|0, dlq=q.dlq|0;
+    if($('q_b')) $('q_b').textContent=enc; if($('q_v')) $('q_v').textContent=vuelo; if($('q_d')) $('q_d').textContent=dlq;
+    // Tira SQS en vivo del Historial (mismo dato, donde el usuario borra/desencola).
+    if($('bc_sqs_q')) $('bc_sqs_q').textContent=enc; if($('bc_sqs_v')) $('bc_sqs_v').textContent=vuelo; if($('bc_sqs_d')) $('bc_sqs_d').textContent=dlq;
+    const strip=$('bc_sqs'); if(strip) strip.classList.toggle('hot', (enc+vuelo)>0);
+  }catch(e){}
   try{ const r=await api('/api/plans'); let pend=0;
     (r.plans||[]).forEach(p=>{ if(p.status==='pending'||p.status==='running'){
       pend += Math.max(0,((p.tg&&p.tg.batches)|0)-((p.tg&&p.tg.next)|0)) + Math.max(0,((p.wa&&p.wa.batches)|0)-((p.wa&&p.wa.next)|0)); }});
@@ -2733,8 +2772,15 @@ async function dlqRedrive(){
 }
 async function dlqPurge(){
   if(!await confirmModal('¿Descartar TODOS los mensajes fallidos? No se podrán recuperar.',{danger:true,okText:'Descartar'})) return;
-  try{ await api('/api/dlq/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ DLQ descartada'); setTimeout(()=>{ loadDlq(); loadQueue(); if($('k_dlq')) loadDashboard(); },1500); }  // M21
+  try{ const r=await api('/api/dlq/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast(r&&r.detalle? ('ℹ '+r.detalle):'✓ DLQ descartada'); setTimeout(()=>{ loadDlq(); loadQueue(); if($('k_dlq')) loadDashboard(); },1500); }  // M21
   catch(e){ toast('Error al descartar',true); }
+}
+// Purga la cola PRINCIPAL: descarta los lotes que aún esperan (emergencia: detener todo lo encolado).
+// AWS solo permite un purge por cola cada 60s (el backend devuelve 'en_progreso' si se repite).
+async function queuePurge(){
+  if(!await confirmModal('¿Purgar la cola de envío? Se descartan TODOS los lotes que aún esperan en la cola y NO se entregarán. No revierte lo ya enviado. (Los lotes que el worker está entregando en este instante pueden completarse.)',{danger:true,okText:'Purgar cola'})) return;
+  try{ const r=await api('/api/queue/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast(r&&r.detalle? ('ℹ '+r.detalle):'✓ Cola purgada'); setTimeout(()=>{ loadQueue(); loadBroadcasts&&loadBroadcasts(); },1500); }
+  catch(e){ toast(e.message||'No se pudo purgar la cola',true); }
 }
 // --- Opt-out WhatsApp: contactos auto-excluidos por fallos ---
 async function loadBlocked(){
@@ -3627,9 +3673,10 @@ function bcRenderLastCaptured(list){
     '<button data-full="'+bcEsc(txt)+'" onclick="bcSendCaptured(this)">Enviar a…</button>'+
     '<button class="ghost" onclick="showTab(\'envios\');showSub(\'envios\',\'historial\');bcSetFilter(\'capturadas\')">Ver todas las capturadas</button></div>';
 }
+function bcQuitarFilas(ids){ (ids||[]).forEach(id=>{ const c=document.querySelector('.bcsel[data-id="'+id+'"]'); const tr=c&&c.closest('tr'); if(tr) tr.remove(); delete BC_BYID[id]; }); }
 async function bcDelete(id){
-  if(!await confirmModal('¿Borrar este envío DEFINITIVAMENTE de la tabla? No se puede deshacer (no afecta lo ya entregado).',{danger:true,okText:'Borrar'})) return;
-  try{ await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); toast('✓ Envío borrado'); loadBroadcasts(); }
+  if(!await confirmModal('¿Borrar este envío DEFINITIVAMENTE? Se quita de la tabla y se DETIENE lo que quede pendiente por enviar (se desencola). No revierte lo ya entregado.',{danger:true,okText:'Borrar'})) return;
+  try{ await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); bcQuitarFilas([id]); toast('✓ Envío borrado y desencolado'); loadBroadcasts(); loadQueue&&loadQueue(); }
   catch(e){ toast('Error al borrar',true); }
 }
 async function bcClearFinished(){
@@ -3647,8 +3694,8 @@ function bcSelChanged(){
 }
 async function bcDeleteSelected(){
   const ids=bcSelectedIds(); if(!ids.length) return;
-  if(!await confirmModal('¿Borrar DEFINITIVAMENTE '+ids.length+' envío(s) seleccionados? No se puede deshacer.',{danger:true,okText:'Borrar'})) return;
-  try{ const r=await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})}); toast('✓ '+(r.deleted||0)+' borrados'); loadBroadcasts(); }
+  if(!await confirmModal('¿Borrar DEFINITIVAMENTE '+ids.length+' envío(s)? Se quitan de la tabla y se DETIENE lo que quede pendiente por enviar (se desencola). No revierte lo ya entregado.',{danger:true,okText:'Borrar'})) return;
+  try{ const r=await api('/api/broadcasts/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:ids})}); bcQuitarFilas(ids); toast('✓ '+(r.deleted||0)+' borrados y desencolados'); loadBroadcasts(); loadQueue&&loadQueue(); }
   catch(e){ toast('Error al borrar',true); }
 }
 function bcStartPolling(){

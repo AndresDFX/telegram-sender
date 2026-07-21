@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "lambda"))
 
-from adapters.sqs import InlineBroadcastQueue, SqsBroadcastQueue  # noqa: E402
+from adapters.sqs import InlineBroadcastQueue, SqsBroadcastQueue, SqsQueueStats  # noqa: E402
 from application.ports import PartialEnqueueError  # noqa: E402
 
 
@@ -39,6 +39,57 @@ class SqsQueueTests(unittest.TestCase):
             os.environ.pop("BROADCAST_QUEUE_URL", None)
             with self.assertRaises(RuntimeError):
                 SqsBroadcastQueue(queue_url=None).encolar("x", ["1"])
+
+
+class SqsQueueStatsTests(unittest.TestCase):
+    def test_profundidades_incluye_en_vuelo(self):
+        # Devuelve en cola (visibles) Y en vuelo (NotVisible) para cola principal y DLQ.
+        fake = MagicMock()
+
+        def attrs(QueueUrl, AttributeNames):
+            if QueueUrl == "https://main":
+                return {"Attributes": {"ApproximateNumberOfMessages": "3", "ApproximateNumberOfMessagesNotVisible": "2"}}
+            return {"Attributes": {"ApproximateNumberOfMessages": "5", "ApproximateNumberOfMessagesNotVisible": "1"}}
+
+        fake.get_queue_attributes.side_effect = attrs
+        s = SqsQueueStats(queue_url="https://main", dlq_url="https://dlq")
+        with patch.object(s, "_client", return_value=fake):
+            r = s.profundidades()
+        self.assertEqual(r, {"broadcast": 3, "en_vuelo": 2, "dlq": 5, "dlq_en_vuelo": 1})
+        # pidió ambos atributos (no solo el de visibles)
+        _, kw = fake.get_queue_attributes.call_args
+        self.assertIn("ApproximateNumberOfMessagesNotVisible", kw["AttributeNames"])
+
+    def test_purgar_principal_ok(self):
+        fake = MagicMock()
+        s = SqsQueueStats(queue_url="https://main", dlq_url="https://dlq")
+        with patch.object(s, "_client", return_value=fake):
+            r = s.purgar_principal()
+        self.assertEqual(r, {"ok": True, "purged": True})
+        fake.purge_queue.assert_called_once_with(QueueUrl="https://main")
+
+    def test_purgar_principal_rate_limit_no_revienta(self):
+        # Un segundo purge en <60s (PurgeQueueInProgress) devuelve 'en_progreso', no una excepción.
+        fake = MagicMock()
+        fake.purge_queue.side_effect = RuntimeError("AWS.SimpleQueueService.PurgeQueueInProgress: Only one PurgeQueue ...")
+        s = SqsQueueStats(queue_url="https://main")
+        with patch.object(s, "_client", return_value=fake):
+            r = s.purgar_principal()
+        self.assertTrue(r.get("ok"))
+        self.assertEqual(r.get("purge"), "en_progreso")
+
+    def test_purgar_principal_sin_url(self):
+        s = SqsQueueStats(queue_url=None)
+        s._url = None
+        self.assertEqual(s.purgar_principal(), {"error": "sin cola"})
+
+    def test_dlq_purgar_rate_limit_no_revienta(self):
+        fake = MagicMock()
+        fake.purge_queue.side_effect = RuntimeError("PurgeQueueInProgress")
+        s = SqsQueueStats(queue_url="https://main", dlq_url="https://dlq")
+        with patch.object(s, "_client", return_value=fake):
+            r = s.dlq_purgar()
+        self.assertEqual(r.get("purge"), "en_progreso")
 
 
 class InlineQueueTests(unittest.TestCase):

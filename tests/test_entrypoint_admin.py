@@ -76,6 +76,35 @@ class FakeQueueStats:
         self.purged = True
         return {"ok": True, "purged": True}
 
+    def purgar_principal(self):
+        self.main_purged = True
+        return {"ok": True, "purged": True}
+
+
+class FakeBroadcastStore:
+    def __init__(self):
+        self.borrados = []
+
+    def listar(self, limit=30):
+        return []
+
+    def borrar(self, bid):
+        self.borrados.append(bid)
+
+    def borrar_terminados(self, excluir_ids=None):
+        return 0
+
+
+class FakePlanStoreAdmin:
+    def __init__(self):
+        self.borrados = []
+
+    def borrar(self, pid):
+        self.borrados.append(pid)
+
+    def activos(self):
+        return []
+
 
 class FakeAudit:
     def __init__(self):
@@ -120,11 +149,14 @@ class AdminTests(unittest.TestCase):
         admin.queue_stats = FakeQueueStats()
         admin.image_store = FakeImageStore()
         admin.audit_store = FakeAudit()
+        admin.broadcast_store = FakeBroadcastStore()
+        admin.plan_store = FakePlanStoreAdmin()
         os.environ["ADMIN_USER"] = "admin"
         os.environ["ADMIN_PASSWORD"] = "secret123"
 
     def tearDown(self):
         admin.config = admin.subscribers = admin.queue_stats = admin.image_store = admin.audit_store = None
+        admin.broadcast_store = admin.plan_store = None
         os.environ.pop("ADMIN_USER", None)
         os.environ.pop("ADMIN_PASSWORD", None)
 
@@ -196,6 +228,22 @@ class AdminTests(unittest.TestCase):
     def test_post_subscriber_toggle(self):
         admin.lambda_handler(_event("POST", "/admin/api/subscribers", {"chat_id": "7", "status": "inactive"}), None)
         self.assertEqual(admin.subscribers.registros, [("7", "inactive")])
+
+    def test_queue_purge_llama_purgar_principal(self):
+        resp = admin.lambda_handler(_event("POST", "/admin/api/queue/purge", {}), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertTrue(getattr(admin.queue_stats, "main_purged", False))
+
+    def test_borrar_difusion_detiene_el_plan(self):
+        # Borrar una difusión también borra su plan (pid == broadcast_id) → desencola/detiene.
+        admin.lambda_handler(_event("POST", "/admin/api/broadcasts/delete", {"id": "b-123"}), None)
+        self.assertIn("b-123", admin.plan_store.borrados)     # detuvo el envío (plan)
+        self.assertIn("b-123", admin.broadcast_store.borrados)  # y quitó el registro
+
+    def test_borrar_masivo_detiene_cada_plan(self):
+        admin.lambda_handler(_event("POST", "/admin/api/broadcasts/delete", {"ids": ["b1", "b2"]}), None)
+        self.assertEqual(admin.plan_store.borrados, ["b1", "b2"])
+        self.assertEqual(admin.broadcast_store.borrados, ["b1", "b2"])
 
     def test_get_queue(self):
         resp = admin.lambda_handler(_event("GET", "/admin/api/queue"), None)

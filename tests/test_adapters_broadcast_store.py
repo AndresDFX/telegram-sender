@@ -78,6 +78,22 @@ class IncrTelegramFechasTests(unittest.TestCase):
         self.assertIn(":now", kw["ExpressionAttributeValues"])
 
 
+class ScanConsistenteTests(unittest.TestCase):
+    def test_scan_todo_usa_consistent_read(self):
+        # Tras borrar, el re-listado NO debe devolver el item borrado: Scan con ConsistentRead=True.
+        store = DynamoDbBroadcastStore.__new__(DynamoDbBroadcastStore)
+        llamadas = []
+
+        class _T:
+            def scan(self, **kw):
+                llamadas.append(kw)
+                return {"Items": []}
+
+        store._t = lambda: _T()
+        store._scan_todo()
+        self.assertTrue(llamadas and llamadas[0].get("ConsistentRead") is True)
+
+
 class RegistrarErrorTests(unittest.TestCase):
     def test_b18_dos_escrituras_add_siempre_y_last_error_condicional(self):
         # B18: registrar_error hace (1) ADD error_reasons SIN condición de orden y (2) SET last_error
