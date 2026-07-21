@@ -755,8 +755,7 @@ class DynamoDbBroadcastStore:
                     "source": j.get("source", ""),
                     "channels": list(j.get("channels", [])),
                     "status": self._estado(j),
-                    "created_at_h": int(j.get("created_at", 0)),  # recibido (redundante con created_at; explícito)
-                    "first_sent_at": int(j.get("first_sent_at", 0)),  # primer envío real
+                    "first_sent_at": int(j.get("first_sent_at", 0)),  # primer envío real (para el grid/detalle)
                     "last_sent_at": int(j.get("last_sent_at", 0)),   # último envío real
                     "last_error": j.get("last_error", ""),
                     "error_reasons": sorted(j.get("error_reasons")) if j.get("error_reasons") else [],
