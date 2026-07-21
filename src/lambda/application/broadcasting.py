@@ -140,11 +140,12 @@ class BroadcastList:
         return os.environ.get("BROADCASTS_TABLE")
 
     def _registrar(self, broadcast_id: str, text: str, source: str, channels: list[str], tg_total: int,
-                   price_diff: list | None = None) -> None:
+                   price_diff: list | None = None, original_text: str | None = None) -> None:
         if not self._broadcasts:
             return
         try:
-            self._broadcasts.crear(broadcast_id, text, source, channels, tg_total=tg_total, price_diff=price_diff)
+            self._broadcasts.crear(broadcast_id, text, source, channels, tg_total=tg_total,
+                                   price_diff=price_diff, original_text=original_text)
         except Exception:
             logger.exception("No se pudo registrar el job %s (no afecta el envío)", broadcast_id)
 
@@ -313,7 +314,7 @@ class BroadcastList:
         # envío NO vacía ninguna cola: las listas capturadas no se reenvían retroactivamente.
         if not bool(cfg.get("sending_enabled", True)):
             bid = self._nuevo_id()
-            self._registrar(bid, mensaje_cap, "capture", [], 0, price_diff=desglose)
+            self._registrar(bid, mensaje_cap, "capture", [], 0, price_diff=desglose, original_text=text)
             enviado = self._preview_capture(bid, mensaje_cap)
             logger.info(
                 "Lista capturada %s (envío apagado): registrada%s, NO difundida",
@@ -333,7 +334,7 @@ class BroadcastList:
         # preview, NO difunde), en vez de inundar la agenda. Defensa de fondo a la guardia del panel.
         if not tg_on and not wa_on:
             bid = self._nuevo_id()
-            self._registrar(bid, mensaje_cap, "capture", [], 0, price_diff=desglose)
+            self._registrar(bid, mensaje_cap, "capture", [], 0, price_diff=desglose, original_text=text)
             enviado = self._preview_capture(bid, mensaje_cap)
             logger.warning(
                 "Envío automático ACTIVO pero sin lista elegida para ningún canal; lista %s "
@@ -346,7 +347,7 @@ class BroadcastList:
         # M18: id DETERMINISTA en el camino de plan (scheduler). Si crear el plan falla a mitad y el
         # webhook se reintenta, el id reusado sobrescribe el plan en vez de crear otro → no duplica.
         bid = self._bid(dedup_key)
-        self._registrar(bid, mensaje, "channel", channels, len(clientes), price_diff=desglose)
+        self._registrar(bid, mensaje, "channel", channels, len(clientes), price_diff=desglose, original_text=text)
 
         wa_mode = wa_t.get("mode", "all") if wa_on else "all"
         wa_list_ids = ids_de_listas_activas(cfg.get("whatsapp_lists", []), wa_t) if wa_on else []

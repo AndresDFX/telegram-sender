@@ -577,13 +577,16 @@ class DynamoDbBroadcastStore:
         return _table(self._name, self._endpoint)
 
     def crear(self, broadcast_id: str, text: str, source: str, channels, tg_total: int = 0, ttl_days: int = 30,
-              price_diff: list | None = None) -> None:
+              price_diff: list | None = None, original_text: str | None = None) -> None:
         now = int(time.time())
         item = {
             "id": broadcast_id,
             "created_at": now,
             "text": (text or "")[:600],  # preview corto para la tabla
             "full_text": (text or "")[:4096],  # texto COMPLETO (para "ver mensaje completo" en el panel)
+            # MENSAJE ANTERIOR: el texto ORIGINAL del canal (antes de limpiar/markup), para compararlo
+            # en el panel con el que realmente se envía. Solo en difusiones del canal (el manual va crudo).
+            "original_text": (original_text or "")[:4096] if original_text else "",
             "source": source,
             "channels": list(channels),
             "tg_total": int(tg_total),
@@ -606,7 +609,22 @@ class DynamoDbBroadcastStore:
         self._t().put_item(Item=item)
 
     def incr_telegram(self, broadcast_id: str, sent: int = 0, failed: int = 0) -> None:
-        self._add(broadcast_id, "ADD tg_sent :s, tg_failed :f", {":s": int(sent), ":f": int(failed)})
+        # Además de los contadores, sella las FECHAS de envío: first_sent_at (primera entrega) y
+        # last_sent_at (última), para mostrarlas en el grid/detalle. El servicio de WhatsApp sella
+        # las suyas por su lado (bcIncr en Node).
+        from decimal import Decimal
+
+        now = Decimal(int(time.time()))
+        try:
+            self._t().update_item(
+                Key={"id": broadcast_id},
+                UpdateExpression=("ADD tg_sent :s, tg_failed :f "
+                                  "SET last_sent_at = :now, first_sent_at = if_not_exists(first_sent_at, :now)"),
+                ConditionExpression="attribute_exists(id)",  # no fabricar items fantasma
+                ExpressionAttributeValues={":s": Decimal(int(sent)), ":f": Decimal(int(failed)), ":now": now},
+            )
+        except Exception:
+            pass  # el tracking de estado nunca debe romper el envío
 
     def set_whatsapp_total(self, broadcast_id: str, total: int) -> None:
         from decimal import Decimal
@@ -732,10 +750,14 @@ class DynamoDbBroadcastStore:
                     "created_at": int(j.get("created_at", 0)),
                     "text": j.get("text", ""),
                     "full_text": j.get("full_text") or j.get("text", ""),  # texto completo para el panel
+                    "original_text": j.get("original_text", ""),  # mensaje anterior (original del canal)
                     "price_diff": list(j.get("price_diff") or []),  # comparador anterior→nuevo por producto
                     "source": j.get("source", ""),
                     "channels": list(j.get("channels", [])),
                     "status": self._estado(j),
+                    "created_at_h": int(j.get("created_at", 0)),  # recibido (redundante con created_at; explícito)
+                    "first_sent_at": int(j.get("first_sent_at", 0)),  # primer envío real
+                    "last_sent_at": int(j.get("last_sent_at", 0)),   # último envío real
                     "last_error": j.get("last_error", ""),
                     "error_reasons": sorted(j.get("error_reasons")) if j.get("error_reasons") else [],
                     "telegram": {

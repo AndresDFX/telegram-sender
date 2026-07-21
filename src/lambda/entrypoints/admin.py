@@ -1380,6 +1380,17 @@ td b{font-weight:600;color:var(--tx)}
 .det-ant{color:var(--mut);text-decoration:line-through;white-space:nowrap;font-variant-numeric:tabular-nums}
 .det-arr{color:var(--mut);text-align:center}
 .det-nue{color:var(--ok);font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+.det-orig{border-color:var(--warn);opacity:.92}
+.det-dates{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px}
+.det-dates .det-f{flex:1;min-width:120px;background:var(--elev);border:1px solid var(--bd);border-radius:var(--r-sm);padding:8px 10px}
+.det-dates .det-f span{display:block;font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}
+.det-dates .det-f b{font-size:12.5px;color:var(--tx2)}
+/* Columna de fechas del grid (compacta). */
+.fechas{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--tx2);white-space:nowrap}
+.fechas .fch-off{color:var(--mut)}
+.fechas .fch-i{display:inline-block;width:16px}
+/* conteo por segmento del filtro (matriz de estado). */
+.segf .seg-n{font-weight:700;opacity:.75;font-size:11px}
 
 /* ---------- stats ---------- */
 .stats{display:flex;gap:14px;flex-wrap:wrap}
@@ -2160,15 +2171,18 @@ th.selcol,td.selcol{width:34px;text-align:center}
   <div class="card" data-tab="envios" data-sub="historial"><h2>📡 Historial de difusiones <span class="live" id="bc_live" style="margin-left:auto"><span class="ping"></span><span id="bc_live_t">en vivo</span></span></h2>
    <div class="hint">Estado y progreso de cada difusión. Las <b>📥 Capturadas</b> son listas del canal registradas SIN enviar — con «Enviar a…» decides a quién van. Se actualiza automáticamente mientras hay envíos en curso.</div>
    <!-- UX-4: filtro segmentado por estado (las capturadas dejan de estar camufladas entre difusiones) -->
+   <!-- Matriz de estado: cada segmento filtra y muestra su conteo (se rellena en loadBroadcasts). -->
    <div class="segf" role="group" aria-label="Filtrar difusiones por estado" style="margin-top:10px">
-     <button data-v="todas" class="on" aria-pressed="true" onclick="bcSetFilter('todas')">Todas</button>
-     <button data-v="capturadas" aria-pressed="false" onclick="bcSetFilter('capturadas')">📥 Capturadas</button>
-     <button data-v="encurso" aria-pressed="false" onclick="bcSetFilter('encurso')">En curso</button>
-     <button data-v="enviadas" aria-pressed="false" onclick="bcSetFilter('enviadas')">Enviadas</button>
-     <button data-v="fallidas" aria-pressed="false" onclick="bcSetFilter('fallidas')">Fallidas</button>
+     <button data-v="todas" class="on" aria-pressed="true" onclick="bcSetFilter('todas')">Todas <b class="seg-n" data-c="todas"></b></button>
+     <button data-v="capturadas" aria-pressed="false" onclick="bcSetFilter('capturadas')">📥 Capturadas <b class="seg-n" data-c="capturadas"></b></button>
+     <button data-v="creada" aria-pressed="false" onclick="bcSetFilter('creada')">🆕 Creadas <b class="seg-n" data-c="creada"></b></button>
+     <button data-v="encurso" aria-pressed="false" onclick="bcSetFilter('encurso')">⏳ En proceso <b class="seg-n" data-c="encurso"></b></button>
+     <button data-v="enviadas" aria-pressed="false" onclick="bcSetFilter('enviadas')">✅ Enviadas <b class="seg-n" data-c="enviadas"></b></button>
+     <button data-v="fallidas" aria-pressed="false" onclick="bcSetFilter('fallidas')">⚠️ Con fallos <b class="seg-n" data-c="fallidas"></b></button>
    </div>
+   <div id="bc_pausa" class="callout warn" style="display:none;margin:10px 0 0">⏸ El envío automático está <b>EN PAUSA</b>: las nuevas listas del canal se capturan pero no se difunden hasta reactivarlo en 🏠 Inicio.</div>
    <div style="overflow-x:auto;margin-top:12px">
-     <table id="bc_table"><thead><tr><th class="selcol"><input type="checkbox" id="bc_selall" onchange="bcSelAll(this.checked)"></th><th>Mensaje</th><th>Estado</th><th>Progreso</th><th></th></tr></thead>
+     <table id="bc_table"><thead><tr><th class="selcol"><input type="checkbox" id="bc_selall" onchange="bcSelAll(this.checked)"></th><th>Mensaje</th><th>Estado</th><th>Fechas</th><th>Progreso</th><th></th></tr></thead>
        <tbody id="bc_rows"></tbody></table>
    </div>
    <div class="empty-state" id="bc_empty" style="display:none"><div class="ico">📨</div><h3>Aún no hay difusiones</h3><p>Cuando la <b>captura</b> esté activa, cada lista del canal aparecerá aquí <b>sin enviarse</b> — tú decides a quién va. También puedes escribir una ahora mismo.</p><button style="margin-top:8px" onclick="showTab('enviar')">✍️ Componer un envío</button></div>
@@ -2495,7 +2509,10 @@ async function saveEmail(){ const b={ mail_from:($('mail_from').value||'').trim(
   try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
     $('resend_api_key').value=''; $('mail_save_status').textContent='✅ guardado'; toast('✓ Correo guardado'); loadCfg(); }
   catch(e){ $('mail_save_status').textContent=''; toast('Error al guardar',true); } }
+let SENDING_ON=true;  // estado global del envío automático (para el aviso "en pausa" en Actividad)
 function renderSendingState(on){
+  SENDING_ON=!!on;
+  if($('bc_pausa')) $('bc_pausa').style.display = on ? 'none' : '';
   if($('sending_enabled')) $('sending_enabled').checked = on;
   const badge=$('sys_badge'); if(badge){ badge.className='pill '+(on?'active':'paused'); badge.textContent = on?'ACTIVOS':'PAUSADOS'; }  // UX-2: pausa=ámbar
   const hb=$('hdr_badge'); if(hb){
@@ -3367,7 +3384,8 @@ async function sendBroadcast(){
 // ===== Envíos: listado + polling (GET /api/broadcasts) =====
 let BC_TIMER=null;
 const BC_POLL=4000;
-const BC_STATUS={ queued:'En cola', sending:'Enviando', done:'Completado', failed:'Fallido', partial:'Parcial', captured:'📥 Capturada (no enviada)' };
+// Etiquetas de estado (vocabulario del usuario): creada / en proceso / capturada / enviada / parcial / fallida.
+const BC_STATUS={ queued:'🆕 Creada', sending:'⏳ En proceso', done:'✅ Enviada', failed:'❌ Fallida', partial:'⚠️ Parcial (con fallos)', captured:'📥 Capturada (no enviada)' };
 function bcEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 // ===== Mensajes programados (módulo /api/schedules) =====
@@ -3452,6 +3470,14 @@ function bcFmtTime(t){
   if(isNaN(d)) return bcEsc(t);
   return d.toLocaleString('es',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
 }
+// Columna de FECHAS: recibido (captura) / primer envío / último envío. Compacta, una línea por fecha.
+function bcFechasCell(b){
+  const fila=(ic,lbl,t)=> t? `<div class="fch"><span class="fch-i" title="${lbl}">${ic}</span>${bcFmtTime(t)}</div>`
+                            : `<div class="fch fch-off"><span class="fch-i" title="${lbl}">${ic}</span>—</div>`;
+  return `<div class="fechas">${fila('📥','Recibido (capturado)',b.created_at)}`+
+    `${fila('🚀','Primer envío',b.first_sent_at)}`+
+    `${fila('🏁','Último envío',b.last_sent_at)}</div>`;
+}
 function bcChanCell(isWa, data){
   const total=(data&&data.total)|0, sent=(data&&data.sent)|0, fail=(data&&data.failed)|0;
   if(!total){ return `<div class="ch ${isWa?'wa':'tg'}"><span class="ic"></span><span class="muted">${isWa?'WhatsApp':'Telegram'} —</span></div>`; }
@@ -3477,6 +3503,7 @@ function bcRow(b){
     `<td class="bc-msg"><b role="button" tabindex="0" title="Ver el mensaje que se envía y el comparador de precios" style="cursor:pointer" onclick="bcDetail('${b.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcDetail('${b.id}')}">${bcEsc(txt)} ›</b>`+
       `<div class="bc-meta"><span class="bc-src">${bcEsc(b.source||'manual')}</span><span>${bcFmtTime(b.created_at)}</span></div></td>`+
     `<td><span class="pill ${st}">${bcEsc(label)}</span>${b.last_error?`<div class="bc-err" role="button" tabindex="0" onclick="bcErrDetail(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();bcErrDetail(this)}" data-err="${bcEsc((b.error_reasons||[]).join('\n')||b.last_error)}" title="Ver detalle del error">⚠ ${bcEsc(String(b.last_error).slice(0,72))} ›</div>`:''}</td>`+
+    `<td>${bcFechasCell(b)}</td>`+
     `<td><div class="chprog">${bcChanCell(false,b.telegram)}${bcChanCell(true,b.whatsapp)}</div></td>`+
     `<td style="text-align:right;white-space:nowrap">${sendBtn}<button class="danger" style="padding:4px 9px" title="Borrar definitivamente" onclick="bcDelete('${b.id}')">🗑</button></td>`;
   return tr;
@@ -3505,8 +3532,17 @@ function bcErrDetail(el){
 function bcDetail(id){
   const b=(BC_BYID&&BC_BYID[id])||null;
   const full=(b&&(b.full_text||b.text)||'').trim();
+  const orig=(b&&b.original_text||'').trim();
   const diff=(b&&b.price_diff)||[];
-  let html='<div class="det-sec"><div class="det-h">📤 Mensaje que se envía</div>'+
+  // Fechas de la difusión (recibido / primer envío / último envío).
+  const f=(lbl,t)=> '<div class="det-f"><span>'+lbl+'</span><b>'+(t?bcFmtTime(t):'—')+'</b></div>';
+  let html='<div class="det-dates">'+f('📥 Recibido', b&&b.created_at)+f('🚀 Primer envío', b&&b.first_sent_at)+f('🏁 Último envío', b&&b.last_sent_at)+'</div>';
+  // Mensaje ANTERIOR (original del canal) solo si existe y difiere del que se envía.
+  if(orig && orig!==full){
+    html+='<div class="det-sec"><div class="det-h">📥 Mensaje anterior (original del canal)</div>'+
+      '<div class="det-msg det-orig">'+bcEsc(orig)+'</div></div>';
+  }
+  html+='<div class="det-sec"><div class="det-h">📤 Mensaje que se envía</div>'+
     '<div class="det-msg">'+(full?bcEsc(full):'(sin texto / solo imagen)')+'</div></div>';
   if(diff.length){
     const filas=diff.map(f=>'<tr><td>'+bcEsc(f.producto||'')+'</td><td class="det-ant">'+bcEsc(f.anterior||'')+
@@ -3526,7 +3562,8 @@ let BC_BYID={};  // id→job de la última carga (para el detalle: mensaje final
 const BC_FILTERS={
   todas: ()=>true,
   capturadas: b=>b.status==='captured',
-  encurso: b=>b.status==='queued'||b.status==='sending',
+  creada: b=>b.status==='queued',        // creada = registrada, aún sin despachar
+  encurso: b=>b.status==='sending',      // en proceso = despachándose
   enviadas: b=>b.status==='done',
   fallidas: b=>b.status==='failed'||b.status==='partial',
 };
@@ -3534,11 +3571,14 @@ function bcSetFilter(v){ BC_FILTER=v;
   document.querySelectorAll('.card[data-sub="historial"] .segf button').forEach(x=>{ const on=x.dataset.v===v; x.classList.toggle('on',on); x.setAttribute('aria-pressed',on?'true':'false'); });
   loadBroadcasts(); }
 async function loadBroadcasts(){
-  { const _b=$('bc_rows'); if(_b && !_b.children.length) skelTable('bc_rows',5,4); }
+  { const _b=$('bc_rows'); if(_b && !_b.children.length) skelTable('bc_rows',6,4); }
   try{
     const r=await api('/api/broadcasts');
     const todos=r.broadcasts||[];
     BC_BYID={}; todos.forEach(b=>{ BC_BYID[b.id]=b; });  // mapa id→job para el detalle (mensaje final + comparador)
+    // Matriz de estado: conteo por segmento (se pinta en cada botón del filtro).
+    document.querySelectorAll('.card[data-sub="historial"] .seg-n').forEach(el=>{
+      const f=BC_FILTERS[el.dataset.c]; el.textContent = f? '('+todos.filter(f).length+')' : ''; });
     const list=todos.filter(BC_FILTERS[BC_FILTER]||BC_FILTERS.todas);
     const rows=$('bc_rows'); rows.innerHTML='';
     // UX-fix: estado vacío CONTEXTUAL por filtro (antes con "Fallidas" sin resultados decía "Aún no hay difusiones").
@@ -3546,9 +3586,10 @@ async function loadBroadcasts(){
     if(!list.length){ const h=emp.querySelector('h3'), p=emp.querySelector('p');
       const MSG={ todas:['Aún no hay difusiones','Cuando la captura esté activa, cada lista del canal aparecerá aquí sin enviarse.'],
         capturadas:['Sin listas capturadas','La captura del canal dejará aquí las listas nuevas, sin enviarlas.'],
+        creada:['Nada recién creado','Las difusiones registradas y aún sin despachar aparecerán aquí.'],
         encurso:['No hay envíos en curso','Los envíos en progreso aparecerán aquí mientras se despachan.'],
         enviadas:['Sin envíos completados todavía','Cuando una difusión termine, la verás aquí.'],
-        fallidas:['Sin difusiones fallidas 🎉','No hay envíos con errores en este momento.'] };
+        fallidas:['Sin difusiones con fallos 🎉','No hay envíos con errores en este momento.'] };
       const m=MSG[BC_FILTER]||MSG.todas; if(h) h.textContent=m[0]; if(p) p.textContent=m[1];
       emp.querySelector('button').style.display = BC_FILTER==='todas' ? '' : 'none'; }
     let active=false;

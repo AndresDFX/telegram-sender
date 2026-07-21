@@ -538,11 +538,13 @@ async function bcSetTotal(table, id, total) {
 async function bcIncr(table, id, sent, failed) {
   if (!table || !id || (!sent && !failed)) return
   try {
+    // Sella también las FECHAS de envío de WhatsApp (primer/último) para el grid/detalle del panel.
+    const now = String(Math.floor(Date.now() / 1000))
     await ddb.send(new UpdateItemCommand({
       TableName: table, Key: { id: { S: id } },
-      UpdateExpression: 'ADD wa_sent :s, wa_failed :f',
+      UpdateExpression: 'ADD wa_sent :s, wa_failed :f SET last_sent_at = :now, first_sent_at = if_not_exists(first_sent_at, :now)',
       ConditionExpression: 'attribute_exists(id)',
-      ExpressionAttributeValues: { ':s': { N: String(sent) }, ':f': { N: String(failed) } },
+      ExpressionAttributeValues: { ':s': { N: String(sent) }, ':f': { N: String(failed) }, ':now': { N: now } },
     }))
   } catch (e) { if (e.name !== 'ConditionalCheckFailedException') log.error({ err: String(e) }, 'bcIncr falló') }
 }

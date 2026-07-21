@@ -59,6 +59,25 @@ class EstadoTests(unittest.TestCase):
         self.assertEqual(E(job(channels=["telegram"], tg_total=5, tg_failed=5, tg_sent=0)), "failed")
 
 
+class IncrTelegramFechasTests(unittest.TestCase):
+    def test_incr_telegram_sella_first_y_last_sent_at(self):
+        # Cada entrega Telegram sella last_sent_at y, la primera vez, first_sent_at (if_not_exists).
+        store = DynamoDbBroadcastStore.__new__(DynamoDbBroadcastStore)
+        kw = {}
+
+        class _T:
+            def update_item(self, **k):
+                kw.update(k)
+
+        store._t = lambda: _T()
+        store.incr_telegram("b1", sent=5, failed=0)
+        expr = kw["UpdateExpression"]
+        self.assertIn("ADD tg_sent", expr)
+        self.assertIn("last_sent_at = :now", expr)
+        self.assertIn("first_sent_at = if_not_exists(first_sent_at, :now)", expr)
+        self.assertIn(":now", kw["ExpressionAttributeValues"])
+
+
 class RegistrarErrorTests(unittest.TestCase):
     def test_b18_dos_escrituras_add_siempre_y_last_error_condicional(self):
         # B18: registrar_error hace (1) ADD error_reasons SIN condición de orden y (2) SET last_error

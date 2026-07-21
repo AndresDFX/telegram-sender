@@ -183,22 +183,23 @@ class BroadcastListTests(unittest.TestCase):
     def test_captura_guarda_comparador_de_precios(self):
         # La difusión del canal guarda el desglose anterior→nuevo por producto (para verlo en Actividad).
         class FakeBroadcasts:
-            def __init__(self): self.price_diff = None
-            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None):
-                self.price_diff = price_diff
+            def __init__(self): self.price_diff = None; self.original = None
+            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None, original_text=None):
+                self.price_diff = price_diff; self.original = original_text
             def registrar_error(self, bid, msg): pass
         store = FakeBroadcasts()
         cfg = FakeConfig(sending_enabled=False, currency_symbols="$", markup_percentage=15, whatsapp_footer="")
         BroadcastList(FakeSubs(["1"]), FakeQueue(), cfg, broadcasts=store)("SAMSUNG A06 $325.000")
         self.assertTrue(store.price_diff)
         self.assertEqual((store.price_diff[0]["anterior"], store.price_diff[0]["nuevo"]), ("$325.000", "$374.000"))
+        self.assertEqual(store.original, "SAMSUNG A06 $325.000")  # mensaje anterior (original del canal) guardado
 
     def test_captura_con_imagen_anota_la_foto(self):
         # Post con imagen y caption mínimo ("📌"): la CAPTURA anota que hay imagen para que en el
         # panel no parezca una captura vacía/corrupta. El envío a contactos NO lleva la nota.
         class FakeBroadcasts:
             def __init__(self): self.textos = []
-            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None): self.textos.append(text)
+            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None, original_text=None): self.textos.append(text)
             def registrar_error(self, bid, msg): pass
         store = FakeBroadcasts()
         bl = BroadcastList(FakeSubs(["1"]), FakeQueue(), FakeConfig(sending_enabled=False), broadcasts=store)
@@ -220,7 +221,7 @@ class BroadcastListTests(unittest.TestCase):
             def desconectar(self): pass
         class FakeBroadcasts:
             def __init__(self): self.errores = []
-            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None): pass
+            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None, original_text=None): pass
             def registrar_error(self, bid, msg): self.errores.append(msg)
         store = FakeBroadcasts()
         res = BroadcastList(FakeSubs(["1"]), FakeQueue(), FakeConfig(sending_enabled=False),
@@ -260,7 +261,7 @@ class BroadcastListTests(unittest.TestCase):
         # resuelve a 0 destinatarios; en vez de cerrar como 'enviado-vacío' en silencio, registra error.
         class FakeBroadcasts:
             def __init__(self): self.errores = []
-            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None): pass
+            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None, original_text=None): pass
             def registrar_error(self, bid, msg): self.errores.append(msg)
         store = FakeBroadcasts()
         cfg = FakeConfig(telegram_lists=[{"name": "VIP", "ids": ["1"]}],
@@ -273,7 +274,7 @@ class BroadcastListTests(unittest.TestCase):
         # se re-lanza (para la compensación de dedup del receiver).
         class FakeBroadcasts:
             def __init__(self): self.errores = []
-            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None): pass
+            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None, original_text=None): pass
             def registrar_error(self, bid, msg): self.errores.append(msg)
             def marcar_whatsapp_fallido(self, bid): pass
         class QueueBoom:
@@ -382,7 +383,7 @@ class BroadcastListTests(unittest.TestCase):
             def __init__(self):
                 self.jobs = []
 
-            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None):
+            def crear(self, broadcast_id, text, source, channels, tg_total=0, price_diff=None, original_text=None):
                 self.jobs.append({"id": broadcast_id, "source": source, "channels": list(channels), "tg_total": tg_total})
 
         queue, wa, store = FakeQueue(), FakeWa(), FakeBroadcasts()
