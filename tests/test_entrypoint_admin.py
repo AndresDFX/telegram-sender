@@ -1,9 +1,11 @@
 """Entrypoint admin: Basic Auth y dispatch de la API (config, suscriptores, cola)."""
 
+import ast
 import base64
 import json
 import logging
 import os
+import re
 import sys
 import time
 import unittest
@@ -126,6 +128,33 @@ class FakeAudit:
         n = len(self.entries)
         self.entries = []
         return n
+
+
+class FakeScheduleStore:
+    """Programados en memoria: `actualizar` guarda lo pedido para poder afirmar QUÉ se escribió."""
+
+    def __init__(self):
+        self.items = []
+        self.actualizados = []
+        self.borrados = []
+
+    def crear(self, **campos):
+        sid = "s-%d" % (len(self.items) + 1)
+        self.items.append({"sid": sid, "last_run": 0, "runs": 0, "created_at": 0, **campos})
+        return sid
+
+    def listar(self):
+        return [dict(x) for x in self.items]
+
+    def actualizar(self, sid, **campos):
+        self.actualizados.append((sid, dict(campos)))
+        for it in self.items:
+            if it["sid"] == sid:
+                it.update(campos)
+
+    def borrar(self, sid):
+        self.borrados.append(sid)
+        self.items = [x for x in self.items if x["sid"] != sid]
 
 
 class FakeImageStore:
@@ -276,7 +305,7 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 200)
         self.assertEqual(json.loads(resp["body"])["deleted"], 2)
         # Las 2 previas se borraron; la propia limpieza queda registrada (bitácora del borrado).
-        self.assertEqual([e["action"] for e in admin.audit_store.entries], ["audit:limpiar"])
+        self.assertEqual([e["action"] for e in admin.audit_store.entries], ["audit:borrar"])
 
     def test_users_delete_all_protege_admin_y_actual(self):
         # {all:true} borra todos MENOS el admin principal y el usuario actual (sin lockout).
@@ -304,7 +333,7 @@ class AdminTests(unittest.TestCase):
         # guardar config -> queda auditado; /api/audit lo lista
         admin.lambda_handler(_event("POST", "/admin/api/config", {"source_channel": "x"}), None)
         acciones = [e["action"] for e in admin.audit_store.entries]
-        self.assertIn("config", acciones)
+        self.assertIn("config:guardar", acciones)  # nomenclatura entidad:accion
         resp = admin.lambda_handler(_event("GET", "/admin/api/audit"), None)
         self.assertEqual(resp["statusCode"], 200)
         self.assertTrue(len(json.loads(resp["body"])["audit"]) >= 1)
@@ -676,6 +705,327 @@ class WhatsappPairTests(unittest.TestCase):
         self.assertIn('data-m="qr"', html)
         self.assertLess(html.index('data-m="tel"'), html.index('data-m="qr"'))
         self.assertIn("/api/whatsapp/status", html)     # el sondeo confirma solo, sin recargar
+
+
+class SchedulesCrudTests(unittest.TestCase):
+    """CRUD completo de los programados: crear, leer, EDITAR (nuevo), pausar y borrar.
+    Editar reusa las mismas validaciones que crear (_campos_schedule): si divergieran, editar
+    dejaría pasar cosas que crear rechaza (p. ej. WhatsApp sin lista → toda la agenda)."""
+
+    def setUp(self):
+        admin.config = FakeConfig()
+        admin.subscribers = FakeSubs()
+        admin.queue_stats = FakeQueueStats()
+        admin.image_store = FakeImageStore()
+        admin.audit_store = FakeAudit()
+        admin.broadcast_store = FakeBroadcastStore()
+        admin.plan_store = FakePlanStoreAdmin()
+        admin.schedule_store = FakeScheduleStore()
+        os.environ["ADMIN_USER"] = "admin"
+        os.environ["ADMIN_PASSWORD"] = "secret123"
+
+    def tearDown(self):
+        admin.config = admin.subscribers = admin.queue_stats = admin.image_store = admin.audit_store = None
+        admin.broadcast_store = admin.plan_store = admin.schedule_store = None
+        os.environ.pop("ADMIN_USER", None)
+        os.environ.pop("ADMIN_PASSWORD", None)
+
+    def _crear(self, **extra):
+        cuerpo = {"text": "hola", "telegram": True, "telegram_list": "Clientes",
+                  "type": "daily", "at": "09:00"}
+        cuerpo.update(extra)
+        return admin.lambda_handler(_event("POST", "/admin/api/schedules", cuerpo), None)
+
+    def test_crear_diario_y_auditar(self):
+        resp = self._crear()
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(len(admin.schedule_store.items), 1)
+        self.assertGreater(json.loads(resp["body"])["next_run"], 0)
+        self.assertEqual(admin.audit_store.entries[-1]["action"], "schedules:crear")
+
+    def test_crear_rechaza_whatsapp_sin_lista(self):
+        resp = self._crear(whatsapp=True, whatsapp_list="")
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertIn("lista", json.loads(resp["body"])["error"])
+
+    def test_update_cambia_el_texto_y_recalcula_el_proximo_envio(self):
+        sid = json.loads(self._crear()["body"])["sid"]
+        resp = admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                           {"sid": sid, "text": "texto nuevo"}), None)
+        self.assertEqual(resp["statusCode"], 200)
+        guardado = admin.schedule_store.items[0]
+        self.assertEqual(guardado["text"], "texto nuevo")
+        self.assertGreater(json.loads(resp["body"])["next_run"], 0)
+        self.assertEqual(admin.audit_store.entries[-1]["action"], "schedules:actualizar")
+
+    def test_update_hereda_lo_que_no_se_manda(self):
+        # El panel manda solo lo que cambió: canales, listas y horario deben sobrevivir.
+        sid = json.loads(self._crear()["body"])["sid"]
+        admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                    {"sid": sid, "name": "Matutino"}), None)
+        g = admin.schedule_store.items[0]
+        self.assertEqual(g["name"], "Matutino")
+        self.assertEqual(g["text"], "hola")
+        self.assertTrue(g["telegram"])
+        self.assertEqual(g["telegram_list"], "Clientes")
+        self.assertEqual(g["at"], "09:00")
+
+    def test_update_no_pisa_el_historial_de_ejecuciones(self):
+        sid = json.loads(self._crear()["body"])["sid"]
+        admin.schedule_store.items[0].update({"runs": 7, "last_run": 1700000000})
+        admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                    {"sid": sid, "text": "otro"}), None)
+        _sid, campos = admin.schedule_store.actualizados[-1]
+        self.assertNotIn("runs", campos)
+        self.assertNotIn("last_run", campos)
+        self.assertEqual(admin.schedule_store.items[0]["runs"], 7)
+
+    def test_update_valida_igual_que_crear(self):
+        sid = json.loads(self._crear()["body"])["sid"]
+        resp = admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                           {"sid": sid, "whatsapp": True, "whatsapp_list": ""}), None)
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertIn("lista", json.loads(resp["body"])["error"])
+        resp = admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                           {"sid": sid, "text": ""}), None)
+        self.assertEqual(resp["statusCode"], 400)
+        resp = admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                           {"sid": sid, "image_url": "http://insegura/x.jpg"}), None)
+        self.assertEqual(resp["statusCode"], 400)
+
+    def test_update_de_una_vez_exige_fecha_futura(self):
+        futuro = int(time.time()) + 3600
+        sid = json.loads(self._crear(type="once", run_at=futuro)["body"])["sid"]
+        resp = admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                           {"sid": sid, "run_at": int(time.time()) - 60}), None)
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertIn("futuras", json.loads(resp["body"])["error"])
+
+    def test_update_de_una_vez_conserva_la_fecha_si_no_se_manda(self):
+        futuro = int(time.time()) + 3600
+        sid = json.loads(self._crear(type="once", run_at=futuro)["body"])["sid"]
+        resp = admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                           {"sid": sid, "text": "cambiado"}), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(admin.schedule_store.items[0]["next_run"], futuro)
+
+    def test_update_de_semanal_exige_dias(self):
+        sid = json.loads(self._crear()["body"])["sid"]
+        resp = admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                           {"sid": sid, "type": "weekly", "days": []}), None)
+        self.assertEqual(resp["statusCode"], 400)
+        ok = admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                         {"sid": sid, "type": "weekly", "days": [0, 3]}), None)
+        self.assertEqual(ok["statusCode"], 200)
+        self.assertEqual(admin.schedule_store.items[0]["days"], [0, 3])
+
+    def test_update_sid_desconocido_400(self):
+        resp = admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                           {"sid": "s-inexistente", "text": "x"}), None)
+        self.assertEqual(resp["statusCode"], 400)
+        resp = admin.lambda_handler(_event("POST", "/admin/api/schedules/update", {"text": "x"}), None)
+        self.assertEqual(resp["statusCode"], 400)
+
+    def test_update_puede_reactivar(self):
+        sid = json.loads(self._crear()["body"])["sid"]
+        admin.lambda_handler(_event("POST", "/admin/api/schedules/update",
+                                    {"sid": sid, "enabled": False}), None)
+        self.assertFalse(admin.schedule_store.items[0]["enabled"])
+
+    def test_toggle_audita_con_verbo_propio(self):
+        sid = json.loads(self._crear()["body"])["sid"]
+        admin.lambda_handler(_event("POST", "/admin/api/schedules/toggle", {"sid": sid, "enabled": False}), None)
+        self.assertEqual(admin.audit_store.entries[-1]["action"], "schedules:pausar")
+        admin.lambda_handler(_event("POST", "/admin/api/schedules/toggle", {"sid": sid, "enabled": True}), None)
+        self.assertEqual(admin.audit_store.entries[-1]["action"], "schedules:activar")
+
+
+class UsersUpdateTests(unittest.TestCase):
+    """`POST /api/users/update`: editar el correo y RESTABLECER la contraseña de otra persona
+    (lo que faltaba del CRUD de usuarios: antes solo se podía crear, cambiar rol y borrar)."""
+
+    def setUp(self):
+        admin.config = FakeConfig()
+        admin.subscribers = FakeSubs()
+        admin.audit_store = FakeAudit()
+        os.environ["ADMIN_USER"] = "admin"
+        os.environ["ADMIN_PASSWORD"] = "secret123"
+        admin._AUTH["fails"] = 0
+        admin._AUTH["locked_until"] = 0.0
+        admin.config.users = {
+            "ana": {"email": "ana@x.com", "hash": admin.auth_dom.hash_password("clave1234"), "role": "user"},
+        }
+
+    def tearDown(self):
+        admin.config = admin.subscribers = admin.audit_store = None
+        os.environ.pop("ADMIN_USER", None)
+        os.environ.pop("ADMIN_PASSWORD", None)
+
+    def _ev(self, body, user="admin", pw="secret123"):
+        token = base64.b64encode(f"{user}:{pw}".encode()).decode()
+        return {
+            "rawPath": "/dev/admin/api/users/update",
+            "requestContext": {"http": {"method": "POST", "path": "/dev/admin/api/users/update"}},
+            "headers": {"authorization": f"Basic {token}"},
+            "body": json.dumps(body),
+        }
+
+    def test_cambia_el_correo(self):
+        r = admin.lambda_handler(self._ev({"username": "ana", "email": "nueva@x.com"}), None)
+        self.assertEqual(r["statusCode"], 200)
+        self.assertEqual(admin.config.users["ana"]["email"], "nueva@x.com")
+        self.assertEqual(admin.audit_store.entries[-1]["action"], "users:actualizar")
+        self.assertIn("correo", admin.audit_store.entries[-1]["detail"])
+
+    def test_restablece_la_contrasena_sin_pedir_la_actual(self):
+        r = admin.lambda_handler(self._ev({"username": "ana", "password": "otraclave99"}), None)
+        self.assertEqual(r["statusCode"], 200)
+        self.assertTrue(admin._verificar("ana", "otraclave99"))
+        self.assertFalse(admin._verificar("ana", "clave1234"))
+        self.assertIn("contraseña", admin.audit_store.entries[-1]["detail"])
+
+    def test_no_registra_la_contrasena_en_la_auditoria(self):
+        admin.lambda_handler(self._ev({"username": "ana", "password": "otraclave99"}), None)
+        self.assertNotIn("otraclave99", admin.audit_store.entries[-1]["detail"])
+
+    def test_conserva_el_rol_y_los_datos_por_usuario(self):
+        admin.config.users["ana"]["excluded"] = ["123"]
+        admin.lambda_handler(self._ev({"username": "ana", "email": "n@x.com"}), None)
+        self.assertEqual(admin.config.users["ana"]["role"], "user")
+        self.assertEqual(admin.config.users["ana"]["excluded"], ["123"])
+
+    def test_rechaza_contrasena_corta(self):
+        r = admin.lambda_handler(self._ev({"username": "ana", "password": "corta"}), None)
+        self.assertEqual(r["statusCode"], 400)
+        self.assertTrue(admin._verificar("ana", "clave1234"))  # no la cambió
+
+    def test_rechaza_usuario_inexistente_y_cuerpo_vacio(self):
+        self.assertEqual(admin.lambda_handler(self._ev({"username": "nadie", "email": "x@y.com"}), None)["statusCode"], 400)
+        self.assertEqual(admin.lambda_handler(self._ev({"username": "ana"}), None)["statusCode"], 400)
+
+    def test_un_usuario_normal_no_puede_editar_a_otros(self):
+        r = admin.lambda_handler(self._ev({"username": "ana", "password": "otraclave99"},
+                                          user="ana", pw="clave1234"), None)
+        self.assertEqual(r["statusCode"], 403)
+        self.assertTrue(admin._verificar("ana", "clave1234"))
+
+    def test_users_get_dice_quien_es_el_principal(self):
+        ev = {
+            "rawPath": "/dev/admin/api/users",
+            "requestContext": {"http": {"method": "GET", "path": "/dev/admin/api/users"}},
+            "headers": {"authorization": "Basic " + base64.b64encode(b"admin:secret123").decode()},
+            "body": None,
+        }
+        cuerpo = json.loads(admin.lambda_handler(ev, None)["body"])
+        # El panel ya no adivina que el principal se llama "admin": lo dice el backend.
+        self.assertEqual(cuerpo["principal"], "admin")
+
+
+class NomenclaturaTests(unittest.TestCase):
+    """Los nombres tienen que significar lo mismo en todas partes: la clave de auditoría usa la
+    MISMA palabra que la ruta HTTP (`entidad:accion`) y el panel sabe traducir todas."""
+
+    ENTIDADES = {"users", "config", "patterns", "subscribers", "broadcasts", "plans", "schedules",
+                 "queue", "dlq", "audit", "telethon", "whatsapp"}
+
+    @classmethod
+    def setUpClass(cls):
+        ruta = os.path.join(os.path.dirname(__file__), "..", "src", "lambda", "entrypoints", "admin.py")
+        with open(ruta, encoding="utf-8") as fh:
+            cls.codigo = fh.read()
+        cls.acciones = []
+        for nodo in ast.walk(ast.parse(cls.codigo)):
+            if not (isinstance(nodo, ast.Call) and getattr(nodo.func, "id", "") == "_audit" and nodo.args):
+                continue
+            primero = nodo.args[0]
+            ramas = [primero] if not isinstance(primero, ast.IfExp) else [primero.body, primero.orelse]
+            for rama in ramas:
+                cls.acciones.append(rama.value if isinstance(rama, ast.Constant) else None)
+
+    def test_hay_acciones_y_todas_son_literales(self):
+        self.assertGreater(len(self.acciones), 20)
+        self.assertNotIn(None, self.acciones)  # una acción calculada no se puede auditar ni traducir
+
+    def test_toda_accion_es_entidad_dos_puntos_verbo(self):
+        for a in self.acciones:
+            self.assertRegex(a, r"^[a-z]+:[a-z-]+$", a)
+            self.assertIn(a.split(":")[0], self.ENTIDADES, a)
+
+    def test_la_entidad_de_la_accion_existe_como_ruta(self):
+        for a in self.acciones:
+            entidad = a.split(":")[0]
+            self.assertIn(f'"/api/{entidad}', self.codigo, entidad)
+
+    def _bloque(self, nombre):
+        i = self.codigo.index("const " + nombre + "={")
+        return self.codigo[i:self.codigo.index("};", i)]
+
+    def test_el_panel_traduce_todas_las_acciones(self):
+        ents, vrbs = self._bloque("ACC_ENT"), self._bloque("ACC_VRB")
+        for a in self.acciones:
+            e, v = a.split(":", 1)
+            self.assertIn(e + ":", ents, a)
+            self.assertTrue(v + ":" in vrbs or "'" + v + "':" in vrbs, a)
+
+    def test_las_rutas_de_escritura_usan_los_mismos_verbos(self):
+        # Forma canónica: POST /api/<entidad>/update y /delete (más los verbos propios ya existentes).
+        rutas = set(re.findall(r'sub == "(/api/[a-z/\-]+)"', self.codigo))
+        for esperada in ("/api/users/update", "/api/users/delete",
+                         "/api/schedules/update", "/api/schedules/delete",
+                         "/api/broadcasts/delete", "/api/plans/delete", "/api/audit/delete"):
+            self.assertIn(esperada, rutas, esperada)
+
+
+class PanelCrudTests(unittest.TestCase):
+    """El CRUD no existe si no se puede hacer desde el panel: cada operación nueva tiene su botón."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ["ADMIN_USER"] = "admin"
+        os.environ["ADMIN_PASSWORD"] = "secret123"
+        admin.config = FakeConfig()
+        admin.subscribers = FakeSubs()
+        admin.audit_store = FakeAudit()
+        cls.html = admin.lambda_handler(_event("GET", "/admin", auth=False), None)["body"]
+
+    @classmethod
+    def tearDownClass(cls):
+        admin.config = admin.subscribers = admin.audit_store = None
+        os.environ.pop("ADMIN_USER", None)
+        os.environ.pop("ADMIN_PASSWORD", None)
+
+    def test_editar_un_programado(self):
+        for pieza in ("function sgEdit", 'onclick="sgEdit(', "/api/schedules/update",
+                      'id="se_text"', 'id="se_type"', 'id="se_days_box"', "schedLocalInput"):
+            self.assertIn(pieza, self.html, pieza)
+
+    def test_editar_un_usuario(self):
+        for pieza in ("function editUser", 'onclick="editUser(', "/api/users/update",
+                      'id="eu_email"', 'id="eu_pw"'):
+            self.assertIn(pieza, self.html, pieza)
+
+    def test_renombrar_una_lista(self):
+        for pieza in ("function renameList", 'onclick="renameList(', "auto_'+ch+'_list"):
+            self.assertIn(pieza, self.html, pieza)
+        # Renombrar arrastra las referencias de los programados (si no, se quedan sin destino).
+        self.assertIn("/api/schedules/update", self.html)
+
+    def test_reincluir_un_solo_auto_excluido(self):
+        self.assertIn("async function clearBlocked(id)", self.html)
+        self.assertIn("clearBlocked(\\'", self.html)   # botón por contacto (con su jid)
+        self.assertIn("clearBlocked()", self.html)     # y el de "reincluir a todos"
+        self.assertIn("blk-row", self.html)
+
+    def test_la_auditoria_se_lee_en_espanol(self):
+        for pieza in ("const ACC_ENT=", "const ACC_VRB=", "function accLabel"):
+            self.assertIn(pieza, self.html, pieza)
+
+    def test_el_principal_no_se_adivina(self):
+        self.assertIn("USR_PRINCIPAL", self.html)
+        self.assertIn("r.principal", self.html)
+
+    def test_enter_en_un_textarea_no_envia_el_modal(self):
+        self.assertIn("TEXTAREA", self.html)
 
 
 if __name__ == "__main__":

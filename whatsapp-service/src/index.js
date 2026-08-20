@@ -462,10 +462,22 @@ app.get('/blocked', auth, (req, res) => {
 })
 
 // Reinicia el conteo de fallos (re-incluye a los auto-excluidos).
+// Con body {id: "<jid>"} reincluye SOLO a ese contacto; sin id, a todos (compatibilidad).
 app.post('/blocked/clear', auth, async (req, res) => {
+  const id = String((req.body && req.body.id) || '').trim()
+  if (id) {
+    // Acepta el jid completo o el número suelto: el panel muestra ambos.
+    const jid = id.includes('@') ? id : `${id}@s.whatsapp.net`
+    const habia = failures[jid] !== undefined || failures[id] !== undefined
+    delete failures[jid]
+    delete failures[id]
+    await flushFailures()
+    return res.json({ ok: true, cleared: habia ? 1 : 0, id: jid })
+  }
+  const n = Object.keys(failures).length
   for (const k of Object.keys(failures)) delete failures[k]
   await flushFailures()  // M19: persiste sincrónicamente; un /reconnect inmediato no revive los conteos
-  res.json({ ok: true })
+  res.json({ ok: true, cleared: n })
 })
 
 // Resuelve a quién enviar según el modo de targeting y las listas de distribución.

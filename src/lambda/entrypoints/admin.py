@@ -141,7 +141,18 @@ def _ensure() -> None:
 
 
 def _audit(action: str, detail: str = "") -> None:
-    """Registra una acción del panel (best-effort; nunca rompe la operación)."""
+    """Registra una acción del panel (best-effort; nunca rompe la operación).
+
+    NOMENCLATURA (obligatoria, para que un nombre signifique lo mismo en todas partes):
+    ``entidad:accion`` donde **entidad** es EXACTAMENTE el segmento de la ruta HTTP
+    (``users``, ``config``, ``patterns``, ``subscribers``, ``broadcasts``, ``plans``,
+    ``schedules``, ``queue``, ``dlq``, ``audit``, ``telethon``, ``whatsapp``) y **accion**
+    es el verbo en infinitivo (``crear``, ``actualizar``, ``borrar``, ``guardar``,
+    ``cancelar``, ``activar``, ``pausar``, ``vaciar``, ``reintentar``…). El panel traduce
+    esa clave a español legible con ``ACC_ENT`` (entidad) + ``ACC_VRB`` (verbo) en la tabla
+    de Auditoría: si añades una acción nueva, añade también su etiqueta allí
+    (``NomenclaturaTests`` falla si falta).
+    """
     try:
         audit_store.registrar(action, detail, admin_user())
     except Exception:
@@ -369,7 +380,7 @@ def _auth_reset(body: dict) -> dict[str, Any]:
     u["hash"] = auth_dom.hash_password(nueva)
     users[usuario] = u; config.set_users(users)
     resets.pop(usuario, None); config.set_resets(resets)
-    _audit("user:reset", usuario)
+    _audit("users:reset-clave", usuario)
     return _json({"ok": True})
 
 
@@ -637,6 +648,66 @@ def _sanea_config(cambios: dict) -> dict:
     return out
 
 
+def _campos_schedule(c: dict) -> tuple[dict | None, dict | None]:
+    """Valida un programado y devuelve ``(campos_normalizados, respuesta_de_error)``.
+
+    Lo comparten CREAR (``POST /api/schedules``) y ACTUALIZAR (``POST /api/schedules/update``):
+    las reglas de un programado deben ser idénticas en los dos sitios, o editar uno permitiría
+    guardar algo que crearlo rechaza (p. ej. WhatsApp sin lista → difusión a toda la agenda).
+    """
+    texto = str(c.get("text", "")).strip()
+    if not texto:
+        return None, _json({"error": "El mensaje no puede estar vacío"}, 400)
+    if len(texto) > 4096:
+        return None, _json({"error": "El mensaje supera 4096 caracteres"}, 400)
+    a_tg, a_wa = bool(c.get("telegram")), bool(c.get("whatsapp"))
+    if not (a_tg or a_wa):
+        return None, _json({"error": "Elige al menos un canal"}, 400)
+    wa_list = str(c.get("whatsapp_list", "")).strip()
+    if a_wa and not wa_list:
+        return None, _json({"error": "WhatsApp exige elegir una lista (evita mandar a todos)"}, 400)
+    img = str(c.get("image_url", "")).strip()
+    if img and not img.startswith("https://"):
+        return None, _json({"error": "La imagen debe ser una URL https://"}, 400)
+    tipo = str(c.get("type", "once")).lower()
+    if tipo not in ("once", "daily", "weekly"):
+        return None, _json({"error": "Tipo de programación inválido"}, 400)
+    tz = int(config.get().get("window_tz", -300))
+    ahora = int(time.time())
+    at, dias = "", []
+    if tipo == "once":
+        try:
+            next_run = int(c.get("run_at") or 0)
+        except (TypeError, ValueError):
+            next_run = 0
+        if next_run <= ahora:
+            return None, _json({"error": "La fecha y hora deben ser futuras"}, 400)
+    else:
+        at = str(c.get("at", "")).strip()
+        if not hhmm(at):
+            return None, _json({"error": "Hora inválida (usa HH:MM)"}, 400)
+        if tipo == "weekly":
+            dias = sorted({int(d) for d in (c.get("days") or []) if str(d).strip().isdigit() and 0 <= int(d) <= 6})
+            if not dias:
+                return None, _json({"error": "Elige al menos un día de la semana"}, 400)
+        next_run = proximo_run(tipo, at, dias, tz, ahora)
+        if not next_run:
+            return None, _json({"error": "No se pudo calcular el próximo envío"}, 400)
+    return {
+        "name": str(c.get("name", "")).strip(),
+        "text": texto,
+        "image_url": img,
+        "telegram": a_tg,
+        "telegram_list": str(c.get("telegram_list", "")).strip(),
+        "whatsapp": a_wa,
+        "whatsapp_list": wa_list,
+        "type": tipo,
+        "at": at,
+        "days": dias,
+        "next_run": next_run,
+    }, None
+
+
 def _config_publico() -> dict:
     """Config para el panel, con los secretos enmascarados (no se exponen)."""
     cfg = config.get()
@@ -769,7 +840,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             if not _es_admin(event):
                 return _json({"error": "Solo un administrador puede gestionar usuarios."}, 403)
             users = config.get_users() or {}
-            return _json({"me": _usuario_actual(event), "is_admin": True, "users": [
+            # `principal` = el admin del bootstrap: el panel lo necesita para no ofrecer borrarlo
+            # ni degradarlo (antes lo adivinaba asumiendo que se llamaba "admin").
+            return _json({"me": _usuario_actual(event), "is_admin": True, "principal": admin_user(), "users": [
                 {"username": k, "email": v.get("email", ""), "role": str(v.get("role", "admin")),
                  "created_at": int(v.get("created_at", 0) or 0)}
                 for k, v in users.items()]})
@@ -790,8 +863,36 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             users[username] = {"email": str(c.get("email", "")).strip(), "hash": auth_dom.hash_password(pw),
                                "role": rol, "created_at": int(time.time())}
             config.set_users(users)
-            _audit("user:crear", f"{username} ({rol})")
+            _audit("users:crear", f"{username} ({rol})")
             return _json({"ok": True})
+        if sub == "/api/users/update" and method == "POST":
+            # ACTUALIZAR un usuario existente: correo y/o contraseña (restablecer sin conocer la
+            # actual, para cuando alguien la pierde). El ROL va por /api/users/role porque arrastra
+            # su propia guardia (el admin principal nunca se degrada).
+            if not _es_admin(event):
+                return _json({"error": "Solo un administrador puede editar usuarios."}, 403)
+            c = _body(event)
+            username = str(c.get("username", "")).strip()
+            users = config.get_users() or {}
+            if username not in users:
+                return _json({"error": "Usuario no encontrado."}, 400)
+            rec = dict(users[username])
+            tocados = []
+            if "email" in c:
+                rec["email"] = str(c.get("email") or "").strip()
+                tocados.append("correo")
+            pw_nueva = c.get("password") or ""
+            if pw_nueva:
+                if not auth_dom.password_valida(pw_nueva):
+                    return _json({"error": "La contraseña debe tener al menos 8 caracteres."}, 400)
+                rec["hash"] = auth_dom.hash_password(pw_nueva)
+                tocados.append("contraseña")
+            if not tocados:
+                return _json({"error": "No hay cambios: escribe un correo o una contraseña nueva."}, 400)
+            users[username] = rec
+            config.set_users(users)
+            _audit("users:actualizar", f"{username}: " + ", ".join(tocados))
+            return _json({"ok": True, "changed": tocados})
         if sub == "/api/users/role" and method == "POST":
             # Cambiar el rol (admin ⇄ user). Solo admins; nunca dejar el panel sin administradores.
             if not _es_admin(event):
@@ -808,7 +909,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 return _json({"error": "El administrador principal no puede cambiar de rol."}, 400)
             users[username]["role"] = nuevo
             config.set_users(users)
-            _audit("user:rol", f"{username} → {nuevo}")
+            _audit("users:rol", f"{username} → {nuevo}")
             return _json({"ok": True})
         if sub == "/api/users/delete" and method == "POST":
             if not _es_admin(event):
@@ -824,7 +925,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     del users[u]
                 if a_borrar:
                     config.set_users(users)
-                _audit("user:borrar", f"todos {len(a_borrar)}")
+                _audit("users:borrar", f"todos {len(a_borrar)}")
                 return _json({"ok": True, "deleted": len(a_borrar)})
             username = str(cuerpo_u.get("username", "")).strip()
             users = config.get_users() or {}
@@ -838,7 +939,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 return _json({"error": "No puedes borrar el usuario con el que iniciaste sesión."}, 400)
             del users[username]
             config.set_users(users)
-            _audit("user:borrar", username)
+            _audit("users:borrar", username)
             return _json({"ok": True})
         if sub == "/api/auth/change-password" and method == "POST":
             c = _body(event)
@@ -853,7 +954,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             u["hash"] = auth_dom.hash_password(nueva)
             users[me] = u
             config.set_users(users)
-            _audit("user:cambiar-clave", me)
+            _audit("users:cambiar-clave", me)
             return _json({"ok": True})
         if sub == "/api/config" and method == "GET":
             return _json(_config_publico())
@@ -874,7 +975,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     return _json({"error": "Antes de activar el envío automático, elige una lista para: "
                                   + " y ".join(faltan) + " (Ajustes → «Lista del envío automático»), "
                                   "para no difundir a TODOS los contactos por error."}, 400)
-            _audit("config", "campos: " + (", ".join(sorted(cambios.keys())) or "(ninguno)"))
+            _audit("config:guardar", "campos: " + (", ".join(sorted(cambios.keys())) or "(ninguno)"))
             return _json(config.set(cambios))
         if sub == "/api/patterns" and method == "GET":
             # Info de destinatarios del USUARIO actual (se guarda en su registro, no en la config global).
@@ -900,7 +1001,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             if usuario:  # solo persiste si hay un usuario identificado (no el fallback de entorno sin registro)
                 users[usuario] = rec
                 config.set_users(users)
-            _audit("destinatarios", f"{usuario}: " + (", ".join(cambiados) or "(ninguno)"))
+            _audit("patterns:guardar", f"{usuario}: " + (", ".join(cambiados) or "(ninguno)"))
             return _json({k: [str(x) for x in (rec.get(k) or [])] for k in _PER_USER})
         if sub == "/api/image" and method == "POST":
             cuerpo = _body(event)
@@ -934,7 +1035,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if sub == "/api/queue" and method == "GET":
             return _json(queue_stats.profundidades())
         if sub == "/api/queue/purge" and method == "POST":
-            _audit("queue_purge")
+            _audit("queue:vaciar")
             return _json(queue_stats.purgar_principal())
         if sub == "/api/preview/process" and method == "POST":
             cfg = config.get()
@@ -950,10 +1051,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if sub == "/api/dlq" and method == "GET":
             return _json({"sample": queue_stats.dlq_muestra(5), "depth": queue_stats.profundidades().get("dlq", 0)})
         if sub == "/api/dlq/redrive" and method == "POST":
-            _audit("dlq_redrive")
+            _audit("dlq:reintentar")
             return _json(queue_stats.dlq_redrive())
         if sub == "/api/dlq/purge" and method == "POST":
-            _audit("dlq_purge")
+            _audit("dlq:vaciar")
             return _json(queue_stats.dlq_purgar())
         if sub == "/api/broadcasts" and method == "GET":
             return _json({"broadcasts": broadcast_store.listar(limit=1000)})  # el panel pagina/busca client-side
@@ -965,7 +1066,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             if not _es_admin(event):
                 return _json({"error": "Solo un administrador puede limpiar la auditoría."}, 403)
             n = audit_store.borrar_todos()
-            _audit("audit:limpiar", f"{n} registros")  # deja constancia de la propia limpieza
+            _audit("audit:borrar", f"{n} registros")  # deja constancia de la propia limpieza
             return _json({"ok": True, "deleted": n})
         if sub == "/api/plans" and method == "GET":
             return _json({"plans": _planes_con_progreso()})
@@ -973,10 +1074,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             pid = str(_body(event).get("pid", "")).strip()
             if pid:  # cancelar un envío puntual (en tiempo real)
                 plan_store.cancelar(pid)
-                _audit("cancelar_envio", pid)
+                _audit("plans:cancelar", pid)
                 return _json({"ok": True, "canceled": 1, "pid": pid})
             n = plan_store.cancelar_pendientes()
-            _audit("cancelar_pendientes", f"{n} difusiones")
+            _audit("plans:cancelar-pendientes", f"{n} difusiones")
             return _json({"ok": True, "canceled": n})
         if sub == "/api/plans/delete" and method == "POST":
             cuerpo = _body(event)
@@ -1096,62 +1197,44 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 # Auditamos el RECHAZO para que se vea EN LA APP por qué un envío "no salió"
                 # (p. ej. sin destinatarios por patrones de exclusión), no solo en el error del momento.
                 canales = "+".join([c for c, on in (("tg", a_tg), ("wa", a_wa)) if on])
-                _audit("broadcast:rechazado", f"[{canales}] {str(e)[:160]}")
+                _audit("broadcasts:rechazado", f"[{canales}] {str(e)[:160]}")
                 return _json({"error": str(e)}, 400)
             canales = "+".join([c for c, on in (("tg", a_tg), ("wa", a_wa)) if on])
-            _audit("broadcast" + (" (programado)" if sched else ""), f"[{canales}] {texto[:60]}")
+            _audit("broadcasts:programar" if sched else "broadcasts:enviar", f"[{canales}] {texto[:60]}")
             return _json({"ok": True, **res})
         if sub == "/api/schedules" and method == "GET":
             return _json({"schedules": schedule_store.listar()})
         if sub == "/api/schedules" and method == "POST":
+            campos, err = _campos_schedule(_body(event))
+            if err:
+                return err
+            sid = schedule_store.crear(enabled=True, **campos)
+            canales = "+".join(x for x, on in (("tg", campos["telegram"]), ("wa", campos["whatsapp"])) if on)
+            _audit("schedules:crear", f"{campos['type']} [{canales}] {campos['text'][:40]}")
+            return _json({"ok": True, "sid": sid, "next_run": campos["next_run"]})
+        if sub == "/api/schedules/update" and method == "POST":
+            # EDITAR un programado ya creado (texto, imagen, canales, listas, frecuencia y hora).
+            # Se valida con las MISMAS reglas que al crearlo (_campos_schedule) y se recalcula
+            # next_run. Lo que no venga en el cuerpo se hereda del programado actual, así que el
+            # panel puede mandar solo lo que cambió. `runs`/`last_run` se conservan (no se pisan).
             c = _body(event)
-            texto = str(c.get("text", "")).strip()
-            if not texto:
-                return _json({"error": "El mensaje no puede estar vacío"}, 400)
-            if len(texto) > 4096:
-                return _json({"error": "El mensaje supera 4096 caracteres"}, 400)
-            a_tg, a_wa = bool(c.get("telegram")), bool(c.get("whatsapp"))
-            if not (a_tg or a_wa):
-                return _json({"error": "Elige al menos un canal"}, 400)
-            wa_list = str(c.get("whatsapp_list", "")).strip()
-            if a_wa and not wa_list:
-                return _json({"error": "WhatsApp exige elegir una lista (evita mandar a todos)"}, 400)
-            img = str(c.get("image_url", "")).strip()
-            if img and not img.startswith("https://"):
-                return _json({"error": "La imagen debe ser una URL https://"}, 400)
-            tipo = str(c.get("type", "once")).lower()
-            if tipo not in ("once", "daily", "weekly"):
-                return _json({"error": "Tipo de programación inválido"}, 400)
-            tz = int(config.get().get("window_tz", -300))
-            ahora = int(time.time())
-            at, dias = "", []
-            if tipo == "once":
-                try:
-                    next_run = int(c.get("run_at") or 0)
-                except (TypeError, ValueError):
-                    next_run = 0
-                if next_run <= ahora:
-                    return _json({"error": "La fecha y hora deben ser futuras"}, 400)
-            else:
-                at = str(c.get("at", "")).strip()
-                if not hhmm(at):
-                    return _json({"error": "Hora inválida (usa HH:MM)"}, 400)
-                if tipo == "weekly":
-                    dias = sorted({int(d) for d in (c.get("days") or []) if str(d).strip().isdigit() and 0 <= int(d) <= 6})
-                    if not dias:
-                        return _json({"error": "Elige al menos un día de la semana"}, 400)
-                next_run = proximo_run(tipo, at, dias, tz, ahora)
-                if not next_run:
-                    return _json({"error": "No se pudo calcular el próximo envío"}, 400)
-            sid = schedule_store.crear(
-                name=str(c.get("name", "")).strip(), text=texto, image_url=img,
-                telegram=a_tg, telegram_list=str(c.get("telegram_list", "")).strip(),
-                whatsapp=a_wa, whatsapp_list=wa_list, type=tipo, at=at, days=dias,
-                next_run=next_run, enabled=True,
-            )
-            canales = "+".join(x for x, on in (("tg", a_tg), ("wa", a_wa)) if on)
-            _audit("schedule:crear", f"{tipo} [{canales}] {texto[:40]}")
-            return _json({"ok": True, "sid": sid, "next_run": next_run})
+            sid = str(c.get("sid", "")).strip()
+            if not sid:
+                return _json({"error": "sid requerido"}, 400)
+            actual = next((x for x in schedule_store.listar() if x["sid"] == sid), None)
+            if not actual:
+                return _json({"error": "Ese envío programado ya no existe."}, 400)
+            base = dict(actual)
+            base["run_at"] = actual.get("next_run", 0)  # 'once': la fecha vive en next_run
+            campos, err = _campos_schedule({**base, **{k: v for k, v in c.items() if k != "sid"}})
+            if err:
+                return err
+            if "enabled" in c:
+                campos["enabled"] = bool(c.get("enabled"))
+            schedule_store.actualizar(sid, **campos)
+            canales = "+".join(x for x, on in (("tg", campos["telegram"]), ("wa", campos["whatsapp"])) if on)
+            _audit("schedules:actualizar", f"{sid} · {campos['type']} [{canales}] {campos['text'][:40]}")
+            return _json({"ok": True, "sid": sid, "next_run": campos["next_run"]})
         if sub == "/api/schedules/toggle" and method == "POST":
             c = _body(event)
             sid = str(c.get("sid", "")).strip()
@@ -1171,7 +1254,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 elif s and s["type"] == "once" and int(s.get("next_run", 0)) <= int(time.time()):
                     return _json({"error": "Ese envío único ya pasó su hora; créalo de nuevo con una fecha futura."}, 400)
             schedule_store.actualizar(sid, **campos)
-            _audit("schedule:toggle", f"{sid}={'on' if enabled else 'off'}")
+            _audit("schedules:activar" if enabled else "schedules:pausar", sid)
             return _json({"ok": True})
         if sub == "/api/schedules/delete" and method == "POST":
             cuerpo = _body(event)
@@ -1185,7 +1268,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                             pass
                 except Exception:
                     logger.exception("No se pudieron listar los schedules para borrado masivo")
-                _audit("schedule:borrar", f"todos {n}")
+                _audit("schedules:borrar", f"todos {n}")
                 return _json({"ok": True, "deleted": n})
             sids = cuerpo.get("sids")
             if isinstance(sids, list) and sids:  # borrar SELECCIONADOS
@@ -1195,13 +1278,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                         schedule_store.borrar(str(x)); n += 1
                     except Exception:
                         pass
-                _audit("schedule:borrar", f"masivo {n}")
+                _audit("schedules:borrar", f"masivo {n}")
                 return _json({"ok": True, "deleted": n})
             sid = str(cuerpo.get("sid", "")).strip()
             if not sid:
                 return _json({"error": "sid requerido"}, 400)
             schedule_store.borrar(sid)
-            _audit("schedule:borrar", sid)
+            _audit("schedules:borrar", sid)
             return _json({"ok": True})
         if sub == "/api/telethon/send-code" and method == "POST":
             from adapters import telethon_login
@@ -1340,8 +1423,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if sub == "/api/whatsapp/blocked" and method == "GET":
             return _whatsapp_proxy("/blocked")
         if sub == "/api/whatsapp/blocked/clear" and method == "POST":
-            _audit("whatsapp_blocked_clear")
-            return _whatsapp_proxy("/blocked/clear", body={})
+            # Reincluir UNO (body {id: "<jid>"}) o TODOS (body vacío): el auto-excluido es un
+            # contador de fallos, así que "borrar" = poner su contador a cero.
+            jid = str(_body(event).get("id", "")).strip()
+            _audit("whatsapp:reincluir", jid or "todos")
+            return _whatsapp_proxy("/blocked/clear", body={"id": jid} if jid else {})
         if sub == "/api/whatsapp/pair" and method == "POST":
             numero = "".join(c for c in str(_body(event).get("number", "")) if c.isdigit())
             # Vincular BORRA la sesión guardada (clearOnStart en el servicio): queda auditado.
@@ -2272,6 +2358,21 @@ html[data-theme="light"] .wa-code{color:var(--ok-tint)}
   .wa-code{font-size:26px;letter-spacing:4px;flex:1 1 100%}
   .wa-code-box button{width:100%}
 }
+/* Formulario DENTRO de un modal (editar un programado): rejilla de 2 columnas. Anula el
+   white-space:pre-line del cuerpo del modal, que en un formulario deja huecos fantasma. */
+.se-form{white-space:normal;display:grid;grid-template-columns:1fr 1fr;gap:0 16px;
+  max-height:min(64vh,560px);align-items:start}
+.se-form>div{min-width:0}
+.se-form>.se-w{grid-column:1/-1}
+.se-form label{display:block;margin-top:12px}
+.se-form input,.se-form select,.se-form textarea{width:100%;margin-top:4px}
+.se-form textarea{min-height:112px;resize:vertical;white-space:pre-wrap}
+.se-form .chan-row{margin-top:4px}
+@media (max-width:640px){ .se-form{grid-template-columns:1fr} }
+/* Auto-excluidos de WhatsApp: una fila por contacto con su botón de reincluir. */
+.blk-row{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--bd)}
+.blk-row:last-child{border-bottom:none}
+.blk-who{flex:1;min-width:0;overflow-wrap:anywhere}
 </style></head><body>
 <!-- Iconos de marca reutilizables (Telegram / WhatsApp) para mostrar junto a la info de cada canal. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -2877,7 +2978,10 @@ function dsModal(o){ o=o||{}; return new Promise(resolve=>{
   const inp=d.querySelector('#ds_modal_input'); setTimeout(()=>{ (inp||d.querySelector('[data-a="k"]')).focus(); },40);
   const no=o.input?null:(o.noCancel?true:false);
   function close(v){ document.removeEventListener('keydown',onKey); ov.remove(); resolve(v); }
-  function onKey(e){ if(e.key==='Escape') close(no); else if(e.key==='Enter') close(o.input?(inp?inp.value:''):true); }
+  // Enter dentro de un <textarea> (o con Shift) es un salto de línea, NO «Aceptar»: los modales con
+  // formulario (editar un programado) llevan textarea y perderían el mensaje a medio escribir.
+  function onKey(e){ if(e.key==='Escape') close(no);
+    else if(e.key==='Enter' && !e.shiftKey && !(e.target&&e.target.tagName==='TEXTAREA')) close(o.input?(inp?inp.value:''):true); }
   ov.addEventListener('mousedown',e=>{ if(e.target===ov) close(no); });
   const _cb=d.querySelector('[data-a=c]'); if(_cb) _cb.onclick=()=>close(no);
   d.querySelector('[data-a=k]').onclick=()=>close(o.input?(inp?inp.value:''):true);
@@ -2946,7 +3050,9 @@ async function fpReset(){
   }catch(e){ $('fp_status').textContent=e.message||'No se pudo restablecer.'; }
 }
 // --- usuarios del panel (solo administradores) ---
-let USR_ME='', IS_ADMIN=false;
+// USR_PRINCIPAL: el admin del bootstrap (ADMIN_USER). Lo dice el backend en /api/users, no se
+// adivina: es quien no se puede borrar ni degradar, y su nombre no siempre es "admin".
+let USR_ME='', IS_ADMIN=false, USR_PRINCIPAL='admin';
 // Carga quién soy + mi rol; muestra/oculta la gestión de usuarios según sea admin.
 async function loadMe(){
   try{ const m=await api('/api/me'); USR_ME=m.user||USR_ME; IS_ADMIN=!!m.is_admin;
@@ -2963,9 +3069,12 @@ function usrRow(u){ const me=u.username===USR_ME; const rol=u.role||'admin';
   const toggle = (rol==='admin')
     ? `<button class="ghost" style="padding:4px 9px" onclick="setUserRole('${bcEsc(u.username)}','user')" title="Quitar permisos de administrador">↓ a usuario</button>`
     : `<button class="ghost" style="padding:4px 9px" onclick="setUserRole('${bcEsc(u.username)}','admin')" title="Dar permisos de administrador">↑ a admin</button>`;
+  const editar=`<button class="ghost" style="padding:4px 9px" onclick="editUser('${bcEsc(u.username)}')" title="Editar correo o restablecer contraseña">✏️</button>`;
+  const resto=(u.username===USR_PRINCIPAL)?'<span class="hint">principal</span>'
+    :(toggle+' '+(me?'':`<button class="danger" style="padding:4px 9px" onclick="deleteUser('${bcEsc(u.username)}')">🗑</button>`));
   return `<tr><td><b>${bcEsc(u.username)}</b>${me?' <span class="hint">(tú)</span>':''}</td><td>${bcEsc(u.email||'—')}</td>`+
     `<td>${roleBadge(rol)}</td>`+
-    `<td style="text-align:right;white-space:nowrap">${(u.username==='admin')?'<span class="hint">principal</span>':(toggle+' '+(me?'':`<button class="danger" style="padding:4px 9px" onclick="deleteUser('${bcEsc(u.username)}')">🗑</button>`))}</td></tr>`; }
+    `<td style="text-align:right;white-space:nowrap">${editar+' '+resto}</td></tr>`; }
 function usrGvInit(){ if(GV.usr) return; gvInit('usr',{ size:25, searchId:'usr_search', pagerId:'usr_pager',
   search:(u,q)=> ((u.username||'')+' '+(u.email||'')+' '+(u.role||'')).toLowerCase().includes(q),
   render:(items,meta)=>{ $('usr_rows').innerHTML = items.length? items.map(usrRow).join('') : ('<tr><td colspan="4" class="hint">'+(meta.q?'Sin resultados.':'Sin usuarios.')+'</td></tr>'); } }); }
@@ -2973,7 +3082,7 @@ async function loadUsers(){
   if(!IS_ADMIN) return;
   usrGvInit();
   { const _u=$('usr_rows'); if(_u && !_u.children.length) skelTable('usr_rows',4,3); }
-  try{ const r=await api('/api/users'); USR_ME=r.me||''; const list=r.users||[];
+  try{ const r=await api('/api/users'); USR_ME=r.me||''; USR_PRINCIPAL=r.principal||USR_PRINCIPAL; const list=r.users||[];
     $('usr_n').textContent='· '+list.length;
     gvSet('usr', list);
   }catch(e){}
@@ -3000,6 +3109,26 @@ async function setUserRole(u,role){
   try{ const r=await fetch(BASE+'/api/users/role',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({username:u,role:role})});
     const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status)); toast('✓ Rol actualizado'); loadUsers();
   }catch(e){ toast(e.message||'Error',true); } }
+// EDITAR un usuario: correo y/o contraseña. Restablecer NO pide la contraseña actual (es la vía del
+// administrador cuando alguien la pierde); cambiar la PROPIA sigue siendo «Cambiar contraseña».
+// Los <input> se referencian ANTES de cerrar el modal: al cerrarse quedan desprendidos del DOM
+// pero conservan su .value, así que se leen igual después del await.
+async function editUser(u){
+  const rec=((GV.usr&&GV.usr.all)||[]).find(x=>x.username===u)||{};
+  const p=dsModal({title:'Editar «'+u+'»',okText:'Guardar cambios',
+    html:'<div><label>Correo (para recuperación)</label><input id="eu_email" type="email" placeholder="correo@dominio.com" value="'+bcEsc(rec.email||'')+'"></div>'+
+         '<div style="margin-top:10px"><label>Contraseña nueva <span class="hint">— déjala vacía para no cambiarla</span></label><input id="eu_pw" type="password" placeholder="mínimo 8 caracteres" autocomplete="new-password"></div>'});
+  const refEmail=$('eu_email'), refPw=$('eu_pw');
+  if(!await p) return;
+  const email=((refEmail&&refEmail.value)||'').trim(), pw=(refPw&&refPw.value)||'';
+  const cambiaCorreo = email!==String(rec.email||'');
+  if(!cambiaCorreo && !pw){ toast('Sin cambios','info'); return; }
+  if(pw && pw.length<8){ toast('La contraseña debe tener al menos 8 caracteres',true); return; }
+  const cuerpo={username:u}; if(cambiaCorreo) cuerpo.email=email; if(pw) cuerpo.password=pw;
+  try{ await api('/api/users/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cuerpo)});
+    toast('✓ Usuario actualizado'+(pw?' (contraseña nueva)':'')); loadUsers();
+  }catch(e){ toast(e.message||'Error al guardar',true); }
+}
 async function deleteUser(u){ if(!await confirmModal('¿Borrar el usuario "'+u+'"?',{danger:true,okText:'Borrar'})) return;
   try{ const r=await fetch(BASE+'/api/users/delete',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({username:u})});
     const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status)); toast('✓ Usuario borrado'); loadUsers();
@@ -3415,18 +3544,41 @@ async function queuePurge(){
 // --- Opt-out WhatsApp: contactos auto-excluidos por fallos ---
 async function loadBlocked(){
   try{ const r=await api('/api/whatsapp/blocked'); $('wa_blk_n').textContent='· '+(r.total||0)+' (umbral '+(r.umbral||3)+')';
-    const b=r.blocked||[]; if($('wa_blk_list')) $('wa_blk_list').innerHTML = b.length? b.map(x=>bcEsc(x.name)+' 📞 '+bcEsc(waNum(x))+' — '+x.fallos+' fallos').join('<br>') : 'Ninguno por ahora.';
+    const b=r.blocked||[], box=$('wa_blk_list'); if(!box) return;
+    // Cada auto-excluido se puede reincluir por separado (antes solo existía «todos»).
+    box.innerHTML = b.length? b.map(x=>'<div class="blk-row"><span class="blk-who">'+bcEsc(x.name)+' 📞 '+bcEsc(waNum(x))+' — '+(x.fallos|0)+' fallos</span>'+
+        '<button class="ghost" style="padding:3px 10px;flex:none" onclick="clearBlocked(\''+bcEsc(String(x.id||''))+'\')" title="Volver a incluirlo en los envíos">Reincluir</button></div>').join('')
+      : 'Ninguno por ahora.';
   }catch(e){ if($('wa_blk_n')) $('wa_blk_n').textContent='· servicio inaccesible'; if($('wa_blk_list')) $('wa_blk_list').textContent='—'; }
 }
-async function clearBlocked(){
-  if(!await confirmModal('¿Reincluir a TODOS los auto-excluidos? Volverán a recibir envíos.',{okText:'Reincluir'})) return;
-  try{ await api('/api/whatsapp/blocked/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); toast('✓ Reincluidos'); loadBlocked(); }
+// Sin `id` reincluye a TODOS (botón de la tarjeta); con `id`, solo a ese contacto.
+async function clearBlocked(id){
+  const uno=!!id;
+  if(!await confirmModal(uno?'¿Reincluir a este contacto? Volverá a recibir envíos.'
+                            :'¿Reincluir a TODOS los auto-excluidos? Volverán a recibir envíos.',{okText:'Reincluir'})) return;
+  try{ await api('/api/whatsapp/blocked/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(uno?{id:String(id)}:{})});
+    toast(uno?'✓ Contacto reincluido':'✓ Reincluidos'); loadBlocked(); }
   catch(e){ toast('No se pudieron reincluir los contactos',true); }
 }
 // --- Auditoría (acciones del panel) ---
-function auditRow(x){ return `<tr><td>${bcFmtTime(x.ts)}</td><td>${bcEsc(x.user)}</td><td><b>${bcEsc(x.action)}</b></td><td style="color:var(--mut)">${bcEsc(x.detail)}</td></tr>`; }
+// Las acciones se guardan como `entidad:accion` (ver _audit en admin.py, misma palabra que la ruta
+// HTTP) y aquí se traducen a español legible; el título del <td> conserva la clave cruda.
+const ACC_ENT={users:'Usuarios',config:'Configuración',patterns:'Exclusiones',subscribers:'Contactos',
+  broadcasts:'Difusiones',plans:'Envíos por partes',schedules:'Programados',queue:'Cola de envío',
+  dlq:'Atascados',audit:'Auditoría',telethon:'Cuenta de Telegram',whatsapp:'WhatsApp'};
+const ACC_VRB={crear:'crear',actualizar:'editar',borrar:'borrar',guardar:'guardar',rol:'cambiar rol',
+  'cambiar-clave':'cambiar contraseña','reset-clave':'restablecer contraseña',cancelar:'cancelar',
+  'cancelar-pendientes':'cancelar pendientes',activar:'activar',pausar:'pausar',vaciar:'vaciar',
+  reintentar:'reintentar',enviar:'enviar',programar:'programar',rechazado:'rechazado (guardia)',
+  reincluir:'reincluir',pair:'vincular',reset:'limpiar sesión',sync:'re-sincronizar contactos',
+  'send-code':'pedir código','sign-in':'iniciar sesión',logout:'cerrar sesión',
+  'refresh-contacts':'actualizar contactos'};
+function accLabel(a){ const s=String(a||''), i=s.indexOf(':');
+  if(i<0) return s;  // acciones antiguas (antes de normalizar los nombres) se muestran tal cual
+  const e=s.slice(0,i), v=s.slice(i+1); return (ACC_ENT[e]||e)+' · '+(ACC_VRB[v]||v); }
+function auditRow(x){ return `<tr><td>${bcFmtTime(x.ts)}</td><td>${bcEsc(x.user)}</td><td><b title="${bcEsc(x.action)}">${bcEsc(accLabel(x.action))}</b></td><td style="color:var(--mut)">${bcEsc(x.detail)}</td></tr>`; }
 function auditGvInit(){ if(GV.audit) return; gvInit('audit',{ size:25, searchId:'audit_search', pagerId:'audit_pager',
-  search:(x,q)=> ((x.action||'')+' '+(x.detail||'')+' '+(x.user||'')).toLowerCase().includes(q),
+  search:(x,q)=> ((x.action||'')+' '+accLabel(x.action)+' '+(x.detail||'')+' '+(x.user||'')).toLowerCase().includes(q),
   render:(items,meta)=>{ const t=$('audit_rows'); if(!t) return;
     t.innerHTML = items.length? items.map(auditRow).join('') : ('<tr><td colspan="4" class="hint">'+(meta.q?'Sin resultados.':'Sin registros aún.')+'</td></tr>'); } }); }
 async function loadAudit(){
@@ -3643,6 +3795,7 @@ function renderLists(ch){ const cont=$(listsBox(ch)); cont.innerHTML='';
       `<button class="ghost" style="padding:3px 9px" onclick="listMembers('${ch}',${i})" title="Ver/editar miembros">${l.ids.length} miembros ›</button>`+
       `<button class="sec" onclick="addToList('${ch}',${i})">+ marcados</button>`+
       `<button class="ghost" onclick="removeFromList('${ch}',${i})">− marcados</button>`+
+      `<button class="ghost" onclick="renameList('${ch}',${i})" title="Renombrar la lista">✏️</button>`+
       `<button class="ghost" onclick="delList('${ch}',${i})">🗑</button>`;
     cont.appendChild(row); });
   document.querySelectorAll(`input[name=mode_${ch}]`).forEach(r=>r.checked=(r.value===((TGT[ch]||{}).mode||'all'))); }
@@ -3685,6 +3838,36 @@ function listMembers(ch,i){
       const before=(l.ids||[]).length; l.ids=(l.ids||[]).filter(id=>byId[String(id)]); const removed=before-l.ids.length;
       if(removed){ refresh(); await persistListsQuiet(ch); toast('✓ '+removed+' huérfano(s) quitado(s)'); } else toast('No hay huérfanos'); }
   });
+}
+// RENOMBRAR una lista. El NOMBRE es su identificador en todas partes (listas activas del canal,
+// «lista del envío automático» y los envíos programados), así que renombrar tiene que ARRASTRAR esas
+// referencias: si no, el envío automático o un programado apuntarían a una lista que ya no existe.
+async function renameList(ch,i){
+  const l=(LISTS[ch]||[])[i]; if(!l) return;
+  const viejo=l.name;
+  const nuevo=((await promptModal('Nombre nuevo para la lista "'+viejo+'":',{title:'Renombrar lista',placeholder:viejo,okText:'Renombrar'}))||'').trim();
+  if(!nuevo || nuevo===viejo) return;
+  if((LISTS[ch]||[]).some((x,j)=>j!==i && x.name===nuevo)){ toast('Ya existe una lista con ese nombre',true); return; }
+  const campo=ch==='telegram'?'telegram_list':'whatsapp_list';
+  let afectados=[];
+  try{ afectados=((await api('/api/schedules')).schedules||[]).filter(s=>s[campo]===viejo); }catch(e){}
+  if(afectados.length && !await confirmModal(afectados.length+' envío(s) programado(s) usan esta lista; se actualizarán al nombre nuevo.',{title:'Renombrar lista',okText:'Renombrar'})) return;
+  l.name=nuevo;
+  TGT[ch].lists=(TGT[ch].lists||[]).map(x=>x===viejo?nuevo:x);
+  const cuerpo=ch==='telegram'?{telegram_lists:LISTS.telegram,telegram_target:TGT.telegram}
+                              :{whatsapp_lists:LISTS.whatsapp,whatsapp_target:TGT.whatsapp};
+  // La lista del envío automático viaja en el MISMO guardado (si no, loadCfg la dejaría apuntando al
+  // nombre viejo y el envío automático se quedaría sin destino).
+  const asel=$('auto_'+ch+'_list');
+  if(asel && asel.value===viejo) cuerpo['auto_'+ch+'_list']=nuevo;
+  try{ await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cuerpo)}); }
+  catch(e){ l.name=viejo; toast('No se pudo renombrar',true); loadCfg(); return; }
+  for(const s of afectados){
+    try{ await api('/api/schedules/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid:s.sid,[campo]:nuevo})}); }catch(e){}
+  }
+  renderLists(ch); loadCfg();
+  if(afectados.length){ try{ loadSchedules(); }catch(e){} }
+  toast('✓ Lista renombrada a "'+nuevo+'"'+(afectados.length?(' · '+afectados.length+' programado(s) actualizado(s)'):''));
 }
 function addList(ch){ const inp=$(ch==='telegram'?'tg_newlist':'wa_newlist'); const n=inp.value.trim(); if(!n)return;
   if(LISTS[ch].some(l=>l.name===n)){ toast('Ya existe una lista con ese nombre',true); return; }
@@ -3881,6 +4064,12 @@ function tzSyncLabels(){ document.querySelectorAll('.tz-lbl').forEach(e=>{ e.tex
 function schedTzLabel(){ const t=schedTz(), s=t<0?'-':'+', a=Math.abs(t); return 'UTC'+s+String(Math.floor(a/60)).padStart(2,'0')+':'+String(a%60).padStart(2,'0'); }
 function schedEpoch(sv){ const m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(sv||''); if(!m) return 0;
   const utc=Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]); return Math.floor((utc - schedTz()*60000)/1000); }
+// Inverso de schedEpoch: epoch → valor de un <input type="datetime-local"> EN LA ZONA CONFIGURADA
+// (para precargar el formulario de edición con la misma hora que se ve en la tabla).
+function schedLocalInput(ep){ if(!ep) return '';
+  const d=new Date((Number(ep)*1000)+schedTz()*60000), p=n=>String(n).padStart(2,'0');
+  if(isNaN(d)) return '';
+  return d.getUTCFullYear()+'-'+p(d.getUTCMonth()+1)+'-'+p(d.getUTCDate())+'T'+p(d.getUTCHours())+':'+p(d.getUTCMinutes()); }
 // --- selección de contactos (picker) en el compositor ---
 let BC_TG_SEL=new Set(), BC_WA_SEL=new Set();
 function bcSel(ch){ return ch==='tg'?BC_TG_SEL:BC_WA_SEL; }
@@ -4135,7 +4324,8 @@ function sgRow(s){
       <td>${bcEsc(sgDesc(s))}</td>
       <td>${s.enabled?sgWhen(s.next_run):'—'}</td>
       <td style="white-space:nowrap;text-align:right">
-        <button class="sec" style="padding:5px 10px" onclick="sgToggle('${s.sid}',${s.enabled?'false':'true'})">${s.enabled?'Pausar':'Activar'}</button>
+        <button class="ghost" style="padding:5px 10px" onclick="sgEdit('${s.sid}')" title="Editar mensaje, canales, listas y horario">✏️ Editar</button>
+        <button class="sec" style="padding:5px 10px;margin-left:6px" onclick="sgToggle('${s.sid}',${s.enabled?'false':'true'})">${s.enabled?'Pausar':'Activar'}</button>
         <button class="danger" style="padding:5px 10px;margin-left:6px" onclick="sgDelete('${s.sid}')">Borrar</button>
       </td></tr>`;
 }
@@ -4164,6 +4354,77 @@ async function sgDeleteAll(){ if(!await confirmModal('¿Borrar TODOS los mensaje
 async function sgToggle(sid,en){ try{ await api('/api/schedules/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid,enabled:en})}); loadSchedules(); }catch(e){ toast('No se pudo cambiar el estado del programado',true); } }
 async function sgDelete(sid){ if(!await confirmModal('¿Borrar este mensaje programado?',{danger:true,okText:'Borrar'})) return;
   try{ await api('/api/schedules/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sid})}); toast('✓ Borrado'); loadSchedules(); }catch(e){ toast('No se pudo borrar el programado',true); } }
+// ---- EDITAR un programado (CRUD completo: crear en ✍️ Enviar, leer/pausar/borrar aquí y ahora editar) ----
+function sgOpts(canal,elegida){ return ((LISTS&&LISTS[canal])||[])
+  .map(l=>`<option value="${bcEsc(l.name)}"${l.name===elegida?' selected':''}>${bcEsc(l.name)} (${(l.ids||[]).length})</option>`).join(''); }
+// `borrador` (opcional) reabre el formulario con lo que la persona había escrito cuando la validación
+// falla: perder un mensaje largo por un campo mal puesto sería el peor final posible.
+async function sgEdit(sid,borrador){
+  const orig=((GV.sg&&GV.sg.all)||[]).find(x=>x.sid===sid);
+  if(!orig){ toast('Ese envío programado ya no existe',true); loadSchedules(); return; }
+  const s=Object.assign({},orig,borrador||{});
+  const dias=new Set((s.days||[]).map(Number));
+  const chk=(id,on,txt)=>`<label class="chan${on?' on':''}" data-chk="${id}" role="checkbox" tabindex="0" aria-checked="${on?'true':'false'}">${txt}</label>`;
+  const p=dsModal({title:'Editar envío programado',okText:'Guardar cambios',wide:true,
+    html:'<div><label style="margin-top:0">Nombre <span class="hint">— opcional</span></label>'+
+           `<input id="se_name" maxlength="80" placeholder="p. ej. Lista de la mañana" value="${bcEsc(s.name||'')}"></div>`+
+         `<div><label style="margin-top:0">Imagen <span class="hint">— URL fija https://</span></label><input id="se_img" placeholder="https://…" value="${bcEsc(s.image_url||'')}"></div>`+
+         `<div class="se-w"><label>Mensaje</label><textarea id="se_text" rows="5">${bcEsc(s.text||'')}</textarea></div>`+
+         '<div><label>Canales</label><div class="chan-row" id="se_chans">'+chk('se_tg',!!s.telegram,'Telegram')+chk('se_wa',!!s.whatsapp,'WhatsApp')+'</div></div>'+
+         '<div><label>¿Cuándo se envía?</label><select id="se_type">'+
+           `<option value="once"${s.type==='once'?' selected':''}>📅 Una vez (fecha y hora)</option>`+
+           `<option value="daily"${s.type==='daily'?' selected':''}>🔁 Diario</option>`+
+           `<option value="weekly"${s.type==='weekly'?' selected':''}>🔁 Semanal</option></select></div>`+
+         `<div><label>Lista de Telegram <span class="hint">— vacío: según Contactos</span></label><select id="se_tg_list"><option value="">(según Contactos)</option>${sgOpts('telegram',s.telegram_list)}</select></div>`+
+         `<div><label>Lista de WhatsApp <span class="hint">— obligatoria en WhatsApp</span></label><select id="se_wa_list"><option value="">— elige una lista —</option>${sgOpts('whatsapp',s.whatsapp_list)}</select></div>`+
+         `<div id="se_once_box"><label>Fecha y hora <span class="hint tz-lbl">${bcEsc(tzLabel())}</span></label>`+
+           `<input type="datetime-local" id="se_run_at" value="${bcEsc(borrador?(borrador.run_at_str||''):schedLocalInput(s.type==='once'?s.next_run:0))}"></div>`+
+         `<div id="se_at_box"><label>Hora <span class="hint tz-lbl">${bcEsc(tzLabel())}</span></label><input type="time" id="se_at" value="${bcEsc(s.at||'09:00')}"></div>`+
+         '<div class="se-w" id="se_days_box"><label>Días</label><div class="chan-row" id="se_days">'+
+           SG_DAYNAMES.map((d,i)=>`<label class="chan${dias.has(i)?' on':''}" data-d="${i}" role="checkbox" tabindex="0" aria-checked="${dias.has(i)?'true':'false'}" aria-label="${SG_DAYFULL[i]}">${d}</label>`).join('')+'</div></div>'+
+         '<div class="se-w hint">Al guardar se recalcula el próximo envío. Los repetidos van a la lista elegida (no a contactos sueltos).</div>',
+    bodyClass:'se-form'});
+  // Referencias tomadas ANTES de cerrar: al cerrarse los nodos quedan desprendidos pero conservan su valor.
+  const R={name:$('se_name'),text:$('se_text'),img:$('se_img'),tgl:$('se_tg_list'),wal:$('se_wa_list'),
+           ty:$('se_type'),ra:$('se_run_at'),at:$('se_at')};
+  const chans=[...document.querySelectorAll('#se_chans .chan')], btnDias=[...document.querySelectorAll('#se_days .chan')];
+  const cajas={once:$('se_once_box'),at:$('se_at_box'),dias:$('se_days_box')};
+  const marcado=el=>el.classList.contains('on');
+  const alternar=el=>{ const on=!marcado(el); el.classList.toggle('on',on); el.setAttribute('aria-checked',on?'true':'false'); };
+  [...chans,...btnDias].forEach(el=>{ el.addEventListener('click',()=>alternar(el));
+    el.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); alternar(el); } }); });
+  const sync=()=>{ const t=R.ty.value;
+    cajas.once.style.display=t==='once'?'block':'none';
+    cajas.at.style.display=t==='once'?'none':'block';
+    cajas.dias.style.display=t==='weekly'?'block':'none'; };
+  R.ty.addEventListener('change',sync); sync();
+  if(!await p) return;
+  const tipo=R.ty.value, tg=marcado(chans[0]), wa=marcado(chans[1]);
+  const draft={name:R.name.value.trim(), text:R.text.value, image_url:R.img.value.trim(),
+    telegram:tg, whatsapp:wa, telegram_list:R.tgl.value, whatsapp_list:R.wal.value,
+    type:tipo, at:R.at.value, days:btnDias.filter(marcado).map(b=>+b.getAttribute('data-d')),
+    run_at_str:R.ra.value};
+  const falla=(m)=>{ toast(m,true); sgEdit(sid,draft); };  // reabre con lo escrito
+  if(!draft.text.trim()) return falla('El mensaje no puede estar vacío');
+  if(draft.text.length>4096) return falla('El mensaje supera 4096 caracteres');
+  if(!tg && !wa) return falla('Elige al menos un canal');
+  if(wa && !draft.whatsapp_list) return falla('WhatsApp exige elegir una lista (evita mandar a todos)');
+  if(draft.image_url && !/^https:\/\//.test(draft.image_url)) return falla('La imagen debe ser una URL https://');
+  const body={sid, name:draft.name, text:draft.text.trim(), image_url:draft.image_url,
+    telegram:tg, whatsapp:wa, telegram_list:draft.telegram_list, whatsapp_list:draft.whatsapp_list, type:tipo};
+  if(tipo==='once'){ const ep=schedEpoch(draft.run_at_str);
+    if(!ep) return falla('Elige la fecha y la hora');
+    if(ep<=Math.floor(Date.now()/1000)) return falla('La fecha y hora deben ser futuras');
+    body.run_at=ep;
+  }else{
+    if(!/^\d{2}:\d{2}$/.test(draft.at||'')) return falla('Hora inválida (usa HH:MM)');
+    body.at=draft.at;
+    if(tipo==='weekly'){ if(!draft.days.length) return falla('Elige al menos un día de la semana'); body.days=draft.days; }
+  }
+  try{ const r=await api('/api/schedules/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    toast('✓ Programado actualizado · próximo envío '+sgWhen(r&&r.next_run)); loadSchedules();
+  }catch(e){ falla(e.message||'No se pudo guardar'); }
+}
 function bcFmtTime(t){
   if(!t) return '';
   const d=new Date(typeof t==='number'? (t<1e12? t*1000 : t) : t);

@@ -1,6 +1,6 @@
 # Plan de pruebas — Replica (Telegram/WhatsApp broadcasting)
 
-`Actualizado: 2026-08-20 · Suite: 326 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
+`Actualizado: 2026-08-20 · Suite: 358 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
 
 Este plan cubre **qué probar, cómo y con qué criterio de aceptación** en los tres niveles que tiene el
 proyecto: (1) suite automatizada, (2) smoke post-deploy y (3) pruebas E2E manuales por flujo. Incluye
@@ -13,7 +13,7 @@ cambio futuro no los reintroduzca sin que nadie lo note.
 
 | Nivel | Qué valida | Cuándo corre | Herramienta |
 |-------|------------|--------------|-------------|
-| **Unitaria** (326 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints, PWA | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
+| **Unitaria** (358 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints, PWA, CRUD y nomenclatura | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
 | **Sintaxis del servicio Node** | `index.js` y `dynamoAuth.js` parsean | Local, antes de commit | `node --check whatsapp-service/src/*.js` |
 | **Sintaxis del JS del panel** | El JS embebido en `_PAGE` y el `sw.js` parsean (un paréntesis suelto = panel en blanco) | Local, antes de commit | `python scripts/revisar_js_panel.py` |
 | **Smoke visual de la UI** | El panel pinta en claro/oscuro y escritorio/móvil sin errores JS | Tras tocar el panel | `python scripts/capturas_ui.py` → `.build/ui/` |
@@ -45,10 +45,60 @@ CI (`.github/workflows/deploy.yml`): en cada push a `main` corre los tests y, si
 | Adapters | `test_adapters_*` (dynamodb, whatsapp, broadcast_store, telegram…) | Dedup fail-open/estricto + métrica EMF (A8/M10/M30), `/count` dedicado (M16), estados de broadcast (M8), `registrar_error` ordenado (B18), TTL/lotes (M7/M9) |
 | Entrypoints | `test_entrypoint_*` (receiver, worker, admin, dispatcher, poller) | Auth webhook fail-closed, dedup del receiver (A8), pausa/manual del worker (A9/B7), guardia de config (A12), lockout del panel (M26), vinculación WhatsApp por código (`WhatsappPairTests`: número normalizado, auditoría **enmascarada**, códigos de error propagados) |
 | PWA | `test_entrypoint_admin.PwaTests` | Manifest/`sw.js`/iconos **públicos** (sin auth) y con las rutas del stage resueltas, ámbito ampliado (`Service-Worker-Allowed`), el SW **nunca** cachea `/api/`, versión del shell que cambia con el HTML |
+| CRUD | `test_entrypoint_admin.SchedulesCrudTests`, `UsersUpdateTests`, `PanelCrudTests` | Editar programados (hereda lo no enviado, valida igual que crear, no pisa el historial de ejecuciones), editar usuario/restablecer contraseña (solo admin, sin filtrar la clave a la auditoría), y que **cada operación tenga su botón en el panel** (un endpoint sin botón no existe para el usuario) |
+| Nomenclatura | `test_entrypoint_admin.NomenclaturaTests` | Recorre el AST buscando las llamadas a `_audit` y exige `entidad:accion` con la entidad **igual al segmento de la ruta HTTP**, que la entidad exista como ruta y que el panel tenga etiqueta para cada entidad y verbo (`ACC_ENT`/`ACC_VRB`) |
 
 **Regla de trabajo:** todo bug corregido lleva test de regresión con el ID del hallazgo en el nombre
 (`test_a12_…`, `test_m18_…`). Si un test con ID falla, se está reintroduciendo un bug conocido: no
 ajustar el test sin leer el hallazgo en el HANDOFF.
+
+### 2.1 Matriz CRUD por entidad (qué operaciones existen y dónde se prueban)
+
+Leyenda: **C** crear · **R** leer/listar · **U** actualizar · **D** borrar. `—` = no aplica por diseño
+(con el motivo). Todas las rutas cuelgan de `/admin/api/…` y auditan con la clave `entidad:accion`.
+
+| Entidad | Dónde vive | C | R | U | D | Rutas de escritura | Prueba |
+|---|---|:-:|:-:|:-:|:-:|---|---|
+| **Usuarios del panel** | `Config.users` | ✅ | ✅ | ✅ | ✅ | `users` · `users/update` (correo + restablecer clave) · `users/role` · `users/delete` | `UsersUpdateTests`, `RoleTests` · F6, F8.3, **F12.1** |
+| **Configuración** | `Config` (documento único) | — *(la crea el stack)* | ✅ | ✅ | — *(no se borra: se edita)* | `config` | `AdminTests` · F3.2 |
+| **Reglas de exclusión por nombre** | `Config.users[u].patterns` | ✅ | ✅ | ✅ | ✅ | `patterns` (el conjunto se reescribe completo: borrar = quitar la línea) | `test_domain_recipients`, `AdminTests` · F8 |
+| **Contactos / audiencia** | tabla `Subscribers` + agenda de WhatsApp | — *(los trae la fuente: `telethon/refresh-contacts`, `whatsapp/sync`)* | ✅ | ✅ *(incluir/excluir)* | **— deliberado** | `subscribers` | `AdminTests` · F8.3 |
+| **Listas de contactos** | `Config.lists` (TG y WA) | ✅ | ✅ | ✅ *(**renombrar** + miembros)* | ✅ | `config` (viven dentro de la config) | `PanelCrudTests` · **F12.3** |
+| **Difusiones** | tabla `Broadcasts` | ✅ *(al enviar)* | ✅ | — *(historial inmutable: lo escribe el worker)* | ✅ *(= desencolar)* | `broadcast` · `broadcasts/delete` | `AdminTests` · F2, F9.1 |
+| **Envíos por partes** | tabla `Plans` | — *(los crea el fraccionado)* | ✅ | ✅ *(solo `cancel`)* | ✅ | `plans/cancel` · `plans/delete` | `AdminTests` · F4.2, F9.1 |
+| **Programados** | tabla `Schedules` | ✅ | ✅ | ✅ *(**editar** + pausar/activar)* | ✅ | `schedules` · `schedules/update` · `schedules/toggle` · `schedules/delete` | `SchedulesCrudTests` · **F12.2** |
+| **Cola de envío** | SQS principal | — *(encola el dispatcher)* | ✅ | — *(un mensaje en cola no se edita)* | ✅ *(vaciar)* | `queue/purge` | `AdminTests` · F9.2/F9.3 |
+| **Envíos atascados** | SQS DLQ | — | ✅ | ✅ *(reintentar = mover a la principal)* | ✅ *(descartar)* | `dlq/redrive` · `dlq/purge` | `AdminTests` · F9.3 |
+| **Auditoría** | tabla `Audit` (TTL 90 d) | ✅ *(implícita en cada acción)* | ✅ | — *(un registro editable no auditaría nada)* | ✅ *(deja registrado el propio borrado)* | `audit/delete` | `AdminTests`, `NomenclaturaTests` · F8.3 |
+| **Imágenes** | bucket S3 | ✅ | — | — | — *(ciclo de vida del bucket)* | `image` | `AdminTests` · F2.4 |
+| **Auto-excluidos de WhatsApp** | contador de fallos del servicio Node | — *(lo escribe el servicio al acumular fallos)* | ✅ | — | ✅ *(**uno solo** o todos)* | `whatsapp/blocked/clear` | `PanelCrudTests` · **F12.4** |
+| **Conexión de Telegram** | `Config` + sesión Telethon | ✅ | ✅ | ✅ | ✅ *(cerrar sesión)* | `telethon/{send-code,sign-in,refresh-contacts,logout}` · `telegram/webhook` | `TelegramAccountTests` · F7 |
+| **Conexión de WhatsApp** | sesión Baileys en DynamoDB | ✅ *(vincular)* | ✅ | ✅ *(sync)* | ✅ *(reset)* | `whatsapp/{pair,sync,reset}` | `WhatsappPairTests` · F7 |
+
+Las tres ausencias son decisiones, no huecos — si alguien las «arregla», rompe una garantía:
+
+- **Contactos sin D:** dar de baja a alguien se expresa como **exclusión reversible** (por número o por
+  regla de nombre). En modo bot un borrado sería irreversible (la agenda no se puede reconstruir), y por
+  eso las tablas de contactos tampoco tienen «eliminar todos». Ver HANDOFF.
+- **Difusiones y envíos por partes sin U:** son el registro de lo que pasó. Editarlos falsearía el
+  historial y el comparador de precios; para cambiar algo se crea un envío nuevo.
+- **Imágenes solo con C:** es media de solo escritura, referenciada **por URL** desde el compositor y los
+  programados. Borrar una imagen usada por un repetido lo dejaría enviando un enlace roto: se limpia por
+  ciclo de vida del bucket, no a mano.
+
+### 2.2 Nomenclatura: un nombre significa lo mismo en todas partes
+
+Regla verificada por `NomenclaturaTests` (falla el CI si se rompe):
+
+| Eje | Convención | Ejemplo |
+|---|---|---|
+| Clave de auditoría | `entidad:accion`, verbo en infinitivo | `schedules:actualizar` |
+| Entidad | **exactamente** el segmento de la ruta HTTP | `schedules` ↔ `/api/schedules` |
+| Ruta de escritura | `POST /api/<entidad>/update` y `/delete` como formas canónicas; los verbos propios se mantienen cuando la operación no es un update genérico | `/api/users/update`, `/api/schedules/toggle` |
+| Etiqueta del panel | cada entidad y cada verbo tienen su traducción al español en `ACC_ENT`/`ACC_VRB` | `schedules:actualizar` → «Programados · editar» (la clave cruda queda en el `title`) |
+
+Al añadir una acción nueva hay que tocar **los tres sitios** (ruta, `_audit`, etiqueta del panel); si
+falta alguno, `NomenclaturaTests` lo dice con el nombre de la acción que falla.
 
 ---
 
@@ -207,6 +257,41 @@ teléfono donde está WhatsApp: **Ajustes → 🔌 Conexiones → Vincular Whats
 9. **Accesibilidad**: con Tab el primer foco es «Saltar al contenido»; ✅ la pestaña activa se anuncia
    (`aria-current`) y los avisos se leen por lector de pantalla (`aria-live`).
 
+### F12 — CRUD de entidades (editar sin borrar y volver a crear)
+> Cubre las operaciones que faltaban (§2.1). Precondición: `sending_enabled=False` y listas de prueba.
+
+1. **Usuario: editar correo y restablecer contraseña.** Ajustes → 👤 Acceso → Usuarios del panel → **✏️**
+   en una fila que no sea la tuya.
+   - ✅ Cambiar solo el correo guarda y **no** invalida la contraseña (la persona sigue entrando con la suya).
+   - ✅ Escribir una contraseña nueva la restablece **sin pedir la actual** (es el caso "se le olvidó");
+     la persona entra con la nueva y no con la vieja.
+   - ✅ Dejar los dos campos vacíos → «Sin cambios», no un guardado fantasma. Contraseña de <8 → error.
+   - ✅ Con un usuario de rol **Usuario**: el botón ✏️ no está y la llamada directa a la API da **403**.
+   - ✅ En 🛠️ Auditoría queda «Usuarios · editar» con *qué* se cambió (correo/contraseña) y **nunca la clave**.
+   - ✅ El admin principal se identifica solo (lo dice el backend): el panel no asume que se llama `admin`.
+2. **Programado: editar en vez de borrar y rehacer.** 📡 Actividad → Programados → **✏️ Editar**.
+   - ✅ El formulario abre **con todo lo que ya tenía** (texto, canales, listas, frecuencia, hora, días) y
+     se ve completo en móvil (una columna) y en escritorio (dos).
+   - ✅ Cambiar solo el texto conserva canales/listas/horario y **recalcula el próximo envío**.
+   - ✅ Cambiar de *diario* a *semanal* exige días; quitar la lista de WhatsApp se rechaza; una imagen que
+     no empiece por `https://` se rechaza — **las mismas reglas que al crear**.
+   - ✅ Un error no pierde lo escrito: el formulario vuelve a abrirse con el borrador y el aviso.
+   - ✅ El contador de ejecuciones y la última ejecución **no se reinician** al editar.
+   - ✅ Pausar/reanudar sigue funcionando y la auditoría distingue «activar» de «pausar».
+3. **Lista de contactos: renombrar arrastrando las referencias.** 👥 Contactos → **✏️** en una lista.
+   - ✅ Renombrar avisa **cuántos programados** apuntan a esa lista y los actualiza al confirmar.
+   - ✅ Si la lista era la del **envío automático**, el nuevo nombre queda elegido ahí (no se queda apuntando
+     al nombre viejo → si no, F3.4: deja de difundir). Se guarda en una sola operación.
+   - ✅ Nombre duplicado → error antes de tocar nada. Si el guardado falla, el nombre viejo se restaura.
+4. **Auto-excluido de WhatsApp: reincluir a UNO.** Ajustes → 🔌 Conexiones (WhatsApp) → «Auto-excluidos
+   por fallos».
+   - ✅ Cada contacto trae su botón **Reincluir**: vuelve a recibir envíos y los demás siguen excluidos.
+   - ✅ «Reincluir a todos» sigue disponible. ⚠️ Requiere el servicio Node redesplegado; con la versión
+     anterior el botón por contacto limpia **todos** los contadores (superconjunto inocuo, no un error).
+5. **Auditoría legible.** Ajustes → 🛠️ Auditoría: ✅ las acciones se leen en español («Programados · editar»)
+   y el buscador encuentra tanto por la etiqueta como por la clave cruda; los registros antiguos (anteriores
+   a normalizar los nombres) siguen mostrándose tal cual, sin huecos.
+
 ---
 
 ## 5. Matriz de regresión (bugs corregidos → prueba que lo protege)
@@ -228,6 +313,10 @@ teléfono donde está WhatsApp: **Ajustes → 🔌 Conexiones → Vincular Whats
 | «Una vez» diferido | Un 📅 «Una vez» sale YA (no se difiere) con el fraccionado apagado o sin store de planes | `test_diferido_crea_plan_aunque_el_fraccionado_este_apagado`, `test_diferido_sin_store_de_planes_se_rechaza` (broadcasting) | F4.1 |
 | tz UTC=0 | Offset horario 0 (UTC) tratado como ausente → ventana y `next_run` mal calculados | `test_dentro_y_fuera_utc` (scheduling), `test_zona_horaria_utc_menos_5` (schedules) | F4.1 / F2.2 |
 | Init pestaña Enviar | La pestaña ✍️ Enviar carga en blanco (sin compositor ni listas) al entrar directo | — (panel/SPA, sin suite) | F2.1 |
+| Editar programado | Editar deja pasar lo que crear rechaza (WA sin lista → toda la agenda), pierde canales/horario no enviados o reinicia el historial de ejecuciones | `SchedulesCrudTests` (`…valida_igual_que_crear`, `…hereda_lo_que_no_se_manda`, `…no_pisa_el_historial…`) | F12.2 |
+| Renombrar lista | Renombrar deja `auto_<canal>_list` y los programados apuntando al nombre viejo → el envío automático deja de difundir (variante de M25) | `PanelCrudTests.test_renombrar_una_lista` | F12.3 / F3.4 |
+| Restablecer contraseña | Un usuario sin rol admin restablece la clave de otro; o la clave acaba escrita en la auditoría | `UsersUpdateTests` (`…un_usuario_normal_no_puede…`, `…no_registra_la_contrasena…`) | F12.1 |
+| Nomenclatura | Una acción nueva se audita con un nombre distinto al de su ruta o sin etiqueta → la auditoría muestra jerga o queda ilegible | `NomenclaturaTests` (AST de `_audit` + `ACC_ENT`/`ACC_VRB`) | F12.5 |
 
 ---
 

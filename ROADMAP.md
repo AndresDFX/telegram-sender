@@ -1,8 +1,9 @@
 # Replica — Roadmap (qué falta para avanzar)
 
-> _Actualizado 2026-08-20 (el panel es una **PWA instalable** con tema claro/oscuro y navegación inferior
-> en móvil; antes, 2026-07-20: panel UX renovado con nombres sin jerga, buscador/paginación/eliminar-todos,
-> borrar = desencolar, cola en vivo, detalle enriquecido, responsive). Reemplaza la hoja original de
+> _Actualizado 2026-08-20 (**CRUD completo por entidad + nomenclatura normalizada** y plan de pruebas con
+> matriz CRUD; antes, mismo día: el panel es una **PWA instalable** con tema claro/oscuro y navegación
+> inferior en móvil; antes, 2026-07-20: panel UX renovado con nombres sin jerga, buscador/paginación/
+> eliminar-todos, borrar = desencolar, cola en vivo, detalle enriquecido, responsive). Reemplaza la hoja original de
 > 2026-06-07 (diseño webhook 1:1), hoy superada. El histórico queda en el historial de git._
 
 **Estado actual:** la plataforma **funciona y está desplegada** (AWS + Render), hoy **pausada**
@@ -28,7 +29,9 @@ de bot/cuenta (bot o userbot) · panel admin moderno (Basic Auth) · **design sy
 **nomenclatura sin jerga** y **diseño responsive** · **vinculación de WhatsApp guiada por código desde
 el mismo teléfono** (QR como alternativa) · **PWA instalable** (manifest + service worker +
 iconos, atajos, aviso de versión nueva y de sin conexión), **tema claro/oscuro** y **navegación inferior
-en móvil**. 326 tests.
+en móvil** · **CRUD completo por entidad** (editar programados, editar usuario/restablecer contraseña,
+renombrar listas arrastrando referencias, reincluir un auto-excluido de WhatsApp) con **nomenclatura
+normalizada** `entidad:accion`. 358 tests.
 
 ---
 

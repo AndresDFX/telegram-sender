@@ -54,9 +54,12 @@ va a alguien, a quién y cuándo.
 2. Te comparte la URL del panel y la contraseña temporal **por un canal seguro** (nunca por chat plano).
 3. En tu primer ingreso: **Ajustes → 👤 Acceso → Cambiar contraseña**. Usa una de 8+ caracteres.
 4. Si la olvidas: «¿Olvidaste tu contraseña?» en el login te envía un código al correo registrado.
+5. Si el correo del código ya no te llega (cambiaste de correo, por ejemplo), el administrador puede
+   **corregir tu correo o darte una contraseña nueva** desde el ✏️ de tu fila en **Usuarios del panel**
+   — sin borrar tu usuario y sin necesitar tu contraseña actual. Cámbiala en cuanto entres.
 
 > Con el rol *Usuario* puedes operar todo el flujo de envíos. Lo único reservado al administrador es
-> gestionar usuarios/roles del panel.
+> gestionar usuarios/roles del panel (crear, editar correo, restablecer contraseñas, cambiar rol, borrar).
 
 ## 3. Qué compartes con el administrador y qué es solo tuyo
 
@@ -131,8 +134,11 @@ Notas:
    de sus modos).
 3. Para elegir a quién enviar, marca ☑ las listas que quieras usar y abajo elige **¿A quién se envía?**:
    *Todos mis contactos*, *Solo las listas marcadas* o *Todos, excepto las listas marcadas*.
-4. ⚠️ **No renombres ni borres listas que no creaste**: si una lista está elegida como destino del
-   envío automático y desaparece, el sistema deja de difundir y lo marca como error.
+4. **Renombrar una lista:** el botón **✏️** de su fila. El panel te avisa cuántos envíos programados usan
+   esa lista y, al confirmar, **los cambia solos** (y también la «Lista del envío automático» si era esa),
+   así que el nuevo nombre no deja nada apuntando al vacío. No se permiten dos listas con el mismo nombre.
+5. ⚠️ **No borres listas que no creaste**: si una lista está elegida como destino del envío automático y
+   **desaparece**, el sistema deja de difundir y lo marca como error. Renombrar es seguro; borrar no.
 
 Para **dejar de enviarle a alguien** no hace falta borrar el contacto: márcalo y usa **Excluir
 marcados**, o escribe una regla en **"⛔ Excluir si el nombre contiene…"** (una palabra por línea,
@@ -150,8 +156,15 @@ No hay un formulario aparte: todo se hace desde el compositor único **✍️ En
 - **Una sola vez a fecha/hora**: usa en cambio el modo **📅 Una vez** (ver §5).
 
 Ambos respetan la ventana horaria y el ritmo anti-baneo del sistema. Para gestionar los repetidos
-ya creados ve a **📡 Actividad → Programados**: ahí aparece la lista y puedes **pausar / reanudar /
-borrar** los tuyos (también con buscador y paginación).
+ya creados ve a **📡 Actividad → Programados**: ahí aparece la lista y puedes **editar / pausar /
+reanudar / borrar** los tuyos (también con buscador y paginación).
+
+**Editar un repetido (✏️ Editar):** no hace falta borrarlo y volver a crearlo. Se abre el mismo
+formulario con todo lo que ya tenía (texto, canales, listas, frecuencia, hora, días) y cambias solo lo
+que quieras; el resto se conserva y el panel recalcula el **próximo envío**. Se aplican las mismas reglas
+que al crear (texto obligatorio, al menos un canal, WhatsApp exige lista, imagen por URL `https://`,
+semanal exige días). Editar **no reinicia el historial** del programado: sigue mostrando cuántas veces se
+ha enviado y cuándo fue la última.
 
 ## 8. Detener, borrar y limpiar envíos
 
@@ -201,7 +214,7 @@ estado EN PAUSA se ve en **ámbar**; el rojo se reserva solo para fallos):
 |---|---|
 | "No llegan capturas nuevas" | ¿La captura está activa? (🏠 Inicio → switch **"Capturar listas del canal"**). ¿El canal publicó algo con texto? Los posts SOLO-imagen sin caption no se capturan. |
 | "Mi envío no salió" | Ábrelo en **📡 Actividad → Historial**: cada fila muestra la razón del fallo. ¿Elegiste lista/destinatarios? ¿Era programado y aún no llega la hora (zona horaria del sistema)? |
-| "A un contacto no le llegó" | Puede estar excluido — recuerda que se aplican las exclusiones de TODOS los usuarios, o el contacto bloqueó al remitente. |
+| "A un contacto no le llegó" | Puede estar excluido — recuerda que se aplican las exclusiones de TODOS los usuarios, o el contacto bloqueó al remitente. En WhatsApp, si le fallaron varios envíos seguidos el sistema lo **auto-excluye**: el administrador lo ve en Ajustes → 🔌 Conexiones → «Auto-excluidos por fallos» y puede pulsar **Reincluir** solo en ese contacto. |
 | "Hay envíos atascados" | 📡 Actividad → Problemas: **reintenta** los atascados; si algo quedó pegado, **Vaciar cola**. |
 | "El panel me bloqueó el ingreso" | 5 intentos fallidos bloquean 5 minutos. Espera y reintenta, o usa el reseteo por correo. |
 | "Sale 'EN PAUSA' (en ámbar) en 🏠 Inicio" | Es el estado del envío AUTOMÁTICO. Tus envíos manuales salen igual. |

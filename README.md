@@ -287,13 +287,17 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
 
 ```powershell
 docker compose -f docker/docker-compose.yml up --build     # stack local (DynamoDB + webhook inline)
-python -m unittest discover -s tests                        # 326 tests (sin AWS; boto3 perezoso + fakes)
+python -m unittest discover -s tests                        # 358 tests (sin AWS; boto3 perezoso + fakes)
 ```
 
 Los tests cubren markup, composición, recipients/listas + exclusión por patrón, cliente Telegram
 (403/429/5xx), envío por lote, SQS, receptor, worker (parcial + estados), dispatcher/planes, schedules,
-onboarding, WhatsApp forwarder, email_sender (Resend), BroadcastStore (estados), envío manual y la **PWA**
-(manifest/sw/iconos públicos, ámbito, versión del shell).
+onboarding, WhatsApp forwarder, email_sender (Resend), BroadcastStore (estados), envío manual, la **PWA**
+(manifest/sw/iconos públicos, ámbito, versión del shell), el **CRUD por entidad** (editar programados y
+usuarios, renombrar listas) y la **nomenclatura** de las acciones auditadas.
+
+El plan completo (matriz CRUD por entidad, smoke post-deploy, flujos E2E F1–F12 y matriz de regresión por
+bug) está en [docs/PLAN_PRUEBAS.md](docs/PLAN_PRUEBAS.md).
 
 El panel es una cadena HTML/JS embebida, así que su JS no lo cubre Python; hay utilidades aparte:
 
@@ -332,7 +336,10 @@ Servicio WhatsApp: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`, `BROADCASTS_TABLE`, 
 - ✅ **PWA instalable** (manifest + service worker + iconos, atajos, aviso de versión nueva y de sin conexión),
   **tema claro/oscuro** y **navegación inferior en móvil** — desplegado y verificado en el stack `dev`.
 - ✅ Despliegue reproducible (`package-lambda.ps1` + `deploy.ps1`); **CI en GitHub Actions** (tests en cada
-  push; deploy gated por `DEPLOY_ENABLED`); **326 tests**.
+  push; deploy gated por `DEPLOY_ENABLED`); **358 tests**.
+- ✅ **CRUD completo por entidad** (editar programados, editar usuario/restablecer contraseña, renombrar
+  listas arrastrando referencias, reincluir un auto-excluido de WhatsApp) con **nomenclatura normalizada**
+  `entidad:accion` alineada con las rutas HTTP y verificada por tests.
 - ⏳ Secretos en SSM/Secrets Manager; encriptación KMS de la tabla config; rate-limit distribuido del login.
 - ⚠️ WhatsApp/userbot: riesgo de baneo por envío masivo — usar listas pequeñas y delays altos.
 
