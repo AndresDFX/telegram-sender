@@ -6,6 +6,9 @@ import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb'
 import express from 'express'
 import pino from 'pino'
 import qrcode from 'qrcode'
+import { createHash } from 'node:crypto'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { useDynamoAuthState } from './dynamoAuth.js'
 
 const PORT = process.env.PORT || 8080
@@ -13,6 +16,41 @@ const TOKEN = process.env.WHATSAPP_TOKEN || ''
 const TABLE = process.env.WHATSAPP_AUTH_TABLE || 'telegram-sync-dev-whatsapp-auth'
 const SESSION_ID = process.env.WHATSAPP_SESSION_ID || 'default'
 const SEND_DELAY_MS = Number(process.env.SEND_DELAY_MS || 2000)
+
+// Identidad del BUILD que está corriendo, para poder comprobar desde fuera si el host
+// (Render) ya desplegó el último commit — sin esto no hay forma de distinguir "auto-deploy
+// activo" de "auto-deploy apagado y llevo semanas con código viejo". Render inyecta
+// RENDER_GIT_COMMIT/BRANCH en cada build; en otros hosts (Fly/Koyeb/local) se puede pasar
+// GIT_COMMIT a mano. Solo se expone el prefijo corto: identifica el build sin revelar más.
+const BUILD_COMMIT = (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || '').trim()
+
+// Huella del CÓDIGO que corre, calculada al arrancar sobre los propios ficheros. No depende de
+// que el host inyecte variables (Render sí lo hace, Fly/Koyeb/local puede que no), así que
+// siempre hay una forma de comparar "lo desplegado" con "lo que hay en el repo". Se normalizan
+// los CRLF porque el checkout de Windows los tiene y el de Linux no (mismo código, otra huella).
+function huellaFuente() {
+  try {
+    const dir = import.meta.dirname
+    const h = createHash('sha256')
+    for (const f of readdirSync(dir).filter((x) => x.endsWith('.js')).sort()) {
+      h.update(f + '\n')
+      h.update(readFileSync(join(dir, f), 'utf8').replace(/\r/g, ''))
+    }
+    h.update('package.json\n')
+    h.update(readFileSync(join(dir, '..', 'package.json'), 'utf8').replace(/\r/g, ''))
+    return h.digest('hex').slice(0, 12)
+  } catch (e) {
+    return null
+  }
+}
+
+const BUILD = {
+  commit: BUILD_COMMIT ? BUILD_COMMIT.slice(0, 7) : null,
+  branch: (process.env.RENDER_GIT_BRANCH || process.env.GIT_BRANCH || '').trim() || null,
+  src: huellaFuente(),
+  started_at: new Date().toISOString(),
+}
+const uptimeS = () => Math.round((Date.now() - Date.parse(BUILD.started_at)) / 1000)
 
 let sock = null
 let connected = false
@@ -332,11 +370,26 @@ app.get('/', (req, res) =>
       '<h2>Replica · servicio WhatsApp</h2>' +
         `<p>Servicio activo ✓ · ${connected ? 'WhatsApp conectado' : 'WhatsApp NO conectado (escanea el QR)'}</p>` +
         '<p>Endpoints: <code>/health</code> (público), <code>/status</code>, <code>/contacts</code>, <code>/send</code> (requieren token).</p>' +
-        '<p>Configura este servicio (URL + token) desde el panel admin y escanea el QR desde ahí.</p>'
+        '<p>Configura este servicio (URL + token) desde el panel admin y escanea el QR desde ahí.</p>' +
+        `<p style="color:#667">build ${BUILD.commit || BUILD.src || 'desconocido'}${
+          BUILD.branch ? ' · ' + BUILD.branch : ''
+        } · arrancado ${BUILD.started_at}</p>`
     )
 )
 
-app.get('/health', (req, res) => res.json({ ok: true }))
+// Healthcheck del host + sello del build. `ok` se mantiene (es lo que miran el keep-alive del
+// dispatcher y el badge del panel); `commit` permite validar el despliegue sin token
+// (scripts/verificar_deploy_render.py compara este valor con el último commit del repo).
+app.get('/health', (req, res) =>
+  res.json({
+    ok: true,
+    commit: BUILD.commit,
+    branch: BUILD.branch,
+    src: BUILD.src,
+    started_at: BUILD.started_at,
+    uptime_s: uptimeS(),
+  })
+)
 
 // Favicon: logo fan-out de Replica (SVG inline). Sirve la raíz, /qr y cualquier página del servicio.
 const FAVICON =
@@ -384,6 +437,7 @@ app.get('/status', auth, (req, res) =>
     lastError,
     lastPairError,
     contacts: Object.keys(contacts).length,
+    build: BUILD,
   })
 )
 
@@ -673,5 +727,5 @@ app.post('/send', auth, (req, res) => {
   }).catch((e) => log.error({ err: String(e) }, 'enviarLote falló'))
 })
 
-app.listen(PORT, () => log.info(`whatsapp-service en :${PORT}`))
+app.listen(PORT, () => log.info({ build: BUILD }, `whatsapp-service en :${PORT}`))
 restart()
