@@ -70,11 +70,14 @@ src/lambda/
 ├── adapters/       dynamodb.py (subs, dedup, HWM, config, Broadcast/Plan/Schedule/Audit stores), sqs.py,
 │                   telegram.py, telethon_user.py + telethon_login.py (userbot), tme.py (scrape),
 │                   whatsapp.py (forwarder), email_sender.py (Resend), s3.py, config.py
-├── entrypoints/    receiver.py, poller.py, worker.py, dispatcher.py, admin.py (panel + API)
+├── entrypoints/    receiver.py, poller.py, worker.py, dispatcher.py, admin.py (panel + API + PWA),
+│                   pwa_assets.py (iconos PNG de la PWA en base64: el paquete solo copia .py)
 └── wiring.py
 whatsapp-service/   servicio Node/Baileys (Docker) — ver su README
 infra/cloudformation/template.yaml   stack AWS completo
-scripts/            package-lambda.ps1, _build_lambda_pkg.py, deploy.ps1, vincular-whatsapp-local.ps1, generar_sesion.py
+scripts/            package-lambda.ps1, _build_lambda_pkg.py, deploy.ps1, repack_lambda_sin_docker.py,
+                    vincular-whatsapp-local.ps1, generar_sesion.py, generar_iconos_pwa.py,
+                    capturas_ui.py, revisar_js_panel.py, verificar_pwa_desplegada.py
 specs/              especificaciones por fase
 ```
 
@@ -95,6 +98,13 @@ Requisitos: Docker Desktop, AWS CLI v2, Python 3.12. Credenciales AWS en `.env.a
 
 `deploy.ps1` pasa: `SendMode` (bot|userbot), `Telethon*`, `Admin*`, tokens, `WorkerReservedConcurrency`.
 Output `AdminUrl` = panel. Stack actual: `telegram-sync-dev` (us-east-1).
+
+**Sin Docker y solo con cambios de código propio** (no de `requirements.txt`) hay una vía alterna: partir del
+zip que el stack ya tiene desplegado y sustituir dentro los `.py` de `src/lambda`
+(`scripts/repack_lambda_sin_docker.py` — aborta si el artefacto no coincide con `git HEAD`), subirlo y hacer
+`aws cloudformation deploy` pasando **solo** `LambdaCodeS3Key`: los parámetros que no se pasan conservan su
+valor anterior en el stack (`UsePreviousValue`), así que no hacen falta los secretos de `.env.deploy` para
+un redespliegue de código. Instrucciones exactas en el docstring del script.
 
 ### Recursos AWS
 
@@ -172,13 +182,34 @@ técnicos y **responsive** (funciona en celular). **Design system de grids:** ca
   legible**) · **👤 Acceso** (usuarios con roles, correo de recuperación Resend, cambio de contraseña) ·
   **🛠️ Auditoría**.
 
+**PWA instalable** (agosto 2026): el panel se instala como app (Android/iOS/escritorio) desde el propio
+navegador. Sirve `manifest.webmanifest` (nombre, `display: standalone`, iconos 192/512 + **maskable**,
+atajos a Enviar/Actividad/Contactos), `sw.js` (service worker: **network-first** para el shell, cache-first
+para iconos, **nunca** cachea `/api/`) e iconos PNG (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`,
+`apple-touch-icon.png`) — todos **públicos y sin auth** (el navegador los pide sin credenciales), generados
+por `scripts/generar_iconos_pwa.py` y embebidos en base64 en `entrypoints/pwa_assets.py`. El `Service-Worker-Allowed`
+amplía el ámbito por encima de `/admin` para que la app abra desde la raíz del stage. Se responden **antes**
+de construir adaptadores, así que el panel abre aunque el backend esté degradado. Extras de app: botón
+**«Instalar app»** (con instrucciones para iOS, que no tiene `beforeinstallprompt`), aviso **«versión nueva»**
+con botón Actualizar (no recarga por sorpresa: la credencial vive solo en memoria, M17), aviso **«sin
+conexión»** —por `navigator.onLine` y también cuando una llamada a la API falla por red— y errores de red en
+castellano en vez de «Failed to fetch».
+
+**Tema claro/oscuro** con conmutador en el header y en el login (`auto` → `claro` → `oscuro`, recordado en
+`localStorage` y aplicado **antes del primer pintado** para que no haya destello blanco); `auto` sigue al
+sistema. **En móvil la navegación pasa a barra inferior fija** (iconos + etiqueta, ≥44px, respetando
+`env(safe-area-inset-*)` para el notch y la barra de gestos) y los KPIs se ven 2×2. Accesibilidad: enlace
+«saltar al contenido», `aria-current` en la pestaña activa y `aria-label` en la navegación.
+
 API (Basic Auth) bajo `/admin/api/`: `me`, `config`, `subscribers`, `image`, `queue[/purge]`, `dlq[/redrive|/purge]`,
 `audit[/delete]`, `users[/role|/delete]` (delete acepta `{all}`), `metrics`, `broadcast` (envío manual),
 `broadcast/preview`, `broadcasts[/delete]` (delete acepta `id`|`ids`|`finished`|`all`, y **desencola** el plan),
 `plans[/cancel|/delete]` (delete acepta `pid`|`pids`|`finished`|`all`), `schedules[/toggle|/delete]`, `auth/{forgot,reset,change-password}`,
 `telethon/{send-code,sign-in,logout}`, `whatsapp/{status,contacts,pair,reset,reconnect,sync,blocked}`,
 `telegram/{me,account,webhook}` (`account` = estado de la sesión userbot: válida o a renovar). Endpoints
-**públicos** (sin auth, con anti-fuerza-bruta): `auth/forgot`, `auth/reset`.
+**públicos** (sin auth, con anti-fuerza-bruta): `auth/forgot`, `auth/reset`. Y fuera de `/api/`, los estáticos
+de la PWA (públicos por necesidad del navegador): `/admin/manifest.webmanifest`, `/admin/sw.js`,
+`/admin/icon-192.png`, `/admin/icon-512.png`, `/admin/icon-maskable-512.png`, `/admin/apple-touch-icon.png`.
 
 **Roles** (`role` en el registro del usuario: `admin` | `user`): un **administrador** gestiona usuarios (crear,
 borrar, promover/degradar) y hace todo lo demás; un **usuario** normal hace **todo MENOS gestionar usuarios**.
@@ -248,13 +279,22 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
 
 ```powershell
 docker compose -f docker/docker-compose.yml up --build     # stack local (DynamoDB + webhook inline)
-python -m unittest discover -s tests                        # 313 tests (sin AWS; boto3 perezoso + fakes)
+python -m unittest discover -s tests                        # 320 tests (sin AWS; boto3 perezoso + fakes)
 ```
 
 Los tests cubren markup, composición, recipients/listas + exclusión por patrón, cliente Telegram
 (403/429/5xx), envío por lote, SQS, receptor, worker (parcial + estados), dispatcher/planes, schedules,
-onboarding, WhatsApp forwarder, email_sender (Resend), BroadcastStore (estados) y envío manual.
-Validación JS del servicio y del panel: `node --check whatsapp-service/src/index.js`.
+onboarding, WhatsApp forwarder, email_sender (Resend), BroadcastStore (estados), envío manual y la **PWA**
+(manifest/sw/iconos públicos, ámbito, versión del shell).
+
+El panel es una cadena HTML/JS embebida, así que su JS no lo cubre Python; hay utilidades aparte:
+
+```powershell
+node --check whatsapp-service/src/index.js       # JS del servicio WhatsApp
+python scripts/revisar_js_panel.py               # node --check del JS embebido del panel + del sw.js
+python scripts/capturas_ui.py                    # capturas de la UI (claro/oscuro, escritorio/móvil) en .build/ui
+$env:PANEL_URL="<AdminUrl>"; python scripts/verificar_pwa_desplegada.py   # PWA contra lo desplegado
+```
 
 ---
 
@@ -281,8 +321,10 @@ Servicio WhatsApp: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`, `BROADCASTS_TABLE`, 
   (matriz de estado, buscador/paginación/eliminar-todos, borrar = desencolar, cola en vivo + vaciar,
   detalle enriquecido con mensaje anterior + comparador + fechas, nomenclatura sin jerga, responsive) —
   desplegado y verificado.
+- ✅ **PWA instalable** (manifest + service worker + iconos, atajos, aviso de versión nueva y de sin conexión),
+  **tema claro/oscuro** y **navegación inferior en móvil** — desplegado y verificado en el stack `dev`.
 - ✅ Despliegue reproducible (`package-lambda.ps1` + `deploy.ps1`); **CI en GitHub Actions** (tests en cada
-  push; deploy gated por `DEPLOY_ENABLED`); **313 tests**.
+  push; deploy gated por `DEPLOY_ENABLED`); **320 tests**.
 - ⏳ Secretos en SSM/Secrets Manager; encriptación KMS de la tabla config; rate-limit distribuido del login.
 - ⚠️ WhatsApp/userbot: riesgo de baneo por envío masivo — usar listas pequeñas y delays altos.
 

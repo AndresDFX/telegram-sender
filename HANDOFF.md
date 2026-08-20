@@ -66,7 +66,15 @@ Servicio portable basado en **Baileys** (WhatsApp Web). Mantiene la conexión (s
 
 ### El panel admin
 
-El frontend es una **SPA monolítica embebida** como un único string crudo `_PAGE` en `admin.py` (≈línea 1092 en adelante; archivo total ~3650 líneas). HTML + CSS + JS inline, autocontenido (sin CDN), servido en `GET /admin`. Incluye su **design system** (paleta naranja `#FD531E`, escala de grises cálida, colores semánticos), favicon SVG inline y la lógica JS que consume la API REST del mismo Lambda. La parte Python alrededor de `_PAGE` (helpers antes del string) son helpers (`_ensure`, `_audit`, autorización por sesión/rol con `_autorizado`/`_es_admin`, reseteo por email, saneo de config) y el router `lambda_handler` (≈línea 529).
+El frontend es una **SPA monolítica embebida** como un único string crudo `_PAGE` en `admin.py`. HTML + CSS + JS inline, autocontenido (sin CDN), servido en `GET /admin`. Incluye su **design system** (paleta naranja `#FD531E`, escala de grises cálida, colores semánticos, y **tema claro** como bloque de tokens `html[data-theme="light"]`), favicon SVG inline y la lógica JS que consume la API REST del mismo Lambda. La parte Python alrededor de `_PAGE` son helpers (`_ensure`, `_audit`, autorización por sesión/rol con `_autorizado`/`_es_admin`, reseteo por email, saneo de config) y el router `lambda_handler`.
+
+Es además una **PWA instalable**: el mismo Lambda sirve `GET /admin/manifest.webmanifest`, `GET /admin/sw.js` y los iconos PNG (`icon-192`, `icon-512`, `icon-maskable-512`, `apple-touch-icon`), todos **públicos sin auth** porque el navegador los pide sin credenciales, y **antes de `_ensure()`** (el shell abre aunque DynamoDB/SQS estén caídos). Detalles que no son obvios:
+
+- Los iconos viajan en **base64 dentro de `entrypoints/pwa_assets.py`** porque el empaquetado copia solo `.py`; se regeneran con `python scripts/generar_iconos_pwa.py` (Pillow rasteriza el mismo isotipo del SVG inline y reescribe el módulo + los PNG de referencia en `docs/brand/replica/pwa/`).
+- Las rutas del manifest/SW se construyen desde el `rawPath` de la petición para que funcionen **con y sin stage** (`/dev/admin/...`), y el SW se sirve con `Service-Worker-Allowed` para ampliar su ámbito a la raíz del stage (si no, no podría controlar `/dev/`).
+- El SW es **network-first para navegaciones** (nunca sirve un panel viejo si hay red), cache-first para iconos y **jamás toca `/api/`** (datos siempre frescos; nada sensible en caché).
+- **Nunca recarga solo**: al detectar versión nueva muestra un aviso y espera; la recarga cerraría la sesión, porque la credencial vive solo en memoria (M17).
+- Para tocar el panel: `python scripts/revisar_js_panel.py` (node --check del JS embebido y del SW), `python scripts/capturas_ui.py` (capturas claro/oscuro, escritorio/móvil) y, tras desplegar, `PANEL_URL=<AdminUrl> python scripts/verificar_pwa_desplegada.py`.
 
 ### Archivos clave
 
@@ -126,7 +134,8 @@ En push a `main` (paths `src/lambda/`, `infra/cloudformation/`, `scripts/`, el w
 
 ### Gotchas de despliegue
 
-- **Parámetros no pasados conservan el valor PREVIO del stack** (no el Default del template). Por eso `WorkerTimeoutSeconds=300` se pasa explícito (commit `9d1852e`). `deploy.ps1` pasa TODOS los params.
+- **Parámetros no pasados conservan el valor PREVIO del stack** (no el Default del template). Por eso `WorkerTimeoutSeconds=300` se pasa explícito (commit `9d1852e`). `deploy.ps1` pasa TODOS los params. **Cara útil de esto:** para redesplegar SOLO código no hacen falta los secretos de `.env.deploy` — basta `--parameter-overrides LambdaCodeS3Key=<key>` y el resto se reutiliza (`UsePreviousValue`).
+- **Sin Docker se puede desplegar código propio** (no dependencias): `python scripts/repack_lambda_sin_docker.py` parte del zip que el stack tiene desplegado (`.build/base.zip`, bajado de S3) y sustituye dentro los `.py` de `src/lambda` normalizados a LF; **aborta si el artefacto no coincide con `git HEAD`**, para no pisar código de origen desconocido. Si cambia `requirements.txt`, esta vía NO sirve: Docker o CI. Usado el 20 ago 2026 para desplegar la PWA.
 - **`SendMode=userbot`**: sin Telethon ApiId/Hash/Session válidos, el worker no envía como tu cuenta.
 - **`WorkerReservedConcurrency=0`**: la cuenta tiene límite de concurrencia bajo (=10); reservar dejaría <10 sin reservar y AWS lo rechaza. La secuencialidad NO depende de esto (la garantizan el gate `in_flight` + un lote por tick + `BatchSize=1`).
 - **El bucket S3 NO lo crea el stack**: debe existir como `telegram-sync-lambda-<account>-<region>` o el deploy falla.
@@ -341,8 +350,9 @@ El plan operativo (suite automatizada, smoke post-deploy, E2E manual por flujo y
 - **Reglas EventBridge (poller, dispatcher) + ESM del worker: ENABLED.** DLQ: 0.
 - **AlertEmail SNS** (`castano.julian@correounivalle.edu.co`): suscripción quedó **PendingConfirmation** (el usuario debe confirmar el correo).
 - **Marca actual del producto: "Replica"** (tagline "Tu lista de precios, replicada y enviada en segundos."). README = documento de contexto canónico.
-- **313 tests** pasando; 2 workflows CI (`tests.yml` + `deploy.yml`, deploy gated por `DEPLOY_ENABLED`).
-- **Documentación al día y LISTO PARA PRUEBAS FUNCIONALES:** manual de invitado (`docs/MANUAL_USUARIO_INVITADO.md`), `README.md`, plan de pruebas (`docs/PLAN_PRUEBAS.md`, con F1–F10) y este HANDOFF reflejan los cambios recientes (nombres sin jerga, buscador/paginación/eliminar-todos, borrar = desencolar, cola en vivo + vaciar, detalle enriquecido con mensaje anterior + comparador + fechas, matriz de estado, responsive, espaciado). Empezar por la checklist E2E de `docs/PLAN_PRUEBAS.md` §4 (F1–F10) con las cuentas de prueba y `sending_enabled=False` salvo el caso que lo pruebe.
+- **320 tests** pasando; 2 workflows CI (`tests.yml` + `deploy.yml`, deploy gated por `DEPLOY_ENABLED`).
+- **Panel = PWA instalable** (agosto 2026): manifest + service worker + iconos maskable, atajos a Enviar/Actividad/Contactos, botón «Instalar app» (con instrucciones para iOS), aviso de versión nueva sin recarga sorpresa, aviso de sin conexión, **tema claro/oscuro** y **navegación inferior fija en móvil** con safe-areas. Desplegado y verificado en vivo (`scripts/verificar_pwa_desplegada.py` → `PWA OK`).
+- **Documentación al día y LISTO PARA PRUEBAS FUNCIONALES:** manual de invitado (`docs/MANUAL_USUARIO_INVITADO.md`), `README.md`, plan de pruebas (`docs/PLAN_PRUEBAS.md`, con F1–F11) y este HANDOFF reflejan los cambios recientes (nombres sin jerga, buscador/paginación/eliminar-todos, borrar = desencolar, cola en vivo + vaciar, detalle enriquecido con mensaje anterior + comparador + fechas, matriz de estado, responsive, espaciado, **PWA + tema claro + nav inferior**). Empezar por la checklist E2E de `docs/PLAN_PRUEBAS.md` §4 (F1–F11) con las cuentas de prueba y `sending_enabled=False` salvo el caso que lo pruebe.
 - **Infra clave:** stack `telegram-sync-dev` (cuenta `438095550710`, `us-east-1`). Tablas: subscribers, processed-updates, config, broadcasts, plans, schedules, audit, whatsapp-auth. Lambdas: receiver, poller, worker, dispatcher, admin. Panel admin: `.../dev/admin` (Basic Auth, usuario `admin`). Roles `admin`/`user` activos.
 
 ---

@@ -1,6 +1,7 @@
 # Replica — Roadmap (qué falta para avanzar)
 
-> _Actualizado 2026-07-20 (panel UX renovado: nombres sin jerga, buscador/paginación/eliminar-todos,
+> _Actualizado 2026-08-20 (el panel es una **PWA instalable** con tema claro/oscuro y navegación inferior
+> en móvil; antes, 2026-07-20: panel UX renovado con nombres sin jerga, buscador/paginación/eliminar-todos,
 > borrar = desencolar, cola en vivo, detalle enriquecido, responsive). Reemplaza la hoja original de
 > 2026-06-07 (diseño webhook 1:1), hoy superada. El histórico queda en el historial de git._
 
@@ -24,7 +25,9 @@ secuencial** (dispatcher EventBridge, un lote a la vez) con **ventana horaria**,
 de bot/cuenta (bot o userbot) · panel admin moderno (Basic Auth) · **design system de grids**
 (buscador + paginación + eliminar-todos), **borrar = desencolar**, **cola de envío en vivo + vaciar**,
 **detalle enriquecido** (mensaje anterior + comparador de precios + fechas), **matriz de estado**,
-**nomenclatura sin jerga** y **diseño responsive**. 313 tests.
+**nomenclatura sin jerga** y **diseño responsive** · **PWA instalable** (manifest + service worker +
+iconos, atajos, aviso de versión nueva y de sin conexión), **tema claro/oscuro** y **navegación inferior
+en móvil**. 320 tests.
 
 ---
 
@@ -77,7 +80,15 @@ de bot/cuenta (bot o userbot) · panel admin moderno (Basic Auth) · **design sy
   envío, accesos rápidos.
 - ✅ **Aviso de sesión expirada + re-login** (8 h) — hecho en Fase 0.
 - ✅ **Onboarding / wizard** — tarjeta "Primeros pasos" en Inicio (checklist: cuenta/bot → canal →
-  listas → WhatsApp → activar). Pendiente (P2): accesibilidad, tema claro, import/export CSV.
+  listas → WhatsApp → activar).
+- ✅ **Tema claro/oscuro** — conmutador en header y login (auto/claro/oscuro, recordado y aplicado antes
+  del primer pintado); `auto` sigue al sistema.
+- ✅ **App instalable (PWA)** — manifest + service worker + iconos maskable, atajos a Enviar/Actividad/
+  Contactos, botón «Instalar app» (con instrucciones para iOS), aviso de versión nueva y de sin conexión,
+  navegación inferior fija en móvil respetando el notch.
+- ✅ **Accesibilidad (básica)** — enlace «saltar al contenido», `aria-current` en la pestaña activa,
+  `aria-label` en la navegación, tap targets ≥44px, `aria-live` en avisos.
+- 🔜 **[P2·M] Import/export CSV** de contactos y listas.
 
 ### Seguridad / Ops
 - ✅ **Audit log** — `DynamoDbAuditStore` (tabla `Audit`, TTL 90 d) registra acciones del panel

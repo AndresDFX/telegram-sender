@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import hmac
 import json
 import logging
@@ -21,6 +22,7 @@ import time
 
 import wiring
 from adapters.config import admin_user
+from entrypoints import pwa_assets
 from domain import auth as auth_dom
 from domain.message import componer_mensaje
 from domain.schedules import hhmm, proximo_run
@@ -34,6 +36,9 @@ logger.setLevel(logging.INFO)
 _AUTH = {"fails": 0, "locked_until": 0.0}
 _AUTH_MAX_FAILS = 5
 _AUTH_LOCK_SECS = 300
+
+# Versión del shell para la caché del service worker (se calcula perezosamente en _pwa_version).
+_PWA_VER = ""
 
 config = None
 subscribers = None
@@ -374,8 +379,186 @@ def _json(data: Any, status: int = 200) -> dict[str, Any]:
     return {"statusCode": status, "headers": {"Content-Type": "application/json"}, "body": json.dumps(data, ensure_ascii=False)}
 
 
-def _html_resp() -> dict[str, Any]:
-    return {"statusCode": 200, "headers": {"Content-Type": "text/html; charset=utf-8"}, "body": _PAGE}
+def _html_resp(raw: str = "/admin") -> dict[str, Any]:
+    """Shell del panel. Sustituye __RAIZ__ por la ruta real (para el manifest y el icono de iOS)."""
+    raiz, _ = _pwa_rutas(raw)
+    return {"statusCode": 200,
+            "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache"},
+            "body": _PAGE.replace("__RAIZ__", raiz)}
+
+
+# --- PWA (app instalable) ----------------------------------------------------
+# El panel es una PWA: manifest + service worker + iconos, todo servido por esta misma Lambda
+# (no hay hosting estático). Las tres rutas son PÚBLICAS —igual que el shell HTML— porque el
+# navegador las pide SIN la cabecera Authorization: el service worker se descarga fuera de la
+# página y el manifest se pide sin credenciales. No exponen ningún dato (son estáticas).
+
+def _pwa_rutas(raw: str) -> tuple[str, str]:
+    """(raíz de la app, ámbito) como rutas absolutas, derivadas de la URL real de la petición.
+
+    Con API Gateway el panel vive bajo el stage (`/dev/admin`), así que no se pueden usar rutas
+    relativas a ciegas: `manifest.webmanifest` colgado de `/dev/admin` resolvería a `/dev/`.
+    Devuelve p. ej. ("/dev/admin/", "/dev/") — el ámbito abarca `/dev/admin` CON y SIN barra final.
+    """
+    idx = raw.find("/admin")
+    prefijo = raw[:idx] if idx >= 0 else ""
+    return (f"{prefijo}/admin/", f"{prefijo}/")
+
+
+def _pwa_version() -> str:
+    """Huella del shell: cambia en cada despliegue que toque la página → invalida la caché del SW."""
+    global _PWA_VER
+    if not _PWA_VER:
+        _PWA_VER = hashlib.sha256(_PAGE.encode("utf-8")).hexdigest()[:12]
+    return _PWA_VER
+
+
+def _manifest_resp(raw: str) -> dict[str, Any]:
+    raiz, ambito = _pwa_rutas(raw)
+    manifest = {
+        "id": raiz,
+        "name": "Replica · difusión Telegram y WhatsApp",
+        "short_name": "Replica",
+        "description": "Captura listas de precios y envíalas a tus contactos por Telegram y WhatsApp,"
+                       " al instante o programado.",
+        "lang": "es",
+        "dir": "ltr",
+        "start_url": raiz,
+        "scope": ambito,
+        "display": "standalone",
+        "display_override": ["standalone", "minimal-ui"],
+        "orientation": "portrait-primary",
+        "background_color": "#0F1217",
+        "theme_color": "#0F1217",
+        "categories": ["business", "productivity", "utilities"],
+        "icons": [
+            {"src": f"{raiz}icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": f"{raiz}icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": f"{raiz}icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+        # Accesos directos del icono (pulsación larga en Android / clic derecho en escritorio).
+        "shortcuts": [
+            {"name": "Componer y enviar", "short_name": "Enviar", "url": f"{raiz}?tab=enviar",
+             "icons": [{"src": f"{raiz}icon-192.png", "sizes": "192x192", "type": "image/png"}]},
+            {"name": "Actividad", "short_name": "Actividad", "url": f"{raiz}?tab=envios",
+             "icons": [{"src": f"{raiz}icon-192.png", "sizes": "192x192", "type": "image/png"}]},
+            {"name": "Contactos", "short_name": "Contactos", "url": f"{raiz}?tab=fuentes",
+             "icons": [{"src": f"{raiz}icon-192.png", "sizes": "192x192", "type": "image/png"}]},
+        ],
+    }
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/manifest+json; charset=utf-8", "Cache-Control": "no-cache"},
+        "body": json.dumps(manifest, ensure_ascii=False),
+    }
+
+
+def _sw_resp(raw: str) -> dict[str, Any]:
+    """Service worker: cachea el shell y los iconos; NUNCA toca /api/ (datos con sesión).
+
+    `Service-Worker-Allowed` permite registrarlo con ámbito por encima de su propia ruta, para que
+    controle también `/dev/admin` (sin barra final) y el shell funcione sin red.
+    """
+    raiz, ambito = _pwa_rutas(raw)
+    ver = _pwa_version()
+    js = _SW_JS.replace("__VER__", ver).replace("__RAIZ__", raiz)
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "text/javascript; charset=utf-8",
+            "Cache-Control": "no-cache, max-age=0",
+            "Service-Worker-Allowed": ambito,
+        },
+        "body": js,
+    }
+
+
+def _icon_resp(b64: str) -> dict[str, Any]:
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "image/png", "Cache-Control": "public, max-age=604800"},
+        "body": b64,
+        "isBase64Encoded": True,
+    }
+
+
+_PWA_ICONOS = {
+    "/icon-192.png": pwa_assets.ICON_192_B64,
+    "/icon-512.png": pwa_assets.ICON_512_B64,
+    "/icon-maskable-512.png": pwa_assets.ICON_MASKABLE_512_B64,
+    "/apple-touch-icon.png": pwa_assets.APPLE_TOUCH_180_B64,
+}
+
+# Service worker. Cachea SOLO el shell y los iconos (estáticos y públicos); todo lo que cuelga de
+# /api/ va SIEMPRE a la red y nunca se guarda (lleva sesión y datos que cambian). Así la app abre
+# sin red —muestra el login y avisa "sin conexión"— sin arriesgar datos obsoletos ni fugas de caché.
+_SW_JS = r"""/* Replica · service worker (generado por entrypoints/admin.py) */
+const VER='__VER__', RAIZ='__RAIZ__', CACHE='replica-'+VER, API=RAIZ+'api/';
+const SHELL=[RAIZ, RAIZ+'manifest.webmanifest', RAIZ+'icon-192.png', RAIZ+'icon-512.png',
+             RAIZ+'icon-maskable-512.png', RAIZ+'apple-touch-icon.png'];
+const OFFLINE='<!doctype html><html lang="es"><meta charset="utf-8">'
+  +'<meta name="viewport" content="width=device-width,initial-scale=1">'
+  +'<title>Replica · sin conexión</title>'
+  +'<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0F1217;color:#E8EDF3;'
+  +'font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;text-align:center;padding:24px}'
+  +'h1{font-size:19px;margin:0 0 8px}p{color:#93A1B2;font-size:14px;margin:0 0 18px;max-width:34ch;line-height:1.6}'
+  +'button{background:#FD531E;color:#201008;border:0;border-radius:8px;padding:11px 18px;font-size:14px;'
+  +'font-weight:700;cursor:pointer}</style><div><h1>Sin conexión</h1>'
+  +'<p>No pudimos abrir el panel. Revisa tu conexión e inténtalo de nuevo.</p>'
+  +'<button onclick="location.reload()">Reintentar</button></div></html>';
+
+self.addEventListener('install', e => {
+  e.waitUntil((async () => {
+    const c = await caches.open(CACHE);
+    // allSettled: un icono que falle no debe abortar la instalación del service worker.
+    await Promise.allSettled(SHELL.map(u => c.add(new Request(u, {cache: 'reload'}))));
+  })());
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil((async () => {
+    const ks = await caches.keys();
+    await Promise.all(ks.filter(k => k.startsWith('replica-') && k !== CACHE).map(k => caches.delete(k)));
+    await self.clients.claim();
+  })());
+});
+
+// El panel avisa "hay versión nueva" y, si aceptas, manda SKIP_WAITING y recarga.
+self.addEventListener('message', e => { if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting(); });
+
+self.addEventListener('fetch', e => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  let url;
+  try { url = new URL(req.url); } catch (_) { return; }
+  if (url.origin !== self.location.origin) return;
+  const p = url.pathname;
+  if (p.indexOf(RAIZ) !== 0 && p !== RAIZ.slice(0, -1)) return;   // fuera del panel: no intervenir
+  if (p.indexOf(API) === 0) return;                               // datos con sesión: solo red
+
+  if (req.mode === 'navigate') {   // shell: red primero (para ver despliegues), caché como respaldo
+    e.respondWith((async () => {
+      try {
+        const r = await fetch(req);
+        if (r && r.ok) { const c = await caches.open(CACHE); await c.put(RAIZ, r.clone()); }
+        return r;
+      } catch (_) {
+        const hit = await caches.match(RAIZ);
+        return hit || new Response(OFFLINE, {status: 503, headers: {'Content-Type': 'text/html; charset=utf-8'}});
+      }
+    })());
+    return;
+  }
+
+  e.respondWith((async () => {   // iconos/manifest: caché primero (no cambian dentro de una versión)
+    const hit = await caches.match(req);
+    if (hit) return hit;
+    const r = await fetch(req);
+    if (r && r.ok && r.type === 'basic') { const c = await caches.open(CACHE); await c.put(req, r.clone()); }
+    return r;
+  })());
+});
+"""
 
 
 def _body(event: dict[str, Any]) -> dict:
@@ -532,16 +715,30 @@ def _registrar_webhook() -> dict:
 # --- dispatcher -------------------------------------------------------------
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    _ensure()
     http = event.get("requestContext", {}).get("http", {})
     method = http.get("method", "GET")
     raw = event.get("rawPath") or http.get("path") or "/admin"
     idx = raw.find("/admin")
     sub = (raw[idx + len("/admin"):] if idx >= 0 else raw).rstrip("/")
 
+    # --- Estáticos del shell: se sirven ANTES de _ensure() ---------------------------------------
+    # Ni la página ni los assets de la PWA tocan DynamoDB/SQS, así que no hace falta construir los
+    # adaptadores para responderlos: el panel abre (y el service worker se instala) incluso si el
+    # backend está degradado, que es justo lo que se espera de una app instalable.
     # La página (shell) es pública; el login y la auth viven en la API.
     if sub == "" and method == "GET":
-        return _html_resp()
+        return _html_resp(raw)
+
+    # PWA: manifest, service worker e iconos. PÚBLICOS a propósito — el navegador los pide sin la
+    # cabecera Authorization (el SW se descarga fuera de la página), y no exponen dato alguno.
+    if method == "GET" and sub in _PWA_ICONOS:
+        return _icon_resp(_PWA_ICONOS[sub])
+    if sub == "/manifest.webmanifest" and method == "GET":
+        return _manifest_resp(raw)
+    if sub == "/sw.js" and method == "GET":
+        return _sw_resp(raw)
+
+    _ensure()
 
     # Recuperación de contraseña: rutas PÚBLICAS (sin sesión). El reseteo tiene tope de
     # intentos + caducidad; forgot responde genérico (no revela si el usuario existe).
@@ -1163,11 +1360,29 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 
 _PAGE = r"""<!doctype html><html lang="es" data-theme="dark"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Replica · Panel</title>
+<meta name="description" content="Replica — captura listas de precios y difúndelas por Telegram y WhatsApp, al instante o programado.">
+<meta name="color-scheme" content="dark light">
 <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><defs><linearGradient id='f' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%23FD531E'/><stop offset='1' stop-color='%23FD9E76'/></linearGradient></defs><rect width='48' height='48' rx='12' fill='url(%23f)'/><g fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='M21 24c5 0 5.5-9 11.5-9'/><path d='M21 24h11.5'/><path d='M21 24c5 0 5.5 9 11.5 9'/></g><circle cx='15' cy='24' r='4.2' fill='%23fff'/><circle cx='33.5' cy='15' r='3' fill='%23fff'/><circle cx='34.5' cy='24' r='3' fill='%23fff'/><circle cx='33.5' cy='33' r='3' fill='%23fff'/></svg>">
-<link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><defs><linearGradient id='f' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%23FD531E'/><stop offset='1' stop-color='%23FD9E76'/></linearGradient></defs><rect width='48' height='48' rx='12' fill='url(%23f)'/><g fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='M21 24c5 0 5.5-9 11.5-9'/><path d='M21 24h11.5'/><path d='M21 24c5 0 5.5 9 11.5 9'/></g><circle cx='15' cy='24' r='4.2' fill='%23fff'/><circle cx='33.5' cy='15' r='3' fill='%23fff'/><circle cx='34.5' cy='24' r='3' fill='%23fff'/><circle cx='33.5' cy='33' r='3' fill='%23fff'/></svg>">
-<meta name="theme-color" content="#FD531E">
+<!-- PWA: el manifest y el icono de iOS se sirven desde esta misma Lambda. __RAIZ__ lo sustituye
+     el backend con la ruta REAL del panel (con API Gateway el stage va delante: /dev/admin/), porque
+     una ruta relativa colgada de "/dev/admin" resolvería mal. iOS ignora los SVG en apple-touch-icon:
+     por eso aquí va PNG. -->
+<link rel="manifest" href="__RAIZ__manifest.webmanifest">
+<link rel="apple-touch-icon" sizes="180x180" href="__RAIZ__apple-touch-icon.png">
+<meta name="theme-color" content="#0F1217" id="mtc">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Replica">
+<meta name="application-name" content="Replica">
+<!-- Tema aplicado ANTES de pintar: si el usuario eligió claro (o su sistema lo está), evita el
+     destello oscuro→claro del primer frame. La lógica completa vive al final del script. -->
+<script>(function(){try{var p=localStorage.getItem('theme')||'auto';
+var cl=(p==='auto')?!!(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches):(p==='light');
+document.documentElement.setAttribute('data-theme',cl?'light':'dark');
+var m=document.getElementById('mtc');if(m)m.setAttribute('content',cl?'#FFFFFF':'#0F1217');}catch(e){}})();</script>
 <style>
 /* === DESIGN SYSTEM TOKENS (Replica) ===
    Tokens ACTIVOS en el :root de RUNTIME (abajo): dark-only, acento naranja Replica, neutros slate.
@@ -1201,6 +1416,13 @@ _PAGE = r"""<!doctype html><html lang="es" data-theme="dark"><head><meta charset
   --ok-soft:rgba(52,211,153,.12);
   --warn-soft:rgba(251,191,36,.12);
   --bad-soft:rgba(251,113,133,.12);
+  /* Capas de superposición (hover/zebra) y cristal del header. Tokenizadas porque en TEMA CLARO
+     un velo blanco sobre blanco es invisible: el tema claro solo redefine estos tokens. */
+  --ov1:rgba(255,255,255,.03);   /* velo sutil: zebra, hover de filas, empties */
+  --ov2:rgba(255,255,255,.05);   /* velo medio: hover de nav/ghost/segmentado */
+  --ov3:rgba(255,255,255,.07);   /* velo fuerte: celda de fila en hover */
+  --ov-bd:rgba(255,255,255,.18); /* borde sobre superficies de color */
+  --glass:rgba(15,18,23,.8);     /* header y nav translúcidos */
   --r:12px; --r-sm:8px; --r-lg:18px;   /* B17: escala de radios consistente */
   --sh:0 1px 0 rgba(255,255,255,.04) inset, 0 1px 2px rgba(0,0,0,.28), 0 24px 56px -28px rgba(0,0,0,.82);
   --sh-sm:0 6px 18px -10px rgba(0,0,0,.6);
@@ -1258,7 +1480,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
 #app{display:none}
 header{
   display:flex;align-items:center;justify-content:space-between;
-  background:rgba(15,18,23,.8);backdrop-filter:blur(16px) saturate(150%);
+  background:var(--glass);backdrop-filter:blur(16px) saturate(150%);
   padding:13px 22px;border-bottom:1px solid var(--bd);
   position:sticky;top:0;z-index:5;
 }
@@ -1269,7 +1491,7 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
 /* ---------- nav (pestañas horizontales) ---------- */
 .nav{
   position:sticky;top:50px;z-index:4;
-  background:rgba(15,18,23,.8);backdrop-filter:blur(16px) saturate(150%);
+  background:var(--glass);backdrop-filter:blur(16px) saturate(150%);
   display:flex;gap:6px;justify-content:center;align-items:center;
   padding:11px 14px;border-bottom:1px solid var(--bd);flex-wrap:wrap;
 }
@@ -1278,7 +1500,7 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
   padding:8px 15px;border-radius:999px;font-weight:600;font-size:13px;
   cursor:pointer;transition:color .15s,background .15s,border-color .15s;
 }
-.nav button:hover{color:var(--tx2);background:rgba(255,255,255,.05);filter:none;box-shadow:none}
+.nav button:hover{color:var(--tx2);background:var(--ov2);filter:none;box-shadow:none}
 .nav button.on{
   background:rgba(var(--ac-rgb),.14);color:var(--ac-tint);border-color:rgba(var(--ac-rgb),.4);
 }
@@ -1297,8 +1519,8 @@ main{max-width:900px;margin:0 auto;padding:26px 22px 80px;display:grid;gap:18px}
 /* UX-2: el CTA de activar es un botón PRIMARIO estándar (naranja) — el verde queda solo para
    estados confirmados, nunca para acciones. Hereda el estilo base de button. */
 #send_banner .sb-go{font-size:14px;padding:11px 22px;font-weight:700}
-#send_banner .sb-pause{background:transparent;border:1px solid rgba(255,255,255,.18);color:var(--mut);font-size:12.5px;padding:6px 13px}
-#send_banner .sb-pause:hover{background:rgba(255,255,255,.06);color:var(--tx2);filter:none;box-shadow:none}
+#send_banner .sb-pause{background:transparent;border:1px solid var(--ov-bd);color:var(--mut);font-size:12.5px;padding:6px 13px}
+#send_banner .sb-pause:hover{background:var(--ov2);color:var(--tx2);filter:none;box-shadow:none}
 
 /* ---------- cards ---------- */
 .card{
@@ -1356,7 +1578,7 @@ button:disabled{opacity:.5;cursor:not-allowed;transform:none;filter:none;box-sha
 button.sec{background:var(--elev);color:var(--tx2);border-color:var(--bd2)}
 button.sec:hover{background:var(--bd2);filter:none;box-shadow:none}
 button.ghost{background:transparent;border:1px solid var(--bd2);color:var(--mut)}
-button.ghost:hover{background:rgba(255,255,255,.05);color:var(--tx2);filter:none;box-shadow:none}
+button.ghost:hover{background:var(--ov2);color:var(--tx2);filter:none;box-shadow:none}
 button.danger{background:var(--danger);color:#fff;border-color:transparent}
 button.danger:hover{background:var(--danger-h);filter:none;box-shadow:0 6px 22px -8px rgba(192,43,36,.5)}
 /* Ritmo vertical uniforme: un botón de acción que sigue a CUALQUIER bloque hermano DIRECTO de la
@@ -1397,7 +1619,7 @@ img.preview{max-width:170px;border-radius:var(--r-sm);margin-top:12px;border:1px
 table{width:100%;border-collapse:collapse;font-size:13.5px}
 th,td{text-align:left;padding:10px 9px;border-bottom:1px solid var(--bd);vertical-align:middle}
 tbody tr{transition:background .12s}
-tbody tr:hover{background:rgba(255,255,255,.025)}
+tbody tr:hover{background:var(--ov1)}
 th{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:700}
 td b{font-weight:600;color:var(--tx)}
 
@@ -1500,7 +1722,7 @@ main>.card.show{display:block}
 .chan-row{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 6px}
 .pickbox{max-height:152px;overflow:auto;border:1px solid var(--bd-int);border-radius:var(--r-sm);background:var(--elev);margin-top:6px;padding:4px}
 .pickitem{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--tx2)}
-.pickitem:hover{background:rgba(255,255,255,.04)}
+.pickitem:hover{background:var(--ov1)}
 .pickitem input{width:auto;margin:0}
 .pickbox .hint{padding:8px}
 .chan{
@@ -1603,7 +1825,7 @@ main>.card.show{display:block}
   transition:background .12s;
   row-gap:8px !important;
 }
-#tg_lists>div:hover, #wa_lists>div:hover{ background:rgba(255,255,255,.025); }
+#tg_lists>div:hover, #wa_lists>div:hover{ background:var(--ov1); }
 #tg_lists>div:last-child, #wa_lists>div:last-child{ border-bottom:0 !important; }
 #tg_lists>div b, #wa_lists>div b{ color:var(--tx); }
 /* el "N miembros" como chip discreto */
@@ -1662,7 +1884,7 @@ main>.card.show{display:block}
 /* refuerzo visual de los empties existentes */
 .bc-empty, #subsempty{
   border:1px dashed var(--bd2);border-radius:var(--r);
-  background:rgba(255,255,255,.04);
+  background:var(--ov1);
 }
 /* skeleton shimmer (el front puede inyectar .skeleton .sk-line al cargar) */
 .skeleton{pointer-events:none}
@@ -1712,7 +1934,7 @@ button.ok:hover{background:#46e0a9}
   content:"";position:absolute;left:14px;right:14px;bottom:-12px;height:2px;
   border-radius:2px;background:linear-gradient(90deg,var(--ac),var(--ac2));
 }
-.nav button:hover{background:rgba(255,255,255,.05)}
+.nav button:hover{background:var(--ov2)}
 /* etiqueta de seccion para encabezar grupos de tarjetas */
 .section-label{
   grid-column:1/-1;display:flex;align-items:center;gap:10px;
@@ -1750,9 +1972,9 @@ th input[type=checkbox],td input[type=checkbox]{transform:scale(1.05)}
 .chan.tg.on .dot,.chan.wa.on .dot{transform:scale(1.25)}
 /* zebra muy tenue en tablas largas de contactos/destinatarios */
 #subs tr:nth-child(even) td, #wa_subs tr:nth-child(even) td{
-  background:rgba(255,255,255,.04);
+  background:var(--ov1);
 }
-tbody tr:hover td{background:rgba(255,255,255,.07)}
+tbody tr:hover td{background:var(--ov3)}
 /* badge de origen del envio mas legible */
 .bc-src{background:var(--ac-soft);border-color:rgba(var(--ac-rgb),.28);color:var(--tx2)}
 /* pildora "sending" pulsa para indicar actividad */
@@ -1801,7 +2023,7 @@ tbody tr.sel-row td{background:rgba(var(--ac-rgb),.12)}
 .segf{display:inline-flex;border:1px solid var(--bd2);border-radius:999px;overflow:hidden;background:var(--elev);vertical-align:middle}
 .segf button{background:transparent;border:none;border-radius:0;color:var(--mut);padding:7px 15px;font-weight:600;font-size:12.5px;cursor:pointer;transition:color .15s,background .15s}
 .segf button+button{border-left:1px solid var(--bd2)}
-.segf button:hover{color:var(--tx2);background:rgba(255,255,255,.05);filter:none;box-shadow:none}
+.segf button:hover{color:var(--tx2);background:var(--ov2);filter:none;box-shadow:none}
 .segf button.on{background:rgba(var(--ac-rgb),.16);color:var(--ac-tint)}
 .segf button.on.exc{background:rgba(251,191,36,.16);color:#FCE7B0}
 .excl-pat{margin:12px 0;padding:12px 14px;background:var(--bg);border:1px solid var(--bd);border-radius:10px}
@@ -1857,7 +2079,9 @@ a:focus-visible,input[type=checkbox]:focus-visible,input[type=radio]:focus-visib
   #send_banner .sb-go,#send_banner .sb-pause{width:100%}
   /* M33: el header no desborda — se trunca el correo y se ocultan badges no esenciales */
   header .u{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  header #conn_tg_src{display:none}
+  /* !important: renderTgSource() lo muestra con estilo inline, que gana a esta regla sin él y
+     devolvía al header la fila extra que M33 quería evitar. El canal fuente se ve en Ajustes. */
+  header #conn_tg_src{display:none!important}
   /* M32: el scroll interno de contactos no se 'pega' y deja respirar la página */
   .tbl-scroll{max-height:60vh;overscroll-behavior:contain}
 }
@@ -1900,6 +2124,128 @@ th.selcol,td.selcol{width:34px;text-align:center}
   /* Tablas dentro de .tbl-scroll conservan su propio scroll (evita doble scroll) */
   .tbl-scroll table{display:table;width:100%}
 }
+
+/* ============================================================================
+   PWA + TEMA CLARO + NAVEGACIÓN INFERIOR EN MÓVIL  (capa final, aditiva)
+   1) app instalable: safe-areas, barra de conexión, botones de instalar/actualizar
+   2) tema claro real (solo redefine tokens + los pocos colores que estaban fijos)
+   3) en teléfono la navegación baja al pulgar (patrón de app nativa)
+   ============================================================================ */
+
+/* ---------- 1) PWA: shell instalada ---------- */
+/* Con viewport-fit=cover + status bar translúcida en iOS, el contenido llega hasta el borde:
+   los env(safe-area-inset-*) evitan que el header quede bajo el reloj o el notch. */
+header{padding-top:calc(13px + env(safe-area-inset-top));
+  padding-left:calc(22px + env(safe-area-inset-left));padding-right:calc(22px + env(safe-area-inset-right))}
+.nav{padding-left:calc(14px + env(safe-area-inset-left));padding-right:calc(14px + env(safe-area-inset-right))}
+#login{padding-top:calc(24px + env(safe-area-inset-top));padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+/* Safari de iOS solo entiende backdrop-filter con prefijo hasta la 18: sin esto el header y la barra
+   de navegación quedan translúcidos SIN difuminar y las etiquetas se leen mal sobre el contenido. */
+header,.nav{-webkit-backdrop-filter:blur(16px) saturate(150%)}
+@supports not ((backdrop-filter:blur(2px)) or (-webkit-backdrop-filter:blur(2px))){
+  header,.nav{background:var(--card)}   /* sin difuminado, superficie opaca: legibilidad primero */
+}
+/* Botón cuadrado de icono (tema / instalar) para el header. */
+.ico-btn{padding:7px 10px;font-size:15px;line-height:1;min-width:38px}
+/* Barra de "sin conexión": informativa, no bloquea; se apila sobre la navegación inferior. */
+.offline-bar{position:fixed;left:14px;right:14px;bottom:14px;z-index:45;
+  background:var(--warn-ink);color:var(--warn-tint);border:1px solid rgba(251,191,36,.45);
+  border-radius:var(--r-sm);padding:11px 14px;font-size:12.5px;font-weight:600;line-height:1.5;
+  box-shadow:var(--sh);display:flex;gap:9px;align-items:center}
+.offline-bar[hidden]{display:none}
+/* Aviso de versión nueva (lo pinta el JS al detectar un service worker en espera). */
+.upd-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:46;max-width:min(520px,94vw);
+  background:var(--info-ink);color:var(--info-tint);border:1px solid rgba(96,165,250,.4);
+  border-radius:var(--r-sm);padding:11px 14px;font-size:12.5px;font-weight:600;
+  box-shadow:var(--sh);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.upd-bar[hidden]{display:none}
+.upd-bar button{padding:7px 14px;font-size:12.5px}
+/* Ya instalada: no tiene sentido ofrecer "instalar" dentro de la propia app. */
+html.pwa #install_btn,html.pwa #install_login{display:none!important}
+/* Sin conexión los indicadores "en vivo" dejan de latir: si no hay red, no están en vivo. */
+html.offline .live.on .ping,html.offline .sqs-strip.hot .ping{animation:none;opacity:.45;box-shadow:none}
+/* Enlace de salto: solo visible al tabular (accesibilidad de teclado). */
+.skip{position:absolute;left:-9999px;top:0;z-index:60}
+.skip:focus{left:12px;top:12px;background:var(--ac);color:var(--ac-ink);padding:9px 14px;
+  border-radius:var(--r-sm);font-weight:700;font-size:13px;text-decoration:none}
+
+/* ---------- 2) TEMA CLARO ---------- */
+/* El panel nació dark-only. Aquí se invierte redefiniendo los MISMOS tokens: los tríos
+   hue/tint/ink mantienen su contrato (fondo = -ink, texto = -tint, texto sobre el hue = -ink),
+   así que toasts, callouts y pills siguen siendo legibles sin tocar sus reglas. */
+html[data-theme="light"]{
+  --bg:#F5F7FA; --bg2:#FFFFFF;
+  --card:#FFFFFF; --card2:#FAFBFD; --elev:#F1F4F8;
+  --bd:#E1E6EE; --bd2:#C3CBD8; --bd-int:#9AA5B5;
+  --tx:#131A23; --tx2:#38424F; --mut:#5D6875; --mut2:#8B96A4;
+  --ac2:#C8400F;        /* enlaces y cifras de acento: el naranja claro no se lee sobre blanco */
+  --ac-tint:#7E2A08;    /* texto sobre fondos naranja suaves (nav activa, segmentado, foco) */
+  --ac-ink:#2A1409;
+  --ok:#0E8A5F;  --ok-tint:#0A5238;  --ok-ink:#E7F8F0;
+  --warn:#9A6206; --warn-tint:#5A3A02; --warn-ink:#FDF4E1;
+  --bad:#C0362F;  --bad-tint:#7A1F1A;  --bad-ink:#FDECEC;
+  --info:#1A66C4; --info-tint:#123E75; --info-ink:#E8F1FE;
+  --danger:#C7332B; --danger-h:#A82A23;
+  --ov1:rgba(19,26,35,.035); --ov2:rgba(19,26,35,.06); --ov3:rgba(19,26,35,.075);
+  --ov-bd:rgba(19,26,35,.16);
+  --glass:rgba(255,255,255,.84);
+  --sh:0 1px 2px rgba(16,24,40,.06), 0 12px 30px -20px rgba(16,24,40,.35);
+  --sh-sm:0 4px 14px -10px rgba(16,24,40,.35);
+  --glow:0 6px 20px -10px rgba(var(--ac-rgb),.5);
+}
+/* Los pocos colores que estaban escritos a mano y no se resuelven por token. */
+html[data-theme="light"] body{background-image:
+  radial-gradient(1000px 560px at 86% -10%, rgba(var(--ac-rgb),.10), transparent 60%),
+  radial-gradient(760px 460px at 4% 2%, rgba(255,120,72,.06), transparent 55%)}
+/* background-IMAGE, no el atajo background: el atajo reinicia background-clip:text y el wordmark
+   (relleno con degradado y color transparente) se vería como un bloque naranja macizo. */
+html[data-theme="light"] .brand .wordmark{background-image:linear-gradient(95deg,#E8480F,#FD7848)}
+html[data-theme="light"] .brand svg{filter:drop-shadow(0 4px 12px rgba(var(--ac-rgb),.32))}
+html[data-theme="light"] select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235D6875' stroke-width='2.5'><path d='M6 9l6 6 6-6'/></svg>")}
+html[data-theme="light"] ::selection{background:rgba(var(--ac-rgb),.26);color:#2A1409}
+html[data-theme="light"] .toast{box-shadow:0 14px 40px -16px rgba(16,24,40,.45)}
+html[data-theme="light"] .ds-modal{box-shadow:0 20px 50px -14px rgba(16,24,40,.45)}
+html[data-theme="light"] .ds-overlay{background:rgba(19,26,35,.42)}
+html[data-theme="light"] .btn-loading::after{border-color:rgba(42,20,9,.3);border-top-color:#2A1409}
+html[data-theme="light"] .segf button.on.exc{color:var(--warn-tint)}
+html[data-theme="light"] .bc-err:hover{color:#9A2119}
+html[data-theme="light"] button.ok:hover{background:#0B7A53}
+html[data-theme="light"] .pill.pat{background:rgba(194,65,12,.1);color:#8A3D06;border-color:rgba(194,65,12,.28)}
+html[data-theme="light"] .bc-err{border-bottom-color:rgba(192,54,47,.5)}
+/* !important: el enlace lleva color en línea (--ac), que sobre blanco baja del contraste mínimo. */
+html[data-theme="light"] #login .box a{color:var(--ac2)!important}
+
+/* ---------- 3) NAVEGACIÓN INFERIOR EN MÓVIL ---------- */
+/* Icono arriba, etiqueta abajo: en desktop se ven en línea (como antes). */
+.nav button .ni{font-style:normal}
+.nav button .nl{font-style:normal}
+.nav button{display:inline-flex;align-items:center;gap:6px}
+@media (max-width:620px){
+  /* La nav deja de ir arriba y pasa a barra fija inferior (zona del pulgar), como una app nativa. */
+  .nav{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:20;
+    justify-content:space-around;gap:2px;flex-wrap:nowrap;
+    border-top:1px solid var(--bd);border-bottom:0;
+    padding:5px 4px calc(5px + env(safe-area-inset-bottom));
+    box-shadow:0 -8px 24px -18px rgba(0,0,0,.9)}
+  .nav button{flex:1 1 0;min-width:0;flex-direction:column;gap:1px;padding:6px 2px;
+    border-radius:12px;min-height:52px;font-size:10.5px;font-weight:700;letter-spacing:.1px}
+  .nav button .ni{font-size:18px;line-height:1.1}
+  .nav button .nl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .nav button.on::after{display:none}                 /* el subrayado no aplica en barra inferior */
+  main{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+  /* Lo flotante se apila POR ENCIMA de la barra inferior (antes quedaba tapado). */
+  .toast{bottom:calc(72px + env(safe-area-inset-bottom))}
+  .offline-bar{bottom:calc(72px + env(safe-area-inset-bottom))}
+  .upd-bar{bottom:calc(72px + env(safe-area-inset-bottom));left:12px;right:12px;transform:none;max-width:none}
+  .help::after{bottom:calc(76px + env(safe-area-inset-bottom))}
+  /* El header ya no es sticky en móvil: la navegación vive abajo y siempre está a mano. */
+  header{padding-top:calc(10px + env(safe-area-inset-top));
+    padding-left:calc(14px + env(safe-area-inset-left));padding-right:calc(14px + env(safe-area-inset-right))}
+  /* KPIs en 2×2: apilados de a uno obligaban a hacer scroll para ver las cuatro cifras. */
+  .stats{flex-direction:row;flex-wrap:wrap;gap:10px}
+  .stat{flex:1 1 calc(50% - 5px);min-width:0;padding:14px 10px}
+  .stat b{font-size:22px}
+}
 </style></head><body>
 <!-- Iconos de marca reutilizables (Telegram / WhatsApp) para mostrar junto a la info de cada canal. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -1907,7 +2253,13 @@ th.selcol,td.selcol{width:34px;text-align:center}
 <symbol id="i-wa" viewBox="0 0 240 240"><circle cx="120" cy="120" r="120" fill="#25D366"/><path fill="#fff" d="M120 54c-36.4 0-66 29.6-66 66 0 11.6 3 22.5 8.3 32L54 186l34.7-9.1c9.1 5 19.6 7.8 30.8 7.8h.5c36.4 0 66-29.6 66-66s-29.6-66-66-66zm38.6 93.2c-1.6 4.5-9.4 8.7-13 9.2-3.3.5-7.5.7-12.1-.8-2.8-.9-6.4-2.1-11-4.1-19.4-8.4-32-27.9-33-29.2-1-1.3-7.9-10.5-7.9-20s5-14.2 6.8-16.2c1.8-2 3.9-2.5 5.2-2.5h3.7c1.2 0 2.8-.2 4.4 3.4 1.6 3.7 5.5 12.9 6 13.8.5.9.8 2 .1 3.3-.7 1.3-1 2.1-2 3.2-1 1.1-2.1 2.5-3 3.3-1 1-2 2.1-.9 4s5 8.2 10.7 13.3c7.4 6.6 13.6 8.6 15.5 9.6 1.9 1 3 .8 4.1-.5 1.1-1.3 4.7-5.5 6-7.4 1.3-1.9 2.6-1.6 4.4-1 1.8.7 11.4 5.4 13.3 6.3 1.9 1 3.2 1.4 3.7 2.2.5.9.5 4.6-1.1 9.1z"/></symbol>
 </defs></svg>
 
-<div id="login"><div class="box">
+<a class="skip" href="#main">Saltar al contenido</a>
+<!-- Avisos de la app instalada: sin conexión y versión nueva. Fuera de #app para que también se
+     vean en la pantalla de acceso. Los muestra/oculta la capa PWA del final del script. -->
+<div id="offline_bar" class="offline-bar" role="status" hidden><span aria-hidden="true">📴</span><span>Sin conexión. Ves lo último cargado; los cambios y envíos se reanudan al volver la red.</span></div>
+<div id="upd_bar" class="upd-bar" role="status" hidden><span>✨ Versión nueva del panel. Al actualizar se recarga y pedirá acceso otra vez.</span><button onclick="pwaActualizar()">Actualizar</button><button class="ghost" onclick="document.getElementById('upd_bar').hidden=true">Después</button></div>
+
+<div id="login"><button class="ghost ico-btn" id="theme_btn2" onclick="cambiarTema()" style="position:fixed;top:14px;right:14px;z-index:30">🌗</button><div class="box">
   <div class="brand brand-lg"><svg viewBox="0 0 48 48" width="46" height="46" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div>
   <p style="text-align:center">Captura listas de precios y envíalas a tus contactos — Telegram y WhatsApp, al instante o programado.</p>
   <label>Usuario</label><input id="lu" autocomplete="username" placeholder="usuario o correo">
@@ -1925,19 +2277,26 @@ th.selcol,td.selcol{width:34px;text-align:center}
     </div>
     <div class="hint" id="fp_status" style="margin-top:8px"></div>
   </div>
+  <div id="install_login" hidden style="margin-top:14px;border-top:1px solid var(--bd);padding-top:13px">
+    <button class="sec" style="width:100%" onclick="pwaInstalar()">📲 Instalar Replica en este dispositivo</button>
+    <div class="hint" style="margin-top:7px;text-align:center">Se abre como app: pantalla completa, icono propio y arranque instantáneo.</div>
+  </div>
 </div></div>
 
 <div id="app">
  <header><div class="brand"><svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true"><defs><linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FD531E"/><stop offset="1" stop-color="#FD9E76"/></linearGradient></defs><rect width="48" height="48" rx="12" fill="url(#lg2)"/><g fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 24c5 0 5.5-9 11.5-9"/><path d="M21 24h11.5"/><path d="M21 24c5 0 5.5 9 11.5 9"/></g><circle cx="15" cy="24" r="4.2" fill="#fff"/><circle cx="33.5" cy="15" r="3" fill="#fff"/><circle cx="34.5" cy="24" r="3" fill="#fff"/><circle cx="33.5" cy="33" r="3" fill="#fff"/></svg><span class="wordmark">Replica</span></div><div><span id="conn_tg" class="pill" title="Estado del bot de Telegram" style="margin-right:6px"></span><span id="conn_tg_src" class="pill" title="Canal fuente del que Telegram lee las listas" style="margin-right:6px;display:none"></span><span id="conn_wa" class="pill" title="Estado del servicio WhatsApp" style="margin-right:6px"></span><span id="hdr_badge" class="pill" style="display:none;margin-right:10px"></span><span class="u" id="who"></span><span id="who_role" class="pill" style="display:none;margin-left:7px;padding:2px 8px;font-size:11px"></span>
-   <button class="ghost" style="margin-left:12px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
- <nav class="nav">
-   <button data-tab="inicio" onclick="showTab('inicio')">🏠 Inicio</button>
-   <button data-tab="enviar" onclick="showTab('enviar')">✍️ Enviar</button>
-   <button data-tab="envios" onclick="showTab('envios')">📡 Actividad</button>
-   <button data-tab="fuentes" onclick="showTab('fuentes')">👥 Contactos</button>
-   <button data-tab="ajustes" onclick="showTab('ajustes')">⚙️ Ajustes</button>
+   <button class="ghost ico-btn" id="install_btn" hidden style="margin-left:10px" onclick="pwaInstalar()" title="Instalar Replica como app" aria-label="Instalar Replica como app">📲</button>
+   <button class="ghost ico-btn" id="theme_btn" style="margin-left:6px" onclick="cambiarTema()">🌗</button>
+   <button class="ghost" style="margin-left:6px;padding:7px 12px" onclick="logout()">Salir</button></div></header>
+ <!-- El icono y la etiqueta van en spans separados: en teléfono la nav es barra inferior y se apilan. -->
+ <nav class="nav" aria-label="Secciones del panel">
+   <button data-tab="inicio" onclick="showTab('inicio')"><span class="ni" aria-hidden="true">🏠</span><span class="nl">Inicio</span></button>
+   <button data-tab="enviar" onclick="showTab('enviar')"><span class="ni" aria-hidden="true">✍️</span><span class="nl">Enviar</span></button>
+   <button data-tab="envios" onclick="showTab('envios')"><span class="ni" aria-hidden="true">📡</span><span class="nl">Actividad</span></button>
+   <button data-tab="fuentes" onclick="showTab('fuentes')"><span class="ni" aria-hidden="true">👥</span><span class="nl">Contactos</span></button>
+   <button data-tab="ajustes" onclick="showTab('ajustes')"><span class="ni" aria-hidden="true">⚙️</span><span class="nl">Ajustes</span></button>
  </nav>
- <main>
+ <main id="main">
   <div id="send_banner" hidden></div>
   <div class="card accent" data-tab="inicio"><h2>Resumen</h2>
    <div class="hint" style="margin:-4px 0 12px">Replica captura la lista de un canal fuente (con markup) <b>y</b> envía tus propios mensajes a listas de contactos por Telegram y WhatsApp — al instante o programados. Tus contactos y listas viven en <b>👥 Contactos</b>; escribe y difunde desde <b>✍️ Enviar</b>.</div>
@@ -3981,5 +4340,127 @@ function plStartPolling(){
   const start=()=>{ if(CRED){ plStartPolling(); qStartPolling(); } };
   if(document.readyState!=='loading') start();
   else document.addEventListener('DOMContentLoaded', start);
+})();
+
+/* ============================================================================
+   PWA — instalar, actualizar, sin conexión y tema  (capa final, aditiva)
+   Todo lo de aquí es progresivo: si el navegador no trae service workers ni
+   beforeinstallprompt, el panel se comporta exactamente como antes.
+   ============================================================================ */
+(function(){
+  const H = document.documentElement;
+  const RAIZ = BASE.replace(/admin$/, '');   // '/dev/' → ámbito del service worker (BASE es '/dev/admin')
+
+  /* --- Atajos del manifest (?tab=enviar): abren la app directamente en esa sección. boot() lee la
+         pestaña de localStorage, así que basta con dejarla escrita antes de que el usuario entre.
+         La URL se limpia para que un F5 no la reabra siempre ahí. --- */
+  try{
+    const q = new URLSearchParams(location.search), t = q.get('tab');
+    if(t && ['inicio','enviar','envios','fuentes','ajustes'].includes(t)){
+      localStorage.setItem('tab', t);
+      q.delete('tab');
+      history.replaceState(null, '', location.pathname + (q.toString()?'?'+q:'') + location.hash);
+    }
+  }catch(e){}
+
+  /* --- Tema: automático (sigue al sistema) → claro → oscuro. El <head> ya pintó el inicial para
+         no dar un destello; aquí solo se cicla y se sincroniza el color de la barra del móvil. --- */
+  const MQ = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
+  const T_ICO = {auto:'🌗', light:'☀️', dark:'🌙'}, T_NOM = {auto:'automático', light:'claro', dark:'oscuro'};
+  const pref = () => { try{ return localStorage.getItem('theme') || 'auto'; }catch(e){ return 'auto'; } };
+  function aplicarTema(){
+    const p = pref(), claro = p==='auto' ? !!(MQ && MQ.matches) : p==='light';
+    H.setAttribute('data-theme', claro ? 'light' : 'dark');
+    const m = $('mtc'); if(m) m.setAttribute('content', claro ? '#FFFFFF' : '#0F1217');
+    const tx = 'Tema ' + T_NOM[p] + (p==='auto' ? ' (sigue al sistema)' : '');
+    ['theme_btn','theme_btn2'].forEach(id => {   // el del header y el de la pantalla de acceso
+      const b = $(id); if(!b) return;
+      b.textContent = T_ICO[p]; b.title = tx + ' — pulsa para cambiar'; b.setAttribute('aria-label', tx);
+    });
+  }
+  window.cambiarTema = function(){
+    const o = ['auto','light','dark'], p = o[(o.indexOf(pref())+1) % o.length];
+    try{ localStorage.setItem('theme', p); }catch(e){}
+    aplicarTema(); toast('Tema ' + T_NOM[p]);
+  };
+  if(MQ && MQ.addEventListener) MQ.addEventListener('change', () => { if(pref()==='auto') aplicarTema(); });
+  aplicarTema();
+
+  /* --- La sección activa se anuncia a lectores de pantalla (la nav es la navegación principal). --- */
+  const _st = window.showTab;
+  if(typeof _st === 'function') window.showTab = function(t){ _st(t);
+    document.querySelectorAll('.nav button').forEach(b => {
+      if(b.dataset.tab===t) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); }); };
+
+  /* --- Instalación. Chrome/Edge/Android disparan beforeinstallprompt; Safari/iOS no lo implementa
+         y allí lo único posible es explicar el gesto (Compartir → Añadir a pantalla de inicio). --- */
+  const instalada = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone===true;
+  if(instalada()) H.classList.add('pwa');
+  const iOS = /iP(hone|od|ad)/.test(navigator.platform||'') || /iPhone|iPad|iPod/.test(navigator.userAgent)
+              || (/Mac/.test(navigator.platform||'') && navigator.maxTouchPoints>1);   // iPad se anuncia como Mac
+  let PROMPT = null;
+  const verInstalar = v => ['install_btn','install_login'].forEach(id => { const e=$(id); if(e) e.hidden = !v; });
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); PROMPT = e; verInstalar(true); });
+  window.addEventListener('appinstalled', () => { PROMPT = null; verInstalar(false); toast('✓ Replica instalada'); });
+  window.pwaInstalar = async function(){
+    if(PROMPT){
+      const p = PROMPT; PROMPT = null; p.prompt();
+      const r = await p.userChoice.catch(() => null);
+      if(r && r.outcome === 'accepted') verInstalar(false); else PROMPT = p;   // si cancela, el botón sigue disponible
+      return;
+    }
+    alertModal('En iPhone o iPad (Safari): pulsa Compartir ⬆️ y elige «Añadir a pantalla de inicio».\n\n'
+      + 'En computador (Chrome o Edge): usa el icono de instalar ⊕ de la barra de direcciones.\n\n'
+      + 'Queda con su icono, a pantalla completa y abre al instante.', {title:'📲 Instalar Replica'});
+  };
+  if(iOS && !instalada()) verInstalar(true);
+
+  /* --- Service worker: la app abre sin red (shell + iconos en caché; /api/ nunca se cachea). --- */
+  let ESPERA = null, ACTUALIZANDO = false;
+  const teniaSW = 'serviceWorker' in navigator && !!navigator.serviceWorker.controller;
+  const avisarNueva = sw => { ESPERA = sw; const b = $('upd_bar'); if(b) b.hidden = false; };
+  window.pwaActualizar = function(){
+    const b = $('upd_bar'); if(b) b.hidden = true;
+    if(!ESPERA){ location.reload(); return; }
+    ACTUALIZANDO = true; ESPERA.postMessage({type:'SKIP_WAITING'});
+  };
+  if('serviceWorker' in navigator && location.protocol === 'https:'){
+    navigator.serviceWorker.register(BASE + '/sw.js', {scope: RAIZ}).then(reg => {
+      if(reg.waiting && teniaSW) avisarNueva(reg.waiting);   // quedó uno esperando de una visita anterior
+      reg.addEventListener('updatefound', () => {
+        const n = reg.installing; if(!n) return;
+        n.addEventListener('statechange', () => {
+          if(n.state === 'installed' && navigator.serviceWorker.controller) avisarNueva(n); });
+      });
+    }).catch(() => {});   // sin service worker el panel funciona igual: solo pierde el modo sin conexión
+    // Recarga SOLO si el usuario pidió actualizar: hacerlo por sorpresa cerraría la sesión, porque la
+    // credencial vive únicamente en memoria (M17).
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if(ACTUALIZANDO) location.reload(); });
+  }
+
+  /* --- Sin conexión: aviso visible y errores de red en castellano (antes salía "Failed to fetch"). --- */
+  // navigator.onLine no basta: devuelve true con portales cautivos, con el backend caído y —en varios
+  // navegadores— al abrir la app ya sin red desde la caché del service worker. Así que el aviso también
+  // se enciende cuando una llamada a la API falla por red, y se apaga en cuanto otra responde.
+  let CAIDO = false;
+  function pintarRed(){
+    const off = !navigator.onLine || CAIDO, b = $('offline_bar');
+    if(b) b.hidden = !off;
+    H.classList.toggle('offline', off);
+  }
+  window.addEventListener('online', () => { CAIDO = false; pintarRed(); toast('✓ Conexión restablecida'); });
+  window.addEventListener('offline', pintarRed);
+  pintarRed();
+  const _api = window.api;
+  if(typeof _api === 'function') window.api = function(p, o){
+    return _api(p, o).then(r => { if(CAIDO){ CAIDO = false; pintarRed(); } return r; }, err => {
+      const m = (err && err.message) || '';
+      const red = !navigator.onLine || /fetch|network|Load failed/i.test(m);
+      if(red && !CAIDO){ CAIDO = true; pintarRed(); }
+      if(!navigator.onLine) throw new Error('Sin conexión: revisa tu red e inténtalo otra vez.');
+      if(red) throw new Error('No se pudo conectar con el servidor. Inténtalo otra vez.');
+      throw err;
+    });
+  };
 })();
 </script></body></html>"""

@@ -510,5 +510,91 @@ class TelegramAccountTests(unittest.TestCase):
         self.assertGreater(admin.config.tg_status["checked_at"], int(time.time()) - 5)
 
 
+class PwaTests(unittest.TestCase):
+    """PWA: manifest, service worker e iconos. Son PUBLICOS a proposito (el navegador los pide sin
+    la cabecera Authorization) y deben resolver bien la raiz REAL del panel, que con API Gateway
+    lleva el stage delante (/dev/admin/)."""
+
+    def setUp(self):
+        admin.config = FakeConfig()
+        admin.subscribers = FakeSubs()
+        os.environ["ADMIN_USER"] = "admin"
+        os.environ["ADMIN_PASSWORD"] = "secret123"
+
+    def tearDown(self):
+        admin.config = admin.subscribers = None
+        os.environ.pop("ADMIN_USER", None)
+        os.environ.pop("ADMIN_PASSWORD", None)
+
+    def test_manifest_publico_y_rutas_con_stage(self):
+        resp = admin.lambda_handler(_event("GET", "/admin/manifest.webmanifest", auth=False), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertIn("application/manifest+json", resp["headers"]["Content-Type"])
+        m = json.loads(resp["body"])
+        self.assertEqual(m["start_url"], "/dev/admin/")
+        self.assertEqual(m["scope"], "/dev/")          # cubre /dev/admin y /dev/admin/ (sin barra y con ella)
+        self.assertEqual(m["display"], "standalone")
+        self.assertTrue(all(i["src"].startswith("/dev/admin/") for i in m["icons"]))
+        self.assertIn("maskable", [i["purpose"] for i in m["icons"]])
+        self.assertTrue(all(s["url"].startswith("/dev/admin/?tab=") for s in m["shortcuts"]))
+
+    def test_sw_publico_con_ambito_ampliado(self):
+        resp = admin.lambda_handler(_event("GET", "/admin/sw.js", auth=False), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertIn("text/javascript", resp["headers"]["Content-Type"])
+        # Sin esta cabecera el navegador rechaza un ambito por encima de la ruta del propio sw.js.
+        self.assertEqual(resp["headers"]["Service-Worker-Allowed"], "/dev/")
+        self.assertIn("no-cache", resp["headers"]["Cache-Control"])
+        self.assertIn("RAIZ='/dev/admin/'", resp["body"])
+        self.assertNotIn("__VER__", resp["body"])
+        self.assertIn("API", resp["body"])             # el fetch handler excluye /api/ de la cache
+
+    def test_sw_nunca_cachea_la_api(self):
+        js = admin.lambda_handler(_event("GET", "/admin/sw.js", auth=False), None)["body"]
+        self.assertIn("API=RAIZ+'api/'", js)
+        self.assertIn("indexOf(API) === 0", js)   # sale de la cache antes de tocar nada
+
+    def test_iconos_publicos_en_base64(self):
+        for ruta in ("/admin/icon-192.png", "/admin/icon-512.png",
+                     "/admin/icon-maskable-512.png", "/admin/apple-touch-icon.png"):
+            resp = admin.lambda_handler(_event("GET", ruta, auth=False), None)
+            self.assertEqual(resp["statusCode"], 200, ruta)
+            self.assertEqual(resp["headers"]["Content-Type"], "image/png")
+            self.assertTrue(resp["isBase64Encoded"], ruta)
+            crudo = base64.b64decode(resp["body"])
+            self.assertTrue(crudo.startswith(bytes([0x89]) + b"PNG"), ruta)   # PNG de verdad, no un placeholder
+            self.assertGreater(len(crudo), 2000, ruta)
+
+    def test_shell_resuelve_la_raiz_real(self):
+        body = admin.lambda_handler(_event("GET", "/admin", auth=False), None)["body"]
+        self.assertNotIn("__RAIZ__", body)             # sin sustituir, el navegador pediria /dev/manifest...
+        self.assertIn('href="/dev/admin/manifest.webmanifest"', body)
+        self.assertIn('href="/dev/admin/apple-touch-icon.png"', body)
+
+    def test_rutas_sin_stage(self):
+        # Invocacion directa de la funcion (o API Gateway sin stage): la raiz es /admin/ y el ambito /.
+        ev = {"rawPath": "/admin/manifest.webmanifest",
+              "requestContext": {"http": {"method": "GET", "path": "/admin/manifest.webmanifest"}},
+              "headers": {}, "body": None}
+        m = json.loads(admin.lambda_handler(ev, None)["body"])
+        self.assertEqual(m["start_url"], "/admin/")
+        self.assertEqual(m["scope"], "/")
+
+    def test_version_cambia_con_el_html(self):
+        # La version del cache sale del hash del shell: al desplegar un panel distinto cambia el
+        # nombre del cache y el SW se renueva solo (dentro de un contenedor se memoiza).
+        v = admin._pwa_version()
+        self.assertEqual(len(v), 12)
+        self.assertTrue(all(c in "0123456789abcdef" for c in v))
+        self.assertEqual(admin._pwa_version(), v)      # memoizado: mismo shell, misma version
+        original, memo = admin._PAGE, admin._PWA_VER
+        try:
+            admin._PAGE, admin._PWA_VER = original + "<!-- otro deploy -->", ""
+            self.assertNotEqual(admin._pwa_version(), v)
+        finally:
+            admin._PAGE, admin._PWA_VER = original, memo
+        self.assertEqual(admin._pwa_version(), v)
+
+
 if __name__ == "__main__":
     unittest.main()

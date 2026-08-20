@@ -1,13 +1,35 @@
 # Manual — Usar Replica con el mismo canal del administrador
 
-`Para: un usuario NUEVO del panel · No requiere conocimientos técnicos · Actualizado: 2026-07-20`
+`Para: un usuario NUEVO del panel · No requiere conocimientos técnicos · Actualizado: 2026-08-20`
 
 Este manual explica cómo una segunda persona usa la plataforma **Replica** aprovechando el mismo
 canal de origen que ya tiene configurado el administrador: ver las listas que se capturan del canal,
 enviarlas a sus contactos y programar envíos — sin tocar nada de la configuración técnica.
 
 > El panel funciona bien en **computador y en el celular** (el menú, las tablas y los formularios se
-> adaptan a la pantalla). Puedes operar todo desde el teléfono.
+> adaptan a la pantalla). Puedes operar todo desde el teléfono, donde el menú se ve como una **barra
+> de botones abajo**, al alcance del pulgar.
+
+### Instálalo como app (recomendado, 10 segundos)
+
+El panel es una **app instalable**: queda con su ícono en tu teléfono o escritorio y abre a pantalla
+completa, sin la barra del navegador.
+
+- **Android / Chrome / Edge:** entra al panel y toca **⬇ Instalar app** (arriba a la derecha, o en la
+  pantalla de ingreso). Si no aparece, usa el menú **⋮ → Instalar aplicación / Añadir a pantalla de inicio**.
+- **iPhone / iPad (Safari):** toca **Compartir** (el cuadrito con la flecha ↑) → **Añadir a pantalla de
+  inicio**. El botón ⬇ del panel te muestra estos mismos pasos, porque iOS no permite instalar solo.
+- **Computador (Chrome/Edge):** el mismo botón ⬇, o el icono de instalar en la barra de direcciones.
+
+Otras dos cosas útiles:
+
+- **☀️/🌙 Tema claro u oscuro:** el botón junto a ⬇ alterna **automático → claro → oscuro** y recuerda
+  tu elección. En *automático* sigue lo que tenga configurado tu teléfono.
+- **Aviso de versión nueva:** cuando se publica una mejora del panel aparece abajo «✨ Versión nueva».
+  Actualiza cuando puedas: **recarga y te pedirá tu usuario y contraseña otra vez** (por seguridad la
+  sesión no se guarda en el dispositivo). Puedes dejarlo para después.
+- **Sin conexión:** si te quedas sin datos, la app abre igual y muestra lo último cargado con el aviso
+  **📴 Sin conexión**. Los envíos y los cambios necesitan red: se reanudan cuando vuelve.
 
 ---
 
@@ -179,6 +201,9 @@ estado EN PAUSA se ve en **ámbar**; el rojo se reserva solo para fallos):
 | "Hay envíos atascados" | 📡 Actividad → Problemas: **reintenta** los atascados; si algo quedó pegado, **Vaciar cola**. |
 | "El panel me bloqueó el ingreso" | 5 intentos fallidos bloquean 5 minutos. Espera y reintenta, o usa el reseteo por correo. |
 | "Sale 'EN PAUSA' (en ámbar) en 🏠 Inicio" | Es el estado del envío AUTOMÁTICO. Tus envíos manuales salen igual. |
+| "Sale 📴 Sin conexión" | No hay red (o el servidor no responde). Ves lo último cargado; espera y reintenta — los envíos no se pierden. |
+| "Me pide la contraseña otra vez" | Pasa al recargar o al actualizar a la versión nueva: la sesión vive solo mientras la app está abierta. |
+| "No veo el botón ⬇ Instalar app" | Ya la tienes instalada (ahí se oculta), o tu navegador no lo soporta: usa **⋮ → Instalar aplicación**, y en iPhone **Compartir → Añadir a pantalla de inicio**. |
 
 ## 12. Buenas prácticas
 

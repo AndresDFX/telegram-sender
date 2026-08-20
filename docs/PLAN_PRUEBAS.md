@@ -1,6 +1,6 @@
 # Plan de pruebas — Replica (Telegram/WhatsApp broadcasting)
 
-`Actualizado: 2026-07-20 · Suite: 313 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
+`Actualizado: 2026-08-20 · Suite: 320 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
 
 Este plan cubre **qué probar, cómo y con qué criterio de aceptación** en los tres niveles que tiene el
 proyecto: (1) suite automatizada, (2) smoke post-deploy y (3) pruebas E2E manuales por flujo. Incluye
@@ -13,8 +13,11 @@ cambio futuro no los reintroduzca sin que nadie lo note.
 
 | Nivel | Qué valida | Cuándo corre | Herramienta |
 |-------|------------|--------------|-------------|
-| **Unitaria** (313 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
+| **Unitaria** (320 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints, PWA | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
 | **Sintaxis del servicio Node** | `index.js` y `dynamoAuth.js` parsean | Local, antes de commit | `node --check whatsapp-service/src/*.js` |
+| **Sintaxis del JS del panel** | El JS embebido en `_PAGE` y el `sw.js` parsean (un paréntesis suelto = panel en blanco) | Local, antes de commit | `python scripts/revisar_js_panel.py` |
+| **Smoke visual de la UI** | El panel pinta en claro/oscuro y escritorio/móvil sin errores JS | Tras tocar el panel | `python scripts/capturas_ui.py` → `.build/ui/` |
+| **PWA desplegada** | Service worker activo, precaché, apertura sin red, aviso de sin conexión | Tras cada deploy del panel | `PANEL_URL=<AdminUrl> python scripts/verificar_pwa_desplegada.py` |
 | **Smoke post-deploy** | El stack desplegado responde y está cableado | Tras cada deploy relevante | Checklist §3 (manual/CLI) |
 | **E2E manual** | Flujos completos de negocio con cuentas de prueba | Antes de activar envío real / tras cambios grandes | Checklist §4 (panel + Telegram/WhatsApp reales) |
 | **Integración local** (futuro) | DynamoDB/SQS reales en Docker | Propuesto — ver [specs/20-tests-integracion.md](../specs/20-tests-integracion.md) | dynamodb-local + ElasticMQ |
@@ -41,6 +44,7 @@ CI (`.github/workflows/deploy.yml`): en cada push a `main` corre los tests y, si
 | Casos de uso | `test_application_*` (broadcasting, dispatch, deliver_batch, materialize_schedules, poll_channel, onboarding) | Captura vs envío (A12/M25), plan fraccionado, claim de lotes (A4/A13/M5/B17/M29), idempotencia por destinatario (A3), avance de horarios (A2), preview (B15/B16), id determinista (M18) |
 | Adapters | `test_adapters_*` (dynamodb, whatsapp, broadcast_store, telegram…) | Dedup fail-open/estricto + métrica EMF (A8/M10/M30), `/count` dedicado (M16), estados de broadcast (M8), `registrar_error` ordenado (B18), TTL/lotes (M7/M9) |
 | Entrypoints | `test_entrypoint_*` (receiver, worker, admin, dispatcher, poller) | Auth webhook fail-closed, dedup del receiver (A8), pausa/manual del worker (A9/B7), guardia de config (A12), lockout del panel (M26) |
+| PWA | `test_entrypoint_admin.PwaTests` | Manifest/`sw.js`/iconos **públicos** (sin auth) y con las rutas del stage resueltas, ámbito ampliado (`Service-Worker-Allowed`), el SW **nunca** cachea `/api/`, versión del shell que cambia con el HTML |
 
 **Regla de trabajo:** todo bug corregido lleva test de regresión con el ID del hallazgo en el nombre
 (`test_a12_…`, `test_m18_…`). Si un test con ID falla, se está reintroduciendo un bug conocido: no
@@ -69,6 +73,9 @@ Correr tras cada deploy que toque Lambdas o template. Credenciales: `.env.aws` (
    `…-dedup-infra` (nueva), `…-dlq-no-vacia`, `…-worker-errores`; todas `OK` o `INSUFFICIENT_DATA`.
 9. **Reglas activas:** EventBridge (dispatcher/poller) `ENABLED`; ESM del worker `Enabled`, BatchSize **1** (invariante B8).
 10. **DLQ vacía:** `ApproximateNumberOfMessagesVisible = 0` en la DLQ.
+11. **PWA sana** (si el deploy tocó el panel): `PANEL_URL=<AdminUrl> python scripts/verificar_pwa_desplegada.py`
+    → **`PWA OK`** (service worker activo con ámbito por encima de `/admin`, shell+iconos en caché, la app
+    abre sin red, `/api/` nunca cacheado, sin errores JS). Detalle manual en §4 F11.
 
 ---
 
@@ -144,9 +151,44 @@ prueba con SOLO esas cuentas; `sending_enabled=False` salvo en el caso que lo pr
 5. **Marca acento-insensible**: ✅ el encabezado «IPRÓ PARTS» (con tilde) NO aparece en el «mensaje que se envía» (`test_quita_marca_ipro_parts`).
 
 ### F10 — Responsive (móvil)
-1. Abrir el panel en un teléfono (o DevTools ~390px): ✅ la nav de 5 pestañas **envuelve** (no corta «Ajustes»); sub-nav y filtros a ancho completo; botones/tap targets cómodos (≥44px).
+1. Abrir el panel en un teléfono (o DevTools ~390px): ✅ las 5 pestañas se ven como **barra inferior fija** (icono + etiqueta, sin cortar «Ajustes»); sub-nav y filtros a ancho completo; botones/tap targets cómodos (≥44px).
 2. ✅ Al enfocar un campo NO hace zoom automático (iOS: inputs a 16px); la caja de login no desborda; en el Historial la columna **Fechas** se oculta (su info sigue en el detalle).
 3. ✅ Ritmo de espaciado: los botones de acción («Guardar…») no quedan pegados al campo de arriba.
+4. ✅ El contenido no queda tapado por la barra inferior (hay `padding-bottom`) y los avisos (toast, sin conexión, versión nueva) salen **encima** de ella; en teléfonos con notch/barra de gestos nada se corta (`env(safe-area-inset-*)`).
+5. ✅ Los KPIs de **🏠 Inicio** se ven en 2×2 (no uno por fila).
+
+### F11 — App instalable (PWA), tema y modo sin conexión
+> Automatizable en su mayor parte: `PANEL_URL=<AdminUrl> python scripts/verificar_pwa_desplegada.py`.
+1. **Estáticos públicos sin auth** (los pide el navegador sin credenciales):
+   `curl -s -o /dev/null -w "%{http_code} %{content_type}\n" <AdminUrl>/manifest.webmanifest` → **200
+   `application/manifest+json`**; igual para `/sw.js` (**200 `text/javascript`**, con cabecera
+   `Service-Worker-Allowed` y `cache-control: no-cache`) y para `/icon-192.png`, `/icon-512.png`,
+   `/icon-maskable-512.png`, `/apple-touch-icon.png` (**200 `image/png`**).
+   ✅ `<AdminUrl>/api/config` sin auth sigue dando **401** (la PWA no abrió ningún hueco).
+2. **Instalar**: en Chrome/Edge (Android o escritorio) aparece **⬇ Instalar app** → instala y abre en
+   ventana propia sin barra del navegador; ✅ una vez instalada el botón **desaparece**. En iOS/Safari el
+   botón muestra las instrucciones de *Compartir → Añadir a pantalla de inicio* (iOS no expone el
+   evento de instalación).
+3. **Icono y arranque**: el icono en el escritorio/launcher es el isotipo de Replica (en Android,
+   recortado en círculo sin comerse el glifo — icono *maskable*); al abrir, el color de la barra de
+   estado coincide con el tema.
+4. **Atajos** (mantener pulsado el icono en Android): ✍️ Enviar, 📡 Actividad, 👥 Contactos → abre el
+   panel en esa pestaña (deep link `?tab=`).
+5. **Sin conexión**: activar modo avión y abrir la app → ✅ carga (shell desde caché) y muestra
+   **📴 Sin conexión**; cualquier acción que necesite red falla con mensaje en castellano («Sin
+   conexión: revisa tu red…»), **no** «Failed to fetch». Al volver la red → toast «✓ Conexión
+   restablecida» y el aviso se retira.
+6. **Nunca cachea datos**: con red y sesión abierta, ✅ los datos que se ven son los del servidor (el SW
+   no guarda `/api/`): un cambio hecho en otro dispositivo se ve al recargar la pestaña.
+7. **Versión nueva**: tras desplegar un cambio del panel, con la app abierta aparece **✨ Versión nueva**;
+   ✅ «Después» la deja para luego (no interrumpe un envío en curso) y «Actualizar» recarga y **vuelve a
+   pedir credenciales** (la credencial vive solo en memoria, M17). ✅ Nunca recarga sin que el usuario lo pida.
+8. **Tema**: el botón alterna **automático → claro → oscuro** y persiste tras recargar; ✅ al recargar en
+   claro **no hay destello oscuro** (se aplica antes del primer pintado); en modo automático, cambiar el
+   tema del sistema cambia el panel; ✅ en claro todo se lee (contraste AA) y el logotipo conserva el
+   degradado (no sale como bloque naranja).
+9. **Accesibilidad**: con Tab el primer foco es «Saltar al contenido»; ✅ la pestaña activa se anuncia
+   (`aria-current`) y los avisos se leen por lector de pantalla (`aria-live`).
 
 ---
 
