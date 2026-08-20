@@ -148,7 +148,14 @@ En push a `main` (paths `src/lambda/`, `infra/cloudformation/`, `scripts/`, el w
 
 New → Web Service → conectar repo → **Root Directory `whatsapp-service`** → Runtime **Docker** → auto-deploy en push. Variables: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`, `WHATSAPP_SESSION_ID` (default `default`), `AWS_ACCESS_KEY_ID/SECRET/REGION`, `SEND_DELAY_MS` (default 2000), `PORT` (default 8080). La sesión Baileys se persiste en la tabla DynamoDB `telegram-sync-dev-whatsapp-auth`, por eso sobrevive a reinicios sin re-escanear QR. Caveat: el plan Free hace spin-down a ~15 min; al despertar reutiliza la sesión (`POST /reconnect`). El build en Render requiere instalar `git`+`ca-certificates`, `npm install --legacy-peer-deps` y reescribir URLs git SSH→HTTPS (Baileys clona libsignal por SSH).
 
-**Auto-deploy VERIFICADO (2026-08-20).** No hay que hacer nada manual: `git push` a `main` con cambios en `whatsapp-service/` y Render construye y publica solo. Medido: commit `329008b` empujado 21:47 UTC → corriendo 21:52:41 UTC (**~5 min**, incluido el build de Docker con `npm install`). Cómo comprobarlo en cualquier momento (no necesita el token del servicio ni la API de Render):
+**Auto-deploy VERIFICADO (2026-08-20).** No hay que hacer nada manual: `git push` a `main` y Render construye y publica solo. Dos medidas del mismo día:
+
+| Push | Qué tocaba | Render sirviéndolo | Tardanza |
+|---|---|---|---|
+| `329008b` 21:47 UTC | `whatsapp-service/` (build real, `npm install`) | 21:52:41 UTC (`src` nuevo) | **~5 min** |
+| `124f24a` 22:02 UTC | solo `src/lambda/`, tests y docs | 22:02:46 UTC (`commit` nuevo, `src` igual) | **~30 s** (capas Docker en caché) |
+
+La segunda fila es el hallazgo importante: **Render redespliega en CADA push a `main`, aunque no toque `whatsapp-service/`** (no hay Build Filters configurados). El código no cambia (la huella `src` se mantiene), pero el contenedor sí es nuevo → **el socket de WhatsApp se reinicia en cada push del repo**, no solo en los del servicio. Si molesta: Render → el servicio → *Settings → Build & Deploy → **Build Filters*** → Included Paths `whatsapp-service/**` (pendiente, requiere el dashboard). Cómo comprobar el despliegue en cualquier momento (no necesita el token del servicio ni la API de Render):
 
 ```bash
 python scripts/verificar_deploy_render.py                # ¿corre el código del repo?
@@ -157,7 +164,7 @@ python scripts/verificar_deploy_render.py --esperar 900   # espera al despliegue
 
 Compara la huella `src` de `/health` con la del working tree. **Si dice DESFASADO tras ~10 min**, el auto-deploy se apagó: Render → el servicio → *Settings → Build & Deploy → Auto-Deploy = On* (rama `main`), o dispara el **Deploy Hook** de esa misma pantalla con un `POST`. Ojo: `--esperar` con cambios sin commitear siempre fallará (el host solo ve lo empujado) — el script lo avisa.
 
-**Cada deploy reinicia el socket de WhatsApp** (contenedor nuevo): la sesión se retoma desde DynamoDB, pero un envío en vuelo puede cortarse. No despliegues el servicio en medio de una difusión grande.
+**Cada push a `main` reinicia el socket de WhatsApp** (contenedor nuevo, ver tabla): la sesión se retoma desde DynamoDB, pero un envío en vuelo puede cortarse. No hagas push en medio de una difusión grande por WhatsApp.
 
 ---
 

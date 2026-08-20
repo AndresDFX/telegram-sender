@@ -14,7 +14,8 @@ Cómo compara (sin necesitar el token del servicio ni la API de Render):
                coincide, el código desplegado es idéntico al del working tree (los CRLF se
                normalizan, porque el checkout de Windows los tiene y el de Linux no).
   * `commit` — sólo informativo: lo inyecta Render (`RENDER_GIT_COMMIT`) y puede faltar en otros
-               hosts. Se compara con el último commit que tocó `whatsapp-service/`.
+               hosts. Se compara con `HEAD` (Render redespliega en CADA push a `main`, aunque no
+               toque `whatsapp-service/`) y con el último commit que sí tocó el servicio.
 
 Salida: 0 si el servicio está al día · 1 si está desfasado o no se pudo comprobar.
 """
@@ -80,11 +81,13 @@ def main() -> int:
 
     esperada = huella_local()
     commit_servicio = git("log", "-1", "--format=%h %ct", "--", "whatsapp-service")
+    head = git("rev-parse", "--short", "HEAD")
     sucio = bool(git("status", "--porcelain", "--", "whatsapp-service"))
     print(f"servicio:        {args.url}")
     print(f"huella del repo: {esperada}" + ("  (⚠ hay cambios SIN COMMIT: el host nunca los tendrá)" if sucio else ""))
     if commit_servicio:
-        print(f"último commit de whatsapp-service/: {commit_servicio.split()[0]}")
+        print(f"último commit de whatsapp-service/: {commit_servicio.split()[0]}"
+              + (f" · HEAD del repo: {head}" if head else ""))
 
     limite = time.time() + max(0, args.esperar)
     intento = 0
@@ -99,6 +102,10 @@ def main() -> int:
                 print("\nAL DÍA: el servicio corre exactamente el código del repo.")
                 if commit:
                     print(f"  commit desplegado: {commit}")
+                    # Render redespliega en cada push: un commit distinto a HEAD con la misma huella
+                    # significa contenedor de antes del último push (mismo código, sin consecuencias).
+                    if head and not head.startswith(commit) and not commit.startswith(head):
+                        print(f"  · el contenedor es anterior al último push ({head}), pero el código es el mismo.")
                 return 0
             if desplegada is None:
                 # El servicio aún no tiene el sello -> es una versión ANTERIOR a este cambio.

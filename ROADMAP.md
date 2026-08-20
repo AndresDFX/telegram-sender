@@ -104,6 +104,11 @@ normalizada** `entidad:accion`. 360 tests.
 - ✅ **CI/CD** — `.github/workflows/deploy.yml` (tests siempre; deploy a CFN gated por la variable
   `DEPLOY_ENABLED`). **Auto-deploy ACTIVADO y validado** (push a `main` → tests → deploy a CFN):
   Secrets de AWS/app cargados y `DEPLOY_ENABLED=true` vía `scripts/set-github-secrets.ps1`.
+- ✅ **Auto-deploy del servicio WhatsApp (Render) validado (2026-08-20)** — el servicio sella su build
+  (`/health` → `commit` + huella `src`) y `scripts/verificar_deploy_render.py` dice `AL DÍA`/`DESFASADO`;
+  el panel lo muestra como `· build <sha>`. 🔜 **[P2·S] Build Filters en Render** (Included Paths
+  `whatsapp-service/**`): hoy **cada** push a `main` redespliega el contenedor y reinicia el socket de
+  WhatsApp aunque el código del servicio no cambie (requiere el dashboard de Render).
 - 🔜 **[P1·M] HTTPS + dominio + WAF** (requiere registrar dominio) · **[P1·L] logs estructurados** ·
   staging/prod → ola 4.
 - ✅ **Alarmas por email** — suscripción de `castano.julian@correounivalle.edu.co` al tópico SNS

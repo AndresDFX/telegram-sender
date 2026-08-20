@@ -18,7 +18,7 @@ cambio futuro no los reintroduzca sin que nadie lo note.
 | **Sintaxis del JS del panel** | El JS embebido en `_PAGE` y el `sw.js` parsean (un paréntesis suelto = panel en blanco) | Local, antes de commit | `python scripts/revisar_js_panel.py` |
 | **Smoke visual de la UI** | El panel pinta en claro/oscuro y escritorio/móvil sin errores JS | Tras tocar el panel | `python scripts/capturas_ui.py` → `.build/ui/` |
 | **PWA desplegada** | Service worker activo, precaché, apertura sin red, aviso de sin conexión | Tras cada deploy del panel | `PANEL_URL=<AdminUrl> python scripts/verificar_pwa_desplegada.py` |
-| **Deploy del servicio WhatsApp** | Render corre el mismo código que el repo (valida que el auto-deploy sigue vivo) | Tras tocar `whatsapp-service/` | `python scripts/verificar_deploy_render.py [--esperar 900]` |
+| **Deploy del servicio WhatsApp** | Render corre el mismo código que el repo (valida que el auto-deploy sigue vivo) | Tras cada push a `main` (Render redespliega siempre, ver §3.6) | `python scripts/verificar_deploy_render.py [--esperar 900]` |
 | **Smoke post-deploy** | El stack desplegado responde y está cableado | Tras cada deploy relevante | Checklist §3 (manual/CLI) |
 | **E2E manual** | Flujos completos de negocio con cuentas de prueba | Antes de activar envío real / tras cambios grandes | Checklist §4 (panel + Telegram/WhatsApp reales) |
 | **Integración local** (futuro) | DynamoDB/SQS reales en Docker | Propuesto — ver [specs/20-tests-integracion.md](../specs/20-tests-integracion.md) | dynamodb-local + ElasticMQ |
@@ -117,9 +117,12 @@ Correr tras cada deploy que toque Lambdas o template. Credenciales: `.env.aws` (
 5. **Guardia A12 (backend):** `POST /api/config {"sending_enabled":true}` sin `auto_telegram_list`
    → **400** con mensaje de lista.
 6. **Servicio WhatsApp:** `curl https://telegram-sender-dm43.onrender.com/health` → `{ok:true, commit, src, …}`;
-   `/status` (con token) reporta `connected` y nº de contactos. Si el deploy tocó `whatsapp-service/`:
-   `python scripts/verificar_deploy_render.py` → **`AL DÍA`** (Render despliega solo en ~5 min; si sale
-   `DESFASADO` pasados ~10 min, el auto-deploy está apagado — ver HANDOFF §Despliegue del servicio WhatsApp).
+   `/status` (con token) reporta `connected` y nº de contactos. `python scripts/verificar_deploy_render.py`
+   → **`AL DÍA`** (Render redespliega en **cada** push a `main`: ~5 min si el push tocó `whatsapp-service/`,
+   ~30 s si no; si sale `DESFASADO` pasados ~10 min, el auto-deploy está apagado — ver HANDOFF §Despliegue
+   del servicio WhatsApp). El `commit` de `/health` debe coincidir con el `HEAD` de `main`; y como el
+   contenedor es nuevo, **`connected` puede tardar unos segundos** en volver a `true` (retoma la sesión
+   desde DynamoDB).
 7. **`/count` desplegado (M16):** `POST /count` (con token) devuelve `{count, mode}` — si da 404, el
    servicio Node de Render está desactualizado (el adapter caerá al fallback `count_only`).
 8. **Alarmas:** `aws cloudwatch describe-alarms --alarm-name-prefix telegram-sync-dev` → incluye

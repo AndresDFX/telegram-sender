@@ -45,8 +45,12 @@ efímero como Render).
 
 ### Despliegue automático (y cómo comprobarlo)
 
-Render trae **Auto-Deploy** activado: cada `git push` a `main` que toque `whatsapp-service/` dispara
-build + publicación, sin pasos manuales. Verificado el 2026-08-20: **~5 min** de push a producción.
+Render trae **Auto-Deploy** activado: cada `git push` a `main` dispara build + publicación, sin pasos
+manuales. Verificado el 2026-08-20: un push que toca este directorio tarda **~5 min** en estar vivo
+(build de Docker con `npm install`); un push que **no** lo toca también redespliega, en **~30 s**
+(todas las capas en caché, el código no cambia). O sea: el contenedor —y con él el socket de
+WhatsApp— se reinicia en cada push del repo. Para evitarlo, Render → *Settings → Build & Deploy →
+Build Filters* → Included Paths `whatsapp-service/**`.
 
 Para saber qué código corre de verdad, el servicio sella su build y lo publica en `/health` (sin token):
 
@@ -70,8 +74,8 @@ Si sale `DESFASADO` pasados ~10 min del push, el auto-deploy se apagó: Render �
 misma pantalla (`curl -X POST "<deploy-hook-url>"`). El panel también muestra el sello: Ajustes →
 🔌 Conexiones → estado de WhatsApp (`· build <sha>`).
 
-> Cada despliegue **reinicia el socket** (contenedor nuevo): la sesión se retoma desde DynamoDB, pero
-> un envío en vuelo puede cortarse. Evita desplegar en medio de una difusión grande.
+> Cada push a `main` **reinicia el socket** (contenedor nuevo): la sesión se retoma desde DynamoDB,
+> pero un envío en vuelo puede cortarse. Evita desplegar en medio de una difusión grande.
 
 ## Vinculación MANUAL (recomendado: desde tu IP, no la de Render)
 
