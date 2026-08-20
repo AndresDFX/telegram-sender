@@ -25,9 +25,10 @@ secuencial** (dispatcher EventBridge, un lote a la vez) con **ventana horaria**,
 de bot/cuenta (bot o userbot) · panel admin moderno (Basic Auth) · **design system de grids**
 (buscador + paginación + eliminar-todos), **borrar = desencolar**, **cola de envío en vivo + vaciar**,
 **detalle enriquecido** (mensaje anterior + comparador de precios + fechas), **matriz de estado**,
-**nomenclatura sin jerga** y **diseño responsive** · **PWA instalable** (manifest + service worker +
+**nomenclatura sin jerga** y **diseño responsive** · **vinculación de WhatsApp guiada por código desde
+el mismo teléfono** (QR como alternativa) · **PWA instalable** (manifest + service worker +
 iconos, atajos, aviso de versión nueva y de sin conexión), **tema claro/oscuro** y **navegación inferior
-en móvil**. 320 tests.
+en móvil**. 326 tests.
 
 ---
 
@@ -70,6 +71,10 @@ en móvil**. 320 tests.
   `GET /api/metrics`. (Falta el desglose de "top fallos" por razón → ola 2.)
 - ✅ **Programar envío a hora/fecha exacta** — `not_before` en el plan; el dispatcher difiere hasta
   esa hora; input datetime en el compositor.
+- ✅ **Vincular WhatsApp sin scripts, desde el mismo teléfono** — número → código de 8 dígitos (grande,
+  con copiar) → pasos guiados → **confirmación automática** al volver de WhatsApp; el QR queda como
+  opción secundaria para otro aparato. Mismo modelo que el userbot de Telegram; solo panel (el servicio
+  Node ya exponía `/pair` y `/status`).
 - ✅ **Opt-out / bloqueados de WhatsApp** — el servicio cuenta fallos por jid y **auto-excluye** a los
   que fallan ≥ umbral (3); endpoints `/blocked` + `/blocked/clear`; tarjeta "Auto-excluidos por
   fallos" en la pestaña WhatsApp (ver / reincluir).

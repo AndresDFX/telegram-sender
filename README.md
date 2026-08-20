@@ -131,7 +131,14 @@ un redespliegue de código. Instrucciones exactas en el docstring del script.
 
 Servicio Node portable (Render free) en `whatsapp-service/`. La sesión y los contactos viven en DynamoDB
 (sobreviven reinicios/spin-down). **Vincular** (una vez) desde tu IP residencial — WhatsApp bloquea el
-linking desde IPs de datacenter:
+linking desde IPs de datacenter.
+
+Lo normal es hacerlo **desde el panel, sin scripts** (igual que el userbot de Telegram): Ajustes →
+🔌 Conexiones → *Vincular WhatsApp* → **📱 Desde este teléfono** → número → código de 8 dígitos →
+lo escribes en WhatsApp (⋮ → Dispositivos vinculados → Vincular con número de teléfono) y el panel
+confirma solo (sondea `/status` cada 3 s). El **QR** queda como opción secundaria para vincular desde
+otro aparato. Si el servicio corre en Render y WhatsApp responde «inténtalo más tarde», se vincula en
+local y Render reusa la sesión:
 
 ```powershell
 ./scripts/vincular-whatsapp-local.ps1            # QR en vivo (o -Pair <num> para código de 8 dígitos)
@@ -176,7 +183,8 @@ técnicos y **responsive** (funciona en celular). **Design system de grids:** ca
   bloque «**⛔ Excluir si el nombre contiene…**» (`telegram_exclude_patterns` / `whatsapp_exclude_patterns`);
   en WhatsApp además auto-excluidos por fallos.
 - **⚙️ Ajustes** (sub-nav): **🔌 Conexiones** (Telegram por bot o «mi cuenta personal», WhatsApp reenvío +
-  QR/código; «Conectar bot») · **📥 Captura** (canal de Telegram, markup %, símbolos, «texto al final del
+  **vinculación guiada por código desde el mismo teléfono** (QR como alternativa para otro aparato);
+  «Conectar bot») · **📥 Captura** (canal de Telegram, markup %, símbolos, «texto al final del
   mensaje», «textos a eliminar de cada lista», imagen, «probar cómo queda una lista») · **📤 Ritmo y
   horarios** (anti-baneo «mensajes por grupo»/«pausa entre mensajes», ventanas, **zona horaria como select
   legible**) · **👤 Acceso** (usuarios con roles, correo de recuperación Resend, cambio de contraseña) ·
@@ -279,7 +287,7 @@ los nuevos se crean con rol explícito (por defecto `user`). El front muestra/oc
 
 ```powershell
 docker compose -f docker/docker-compose.yml up --build     # stack local (DynamoDB + webhook inline)
-python -m unittest discover -s tests                        # 320 tests (sin AWS; boto3 perezoso + fakes)
+python -m unittest discover -s tests                        # 326 tests (sin AWS; boto3 perezoso + fakes)
 ```
 
 Los tests cubren markup, composición, recipients/listas + exclusión por patrón, cliente Telegram
@@ -324,7 +332,7 @@ Servicio WhatsApp: `WHATSAPP_TOKEN`, `WHATSAPP_AUTH_TABLE`, `BROADCASTS_TABLE`, 
 - ✅ **PWA instalable** (manifest + service worker + iconos, atajos, aviso de versión nueva y de sin conexión),
   **tema claro/oscuro** y **navegación inferior en móvil** — desplegado y verificado en el stack `dev`.
 - ✅ Despliegue reproducible (`package-lambda.ps1` + `deploy.ps1`); **CI en GitHub Actions** (tests en cada
-  push; deploy gated por `DEPLOY_ENABLED`); **320 tests**.
+  push; deploy gated por `DEPLOY_ENABLED`); **326 tests**.
 - ⏳ Secretos en SSM/Secrets Manager; encriptación KMS de la tabla config; rate-limit distribuido del login.
 - ⚠️ WhatsApp/userbot: riesgo de baneo por envío masivo — usar listas pequeñas y delays altos.
 

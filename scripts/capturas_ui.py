@@ -75,6 +75,26 @@ os.makedirs(OUT, exist_ok=True)
 URL = "http://127.0.0.1:8791/admin"
 
 
+def capturar_wa(page, tema, nombre):
+    """Vinculación de WhatsApp «desde este teléfono»: hay que dispararla a mano (número → código).
+
+    Se interceptan status/pair para simular «sin vincular» y un código recién emitido; así la
+    captura muestra la caja del código y los pasos, que es lo que hay que revisar a ojo.
+    """
+    page.route("**/api/whatsapp/status", lambda r: r.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"connected": False, "contacts": 0, "pairingCode": None})))
+    page.route("**/api/whatsapp/pair", lambda r: r.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"pairingCode": "48213765", "number": "573001234567"})))
+    page.evaluate("goStep('ajustes','conexiones')")
+    page.wait_for_timeout(400)
+    page.fill("#wa_pair_num", "573001234567")
+    page.click("#wa_pair_btn")
+    page.wait_for_timeout(800)
+    page.screenshot(path=f"{OUT}/wa-vincular-{tema}-{nombre}.png", full_page=True)
+
+
 def entrar(page):
     """Entra al panel sin backend real: inyecta la credencial en memoria y arranca boot()."""
     page.evaluate("""() => {
@@ -106,6 +126,7 @@ with sync_playwright() as p:
                 # Vista de pantalla (sin full_page): es la única que muestra la barra inferior fija
                 # en su sitio; con full_page se dibuja flotando a media altura.
                 page.screenshot(path=f"{OUT}/vp-{arch}-{tema}-{nombre}.png")
+            capturar_wa(page, tema, nombre)
             print(f"{tema}/{nombre}: errores JS = {errores[:3] if errores else 'ninguno'}")
             ctx.close()
     b.close()

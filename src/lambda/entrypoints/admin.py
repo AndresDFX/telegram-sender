@@ -1343,7 +1343,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             _audit("whatsapp_blocked_clear")
             return _whatsapp_proxy("/blocked/clear", body={})
         if sub == "/api/whatsapp/pair" and method == "POST":
-            return _whatsapp_proxy("/pair", timeout=25, body={"number": _body(event).get("number", "")})
+            numero = "".join(c for c in str(_body(event).get("number", "")) if c.isdigit())
+            # Vincular BORRA la sesión guardada (clearOnStart en el servicio): queda auditado.
+            # El número va enmascarado: la auditoría es consultable por cualquier usuario del panel.
+            _audit("whatsapp:pair", f"vincular por código (número ···{numero[-4:]})" if numero else "vincular por código")
+            return _whatsapp_proxy("/pair", timeout=25, body={"number": numero})
         if sub == "/api/whatsapp/reset" and method == "POST":
             _audit("whatsapp:reset", "limpiar sesión de WhatsApp")
             return _whatsapp_proxy("/reset", timeout=25, body={})
@@ -2246,6 +2250,28 @@ html[data-theme="light"] #login .box a{color:var(--ac2)!important}
   .stat{flex:1 1 calc(50% - 5px);min-width:0;padding:14px 10px}
   .stat b{font-size:22px}
 }
+/* ── Vinculación de WhatsApp desde el mismo teléfono (código de 8 dígitos) ──────────────── */
+.wa-code-box{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;
+  padding:14px 16px;background:var(--elev);border:1px dashed var(--bd-int);border-radius:var(--r-sm)}
+.wa-code-lbl{flex:1 1 100%;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut)}
+.wa-code{flex:1;min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:30px;font-weight:800;letter-spacing:6px;line-height:1.15;color:var(--wa);
+  font-variant-numeric:tabular-nums;user-select:all;-webkit-user-select:all}
+.wa-code-box button{flex:none}
+.wa-pasos{margin:12px 0 0;padding-left:22px;color:var(--tx2);font-size:13px;line-height:1.65}
+.wa-pasos b{color:var(--tx)}
+.wa-espera{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12.5px;color:var(--mut)}
+.wa-espera .ping{width:8px;height:8px;border-radius:50%;flex:none;background:var(--mut);animation:ping 1.8s infinite}
+.wa-espera.ok{color:var(--ok)}
+.wa-espera.ok .ping{background:var(--ok);animation:none}
+.wa-espera.bad{color:var(--bad)}
+.wa-espera.bad .ping{background:var(--bad);animation:none}
+/* El verde de marca de WhatsApp no llega a AA sobre fondo claro: ahí se usa su tinta oscura. */
+html[data-theme="light"] .wa-code{color:var(--ok-tint)}
+@media (max-width:620px){
+  .wa-code{font-size:26px;letter-spacing:4px;flex:1 1 100%}
+  .wa-code-box button{width:100%}
+}
 </style></head><body>
 <!-- Iconos de marca reutilizables (Telegram / WhatsApp) para mostrar junto a la info de cada canal. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -2408,21 +2434,40 @@ html[data-theme="light"] #login .box a{color:var(--ac2)!important}
    </div>
    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--bd)">
      <div style="font-weight:700;font-size:13px;margin-bottom:6px">Vincular WhatsApp</div>
-     <div class="hint" style="margin-bottom:10px">Si el QR da "inténtalo más tarde" (típico desde servidores), usa el código de 8 dígitos.</div>
-     <div class="row">
-       <div>
-         <button class="sec" style="width:100%" onclick="waStatus(true)">Mostrar QR</button>
-         <div><img id="wa_qr" class="preview" style="display:none"></div>
-         <div class="hint" id="wa_qr_hint" style="display:none">WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</div>
+     <div class="hint" style="margin-bottom:10px">Como en Telegram: <b>sin scripts y sin otro aparato</b>. Pones tu número, WhatsApp te pide un código de 8 dígitos y el panel confirma solo cuando quedas conectado.</div>
+     <div class="segf" id="wa_modo" role="group" aria-label="Cómo vincular WhatsApp" style="margin-bottom:12px">
+       <button type="button" data-m="tel" class="on" aria-pressed="true" onclick="waModo('tel')">📱 Desde este teléfono</button>
+       <button type="button" data-m="qr" aria-pressed="false" onclick="waModo('qr')">🖥 Con QR (otro aparato)</button>
+     </div>
+     <div id="wa_m_tel">
+       <div class="row">
+         <div><label>Tu número de WhatsApp (con código de país, sin +)</label><input id="wa_pair_num" inputmode="numeric" autocomplete="tel" placeholder="573001234567"></div>
+         <div style="display:flex;align-items:flex-end"><button class="sec" id="wa_pair_btn" style="width:100%" onclick="waPair()">Pedir código de 8 dígitos</button></div>
        </div>
-       <div>
-         <input id="wa_pair_num" placeholder="Número con código país, ej: 573001234567">
-         <button class="sec" style="width:100%;margin-top:8px" onclick="waPair()">Vincular por código</button>
-         <div class="hint" id="wa_pair_out" style="display:none"></div>
+       <div id="wa_pair_box" style="display:none">
+         <div class="wa-code-box">
+           <span class="wa-code-lbl">Escribe este código en WhatsApp</span>
+           <b class="wa-code" id="wa_code" aria-live="polite">····</b>
+           <button class="ghost" type="button" id="wa_code_copy" onclick="waCopyCode()">Copiar</button>
+         </div>
+         <ol class="wa-pasos">
+           <li>Abre <b>WhatsApp</b> en este mismo teléfono.</li>
+           <li>Entra a <b>⋮ (o Ajustes) → Dispositivos vinculados</b>.</li>
+           <li>Toca <b>Vincular dispositivo</b> y abajo <b>Vincular con número de teléfono</b>.</li>
+           <li>Escribe el código y vuelve aquí: la confirmación es automática.</li>
+         </ol>
+         <div class="wa-espera" id="wa_pair_wait"><span class="ping"></span><span id="wa_pair_out">Esperando…</span></div>
+         <div style="margin-top:10px"><button class="ghost" type="button" id="wa_pair_again" onclick="waPair()">Pedir otro código</button></div>
        </div>
      </div>
-     <div style="margin-top:10px"><button class="danger" onclick="waReset()">🗑 Limpiar sesión de WhatsApp</button> <span class="hint" id="wa_reset_out" style="margin-left:6px"></span></div>
-     <div class="hint" style="margin-top:10px">💡 Lo más fiable si Render bloquea el linking: vincula <b>localmente</b> (corre el servicio en tu PC con las mismas credenciales AWS) y Render reusará la sesión guardada en DynamoDB.</div>
+     <div id="wa_m_qr" style="display:none">
+       <div class="hint" style="margin-top:0">Para vincular desde <b>otro</b> aparato: muestra el QR aquí y escanéalo con el teléfono donde está WhatsApp.</div>
+       <button class="sec" style="margin-top:8px" onclick="waStatus(true)">Mostrar QR</button>
+       <div><img id="wa_qr" class="preview" style="display:none" alt="Código QR para vincular WhatsApp"></div>
+       <div class="hint" id="wa_qr_hint" style="display:none">WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</div>
+     </div>
+     <div style="margin-top:12px"><button class="danger" onclick="waReset()">🗑 Limpiar sesión de WhatsApp</button> <span class="hint" id="wa_reset_out" style="margin-left:6px"></span></div>
+     <div class="hint" style="margin-top:10px">💡 Si WhatsApp responde «inténtalo más tarde», es su bloqueo a los datacenter: vincula <b>localmente</b> (corre el servicio en tu PC con las mismas credenciales AWS) y Render reusará la sesión guardada en DynamoDB.</div>
    </div>
    <div class="callout warn">⚠️ Enviar masivamente por WhatsApp puede banear tu número. Empieza con listas pequeñas. <a href="javascript:void 0" onclick="goStep('fuentes','wa')">Gestionar exclusiones de WhatsApp →</a></div>
   </div>
@@ -2809,7 +2854,9 @@ async function api(p, opt){ opt=opt||{}; opt.headers=hdr(opt.headers); const r=a
   if(r.status===401){ logout(); throw new Error('401'); }
   if(!r.ok){ let _m=''; try{ _m=(await r.json()).error||''; }catch(e){} throw new Error(_m||('error '+r.status)); }
   return r.json(); }
-function toast(m,v){ const t=$('toast'); t.textContent=m;
+function toast(m,v){ const t=$('toast');
+  // El propio toast dibuja el icono (✓/!/i) con CSS: si el mensaje ya trae el visto, saldría doble.
+  t.textContent=String(m==null?'':m).replace(/^\s*[✓✔]\s*/,'');
   const cls = v===true ? 'err' : (typeof v==='string' && v ? v : '');  // true=err (compat); 'info'/'warn'/'err'
   // A8: los errores se anuncian de inmediato (assertive); el resto, cortés (polite).
   t.setAttribute('aria-live', (v===true||cls==='err'||cls==='warn') ? 'assertive' : 'polite');
@@ -3161,13 +3208,93 @@ async function waStatus(showQr){ $('wa_state').textContent='consultando...';
     if(showQr && s.qr){ $('wa_qr').src=s.qr; $('wa_qr').style.display='block'; $('wa_qr_hint').style.display='block'; }
     else if(!showQr){ $('wa_qr').style.display='none'; $('wa_qr_hint').style.display='none'; }
   }catch(e){ $('wa_state').textContent='servicio inaccesible (¿URL/token? ¿desplegado?)'; } }
-async function waPair(){ const num=$('wa_pair_num').value.replace(/[^0-9]/g,''); const out=$('wa_pair_out');
-  if(num.length<8){ toast('Número inválido (incluye código de país, sin +)',true); return; }
-  out.style.display='block'; out.textContent='generando código... (puede tardar unos segundos)';
-  try{ const r=await api('/api/whatsapp/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({number:num})});
-    if(r.pairingCode){ out.innerHTML='Código: <b style="font-size:19px;letter-spacing:3px;color:var(--ac2)">'+bcEsc(r.pairingCode)+'</b><br>En el teléfono: WhatsApp → Dispositivos vinculados → <b>Vincular con número de teléfono</b> → ingresa el código.'; }
-    else { out.textContent='No se pudo generar: '+(r.error||r.detalle||'desconocido'); } }
-  catch(e){ out.textContent='Error: el servicio no respondió (¿ya conectado? ¿URL/token?)'; } }
+/* ── Vinculación de WhatsApp «desde este teléfono» ─────────────────────────────────────────
+   Réplica del flujo que ya tiene el userbot de Telegram (número → código → conectado, todo en
+   el panel): sin scripts, sin QR y sin un segundo aparato. El servicio Node ya expone todo lo
+   necesario (`/pair` devuelve el código de 8 dígitos; `/status` dice cuándo quedó conectado),
+   así que esto es UI + sondeo: no hace falta tocar el servicio.
+   Ojo: `/pair` empieza limpio (clearOnStart) — si ya hay sesión, hay que confirmar y limpiar. */
+let WA_POLL=null, WA_T0=0, WA_CODE='';
+const WA_MAX_ESPERA=300;   // s: pasado ese punto el código de WhatsApp ya no sirve; se pide otro
+function waModo(m){
+  const box=$('wa_modo');
+  if(box) box.querySelectorAll('button').forEach(b=>{ const on=b.dataset.m===m;
+    b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false'); });
+  $('wa_m_tel').style.display = m==='tel' ? 'block' : 'none';
+  $('wa_m_qr').style.display  = m==='qr'  ? 'block' : 'none';
+  if(m!=='tel') waPararSondeo();
+}
+function waPararSondeo(){ if(WA_POLL){ clearInterval(WA_POLL); WA_POLL=null; } }
+function waEspera(txt, cls){ const w=$('wa_pair_wait'); if(w) w.className='wa-espera'+(cls?' '+cls:'');
+  const o=$('wa_pair_out'); if(o) o.textContent=txt; }
+function waPintarCodigo(c){ WA_CODE=String(c||'').replace(/[^0-9A-Za-z]/g,'');
+  // WhatsApp muestra el código en dos bloques de 4: se lee y se teclea mucho mejor.
+  $('wa_code').textContent = WA_CODE.length===8 ? (WA_CODE.slice(0,4)+' '+WA_CODE.slice(4)) : (WA_CODE||'····');
+  $('wa_pair_box').style.display='block'; }
+async function waCopyCode(){ if(!WA_CODE){ return; }
+  try{ await navigator.clipboard.writeText(WA_CODE); toast('✓ Código copiado'); }
+  catch(e){ // sin permiso de portapapeles (http, iOS viejo): al menos lo deja seleccionado
+    try{ const r=document.createRange(); r.selectNodeContents($('wa_code'));
+      const s=getSelection(); s.removeAllRanges(); s.addRange(r); toast('Selecciónalo y cópialo','warn'); }catch(e2){} } }
+async function waPair(){
+  const inp=$('wa_pair_num'); const num=(inp.value||'').replace(/[^0-9]/g,'');
+  if(num.length<8){ toast('Escribe tu número con código de país y sin +, ej: 573001234567',true); inp.focus(); return; }
+  const btn=$('wa_pair_btn'), otro=$('wa_pair_again');
+  // El servicio rechaza /pair si ya está conectado (409): para re-vincular hay que cerrar la
+  // sesión actual primero. Se avisa con claridad porque es destructivo.
+  let est=null; try{ est=await api('/api/whatsapp/status'); }catch(e){}
+  if(est && est.connected){
+    if(!await confirmModal('WhatsApp ya está conectado ('+(est.contacts||0)+' contactos). Volver a vincular CIERRA la sesión actual: los envíos por WhatsApp se detienen hasta que termines de vincular. ¿Seguir?',
+      {danger:true,okText:'Cerrar y vincular de nuevo'})) return;
+  }
+  try{ localStorage.setItem('wa_num',num); }catch(e){}
+  waPararSondeo(); btn.disabled=true; if(otro) otro.disabled=true;
+  $('wa_pair_box').style.display='block'; $('wa_code').textContent='····';
+  try{
+    if(est && est.connected){ waEspera('Cerrando la sesión actual…','');
+      await api('/api/whatsapp/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); }
+    waEspera('Pidiendo el código a WhatsApp… (hasta 20 s)','');
+    const r=await api('/api/whatsapp/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({number:num})});
+    if(r.pairingCode){
+      waPintarCodigo(r.pairingCode); WA_T0=Date.now();
+      waEspera('Esperando que escribas el código en WhatsApp…','');
+      WA_POLL=setInterval(waSondear,3000);
+      toast('✓ Código listo: escríbelo en WhatsApp');
+    } else { waEspera('WhatsApp no devolvió código: '+(r.detalle||r.error||'motivo desconocido')+'. Reintenta en un minuto.','bad'); }
+  }catch(e){
+    const m=String(e&&e.message||'');
+    if(m==='ya_conectado') waEspera('WhatsApp sigue conectado. Usa «🗑 Limpiar sesión de WhatsApp» y vuelve a pedir el código.','bad');
+    else if(m==='numero_invalido') waEspera('Número inválido: código de país y solo dígitos, ej: 573001234567.','bad');
+    else if(m==='sin_codigo') waEspera('WhatsApp no entregó el código a tiempo. Suele pasar cuando el servicio corre en un datacenter (Render): reintenta en un minuto o vincula localmente.','bad');
+    else if(m==='whatsapp_no_configurado') waEspera('Falta la URL o el token del servicio de WhatsApp (arriba en esta tarjeta).','bad');
+    else if(m==='whatsapp_inaccesible') waEspera('El servicio de WhatsApp no responde (¿dormido o caído?). Revisa la URL y reintenta.','bad');
+    else waEspera('No se pudo pedir el código: '+(m||'error desconocido'),'bad');
+  }
+  finally{ btn.disabled=false; if(otro) otro.disabled=false; }
+}
+/* Sondeo del estado mientras el usuario teclea el código en su teléfono: al conectar, cierra
+   el flujo solo (sin recargar: la credencial vive solo en memoria, M17). */
+async function waSondear(){
+  const caja=$('wa_pair_box');
+  // Si el usuario se fue de 🔌 Conexiones (o cambió a modo QR) el sondeo deja de tener sentido.
+  if(!caja || !caja.offsetParent){ waPararSondeo(); return; }
+  const seg=Math.round((Date.now()-WA_T0)/1000);
+  try{
+    const s=await api('/api/whatsapp/status');
+    if(s.connected){
+      waPararSondeo(); $('wa_code').textContent='✓';
+      waEspera('WhatsApp vinculado · '+(s.contacts||0)+' contactos sincronizados.','ok');
+      toast('✓ WhatsApp vinculado'); waStatus(false); try{ refreshConn(); }catch(e){}
+      return;
+    }
+    // El servicio puede renovar el código sin que el usuario haga nada: se repinta el vigente.
+    const vig=String(s.pairingCode||'').replace(/[^0-9A-Za-z]/g,'');
+    if(vig && vig!==WA_CODE) waPintarCodigo(vig);
+    if(s.lastPairError){ waPararSondeo(); waEspera('WhatsApp rechazó la vinculación: '+s.lastPairError+'. Pide otro código.','bad'); return; }
+    waEspera('Esperando que escribas el código en WhatsApp… ('+seg+' s)','');
+  }catch(e){ waEspera('Sin respuesta del servicio; reintentando… ('+seg+' s)',''); }
+  if(seg>WA_MAX_ESPERA){ waPararSondeo(); waEspera('El código caducó (pasaron '+Math.round(seg/60)+' min). Pide otro código.','bad'); }
+}
 async function saveAccount(){ const b={ send_mode:$('send_mode').value, telethon_api_id:$('telethon_api_id').value,
    telethon_api_hash:$('telethon_api_hash').value, telethon_session:$('telethon_session').value };
   const bt=$('bot_token').value.trim(); if(bt) b.bot_token=bt;
@@ -3207,7 +3334,9 @@ async function waReset(){
   if(!await confirmModal('¿Limpiar la sesión de WhatsApp? Se borran las credenciales y tendrás que volver a vincular (QR o código).',{danger:true,okText:'Limpiar sesión'})) return;
   $('wa_reset_out').textContent='Limpiando…';
   try{ await api('/api/whatsapp/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-    $('wa_reset_out').textContent='✓ Sesión limpiada. Vincula de nuevo (QR o código).'; toast('✓ Sesión de WhatsApp limpiada'); setTimeout(()=>{ try{waStatus(false)}catch(e){} },1500); }
+    // Un código pedido antes del reset ya no vale: se corta el sondeo y se cierra la caja.
+    try{ waPararSondeo(); WA_CODE=''; $('wa_pair_box').style.display='none'; }catch(e){}
+    $('wa_reset_out').textContent='✓ Sesión limpiada. Vincula de nuevo (código o QR).'; toast('✓ Sesión de WhatsApp limpiada'); setTimeout(()=>{ try{waStatus(false)}catch(e){} },1500); }
   catch(e){ $('wa_reset_out').textContent=''; toast('Error al limpiar',true); }
 }
 async function tgVerify(){ $('tg_state').textContent='verificando...';
@@ -4462,5 +4591,15 @@ function plStartPolling(){
       throw err;
     });
   };
+})();
+/* --- Vinculación de WhatsApp desde el mismo teléfono: recordar el número y confirmar al volver. --- */
+(function(){
+  // El número no es un secreto y es lo único que hay que reescribir en cada re-vinculación.
+  try{ const n=localStorage.getItem('wa_num'); const i=$('wa_pair_num'); if(n && i && !i.value) i.value=n; }catch(e){}
+  // Volver del cambio a WhatsApp es la señal más fiable de que ya escribió el código: se
+  // comprueba al instante en vez de esperar hasta 3 s al siguiente tick.
+  document.addEventListener('visibilitychange', () => {
+    if(!document.hidden && typeof WA_POLL!=='undefined' && WA_POLL) waSondear();
+  });
 })();
 </script></body></html>"""

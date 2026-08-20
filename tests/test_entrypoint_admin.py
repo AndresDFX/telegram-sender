@@ -596,5 +596,87 @@ class PwaTests(unittest.TestCase):
         self.assertEqual(admin._pwa_version(), v)
 
 
+class WhatsappPairTests(unittest.TestCase):
+    """Vinculacion de WhatsApp «desde este telefono» (numero → codigo de 8 digitos → conectado).
+    El servicio Node ya expone /pair y /status: el panel solo añade guia, sondeo y auditoria."""
+
+    def setUp(self):
+        admin.config = FakeConfig()
+        admin.subscribers = FakeSubs()
+        admin.audit_store = FakeAudit()
+        self._proxy = admin._whatsapp_proxy
+        self.llamadas = []
+        os.environ["ADMIN_USER"] = "admin"
+        os.environ["ADMIN_PASSWORD"] = "secret123"
+
+    def tearDown(self):
+        admin._whatsapp_proxy = self._proxy
+        admin.config = admin.subscribers = admin.audit_store = None
+        os.environ.pop("ADMIN_USER", None)
+        os.environ.pop("ADMIN_PASSWORD", None)
+
+    def _fake_proxy(self, respuesta=None, status=200):
+        def _p(path, timeout=20.0, body=None):
+            self.llamadas.append((path, timeout, body))
+            cuerpo = respuesta if respuesta is not None else {"pairingCode": "12345678", "number": "573001234567"}
+            return {"statusCode": status, "headers": {"Content-Type": "application/json"}, "body": json.dumps(cuerpo)}
+        admin._whatsapp_proxy = _p
+
+    def test_pair_audita_con_el_numero_enmascarado(self):
+        # La auditoria la lee cualquier usuario del panel: el numero completo no debe quedar ahi.
+        self._fake_proxy()
+        resp = admin.lambda_handler(_event("POST", "/admin/api/whatsapp/pair", {"number": "573001234567"}), None)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(json.loads(resp["body"])["pairingCode"], "12345678")
+        entrada = admin.audit_store.entries[-1]
+        self.assertEqual(entrada["action"], "whatsapp:pair")
+        self.assertIn("4567", entrada["detail"])          # solo los ultimos 4 digitos
+        self.assertNotIn("573001234567", entrada["detail"])
+        self.assertNotIn("57300", entrada["detail"])
+
+    def test_pair_normaliza_el_numero_antes_de_enviarlo(self):
+        # El campo acepta lo que el usuario tenga a mano ("+57 300 123 4567"); el servicio Node
+        # espera solo digitos.
+        self._fake_proxy()
+        admin.lambda_handler(_event("POST", "/admin/api/whatsapp/pair", {"number": "+57 300 123-4567"}), None)
+        path, _timeout, body = self.llamadas[-1]
+        self.assertEqual(path, "/pair")
+        self.assertEqual(body, {"number": "573001234567"})
+
+    def test_pair_sin_numero_no_inventa_detalle(self):
+        self._fake_proxy({"error": "numero_invalido"}, status=400)
+        resp = admin.lambda_handler(_event("POST", "/admin/api/whatsapp/pair", {}), None)
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertEqual(admin.audit_store.entries[-1]["detail"], "vincular por código")
+
+    def test_pair_propaga_el_fallo_del_servicio(self):
+        # 504 sin_codigo es el caso tipico desde un datacenter: el panel necesita el codigo de error
+        # para explicarlo en castellano, no un 200 vacio.
+        self._fake_proxy({"error": "sin_codigo", "detalle": "no se generó el código a tiempo"}, status=504)
+        resp = admin.lambda_handler(_event("POST", "/admin/api/whatsapp/pair", {"number": "573001234567"}), None)
+        self.assertEqual(resp["statusCode"], 504)
+        self.assertEqual(json.loads(resp["body"])["error"], "sin_codigo")
+
+    def test_status_expone_lo_que_necesita_el_sondeo(self):
+        self._fake_proxy({"connected": True, "contacts": 42, "pairingCode": None})
+        resp = admin.lambda_handler(_event("GET", "/admin/api/whatsapp/status"), None)
+        self.assertEqual(self.llamadas[-1][0], "/status")
+        cuerpo = json.loads(resp["body"])
+        self.assertTrue(cuerpo["connected"])
+        self.assertEqual(cuerpo["contacts"], 42)
+
+    def test_panel_trae_el_flujo_guiado_con_el_qr_como_secundario(self):
+        html = admin.lambda_handler(_event("GET", "/admin", auth=False), None)["body"]
+        for pieza in ('id="wa_modo"', 'id="wa_pair_num"', 'id="wa_pair_btn"', 'id="wa_pair_box"',
+                      'id="wa_code"', 'class="wa-pasos"', "Dispositivos vinculados",
+                      "Vincular con número de teléfono", "function waSondear", "function waCopyCode"):
+            self.assertIn(pieza, html, pieza)
+        # El modo por defecto es el del mismo telefono; el QR queda detras del segundo boton.
+        self.assertIn('data-m="tel" class="on"', html)
+        self.assertIn('data-m="qr"', html)
+        self.assertLess(html.index('data-m="tel"'), html.index('data-m="qr"'))
+        self.assertIn("/api/whatsapp/status", html)     # el sondeo confirma solo, sin recargar
+
+
 if __name__ == "__main__":
     unittest.main()

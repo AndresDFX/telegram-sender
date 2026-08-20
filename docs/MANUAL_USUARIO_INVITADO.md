@@ -183,8 +183,12 @@ estado EN PAUSA se ve en **ámbar**; el rojo se reserva solo para fallos):
 
 ## 10. Lo que NO debes tocar (a menos que seas tú el responsable)
 
-- **Ajustes → 🔌 Conexiones** (cuenta de Telegram por bot o por *mi cuenta personal*, WhatsApp por
-  QR/código, tokens): si se desconecta la cuenta, se caen la captura y los envíos de todos.
+- **Ajustes → 🔌 Conexiones** (cuenta de Telegram por bot o por *mi cuenta personal*, vinculación de
+  WhatsApp, tokens): si se desconecta la cuenta, se caen la captura y los envíos de todos. Ojo con
+  **Vincular WhatsApp**: pedir un código nuevo **cierra la sesión que está funcionando** (el panel te
+  avisa antes). Solo hazlo si eres el responsable de re-vincular; si te toca, es guiado: pones el
+  número, WhatsApp te da un código de 8 dígitos, lo escribes en **⋮ → Dispositivos vinculados →
+  Vincular con número de teléfono** y el panel confirma solo.
 - **Canal de Telegram** (Ajustes → 📥 Captura): cambiarlo redirige TODA la captura a otro canal.
 - **Aumento de precio, imagen de la lista y textos a eliminar de cada lista** (Ajustes → 📥 Captura):
   afectan lo que ven los clientes de todos los usuarios.

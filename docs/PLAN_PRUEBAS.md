@@ -1,6 +1,6 @@
 # Plan de pruebas — Replica (Telegram/WhatsApp broadcasting)
 
-`Actualizado: 2026-08-20 · Suite: 320 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
+`Actualizado: 2026-08-20 · Suite: 326 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
 
 Este plan cubre **qué probar, cómo y con qué criterio de aceptación** en los tres niveles que tiene el
 proyecto: (1) suite automatizada, (2) smoke post-deploy y (3) pruebas E2E manuales por flujo. Incluye
@@ -13,7 +13,7 @@ cambio futuro no los reintroduzca sin que nadie lo note.
 
 | Nivel | Qué valida | Cuándo corre | Herramienta |
 |-------|------------|--------------|-------------|
-| **Unitaria** (320 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints, PWA | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
+| **Unitaria** (326 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints, PWA | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
 | **Sintaxis del servicio Node** | `index.js` y `dynamoAuth.js` parsean | Local, antes de commit | `node --check whatsapp-service/src/*.js` |
 | **Sintaxis del JS del panel** | El JS embebido en `_PAGE` y el `sw.js` parsean (un paréntesis suelto = panel en blanco) | Local, antes de commit | `python scripts/revisar_js_panel.py` |
 | **Smoke visual de la UI** | El panel pinta en claro/oscuro y escritorio/móvil sin errores JS | Tras tocar el panel | `python scripts/capturas_ui.py` → `.build/ui/` |
@@ -43,7 +43,7 @@ CI (`.github/workflows/deploy.yml`): en cada push a `main` corre los tests y, si
 | Dominio | `test_domain_*` (message, markup, scheduling, schedules, recipients, auth, models) | Limpieza de texto/teléfonos (M3), markup y monedas (B3), ventanas horarias (M1), próximos runs (M2), exclusión por patrón (B2), códigos de reseteo (B1) |
 | Casos de uso | `test_application_*` (broadcasting, dispatch, deliver_batch, materialize_schedules, poll_channel, onboarding) | Captura vs envío (A12/M25), plan fraccionado, claim de lotes (A4/A13/M5/B17/M29), idempotencia por destinatario (A3), avance de horarios (A2), preview (B15/B16), id determinista (M18) |
 | Adapters | `test_adapters_*` (dynamodb, whatsapp, broadcast_store, telegram…) | Dedup fail-open/estricto + métrica EMF (A8/M10/M30), `/count` dedicado (M16), estados de broadcast (M8), `registrar_error` ordenado (B18), TTL/lotes (M7/M9) |
-| Entrypoints | `test_entrypoint_*` (receiver, worker, admin, dispatcher, poller) | Auth webhook fail-closed, dedup del receiver (A8), pausa/manual del worker (A9/B7), guardia de config (A12), lockout del panel (M26) |
+| Entrypoints | `test_entrypoint_*` (receiver, worker, admin, dispatcher, poller) | Auth webhook fail-closed, dedup del receiver (A8), pausa/manual del worker (A9/B7), guardia de config (A12), lockout del panel (M26), vinculación WhatsApp por código (`WhatsappPairTests`: número normalizado, auditoría **enmascarada**, códigos de error propagados) |
 | PWA | `test_entrypoint_admin.PwaTests` | Manifest/`sw.js`/iconos **públicos** (sin auth) y con las rutas del stage resueltas, ámbito ampliado (`Service-Worker-Allowed`), el SW **nunca** cachea `/api/`, versión del shell que cambia con el HTML |
 
 **Regla de trabajo:** todo bug corregido lleva test de regresión con el ID del hallazgo en el nombre
@@ -130,8 +130,25 @@ prueba con SOLO esas cuentas; `sending_enabled=False` salvo en el caso que lo pr
 
 ### F7 — Vinculación WhatsApp (solo si hay que re-vincular)
 > ⚠️ Hacer desde IP residencial; ver HANDOFF. Riesgo de invalidar la sesión activa.
+
+**F7.a — Desde el panel, en el mismo teléfono (flujo guiado, sin scripts).** Abrir el panel en el
+teléfono donde está WhatsApp: **Ajustes → 🔌 Conexiones → Vincular WhatsApp**.
+1. Con la sesión **ya conectada**, pulsar «Pedir código»: ✅ sale el modal de confirmación avisando que
+   se cierra la sesión actual; al **cancelar** no pasa nada (sigue conectado, sin código).
+2. Sin sesión (o tras confirmar): número → «Pedir código de 8 dígitos» → ✅ código grande en formato
+   `XXXX XXXX` (<20 s) con botón **Copiar** que funciona, y los 4 pasos visibles.
+3. Escribir el código en WhatsApp (⋮ → Dispositivos vinculados → **Vincular con número de teléfono**) y
+   volver al panel: ✅ **se confirma solo** (sin recargar ni pedir credenciales otra vez) con
+   «WhatsApp vinculado · N contactos» y las pastillas del header en verde.
+4. Fallos honestos: sin URL/token → ✅ dice que faltan (no «error desconocido»); desde Render (IP de
+   datacenter) → ✅ explica el bloqueo y ofrece reintentar/vincular local; pasados 5 min sin escribir el
+   código → ✅ avisa que caducó y ofrece **Pedir otro código**. Salir de 🔌 Conexiones ✅ detiene el sondeo.
+5. **🖥 Con QR (otro aparato)**: el segundo botón del segmentado ✅ muestra el QR y oculta el flujo por código.
+6. ✅ En **Ajustes → 🛠️ Auditoría** queda `whatsapp:pair` con el número **enmascarado** (solo los últimos 4).
+
+**F7.b — Servicio Node (CLI, cuando el panel no puede vincular).**
 1. `/pair` con número: ✅ código de 8 dígitos en <20 s, o **504 con detalle** y vuelta limpia a modo
-   QR (B12 — sin códigos fantasma en logs).
+   QR (B12 — sin códigos fantasma en logs). Con sesión conectada devuelve **409 `ya_conectado`**.
 2. `/reset`: ✅ borra la sesión completa (B11 — si el borrado falla, se reintenta al próximo arranque,
    no re-vincula sobre sesión a medias). Render retoma la sesión desde DynamoDB tras vincular local.
 3. `/blocked/clear` + `/reconnect` inmediato: ✅ los opt-outs limpiados NO reviven (M19).
