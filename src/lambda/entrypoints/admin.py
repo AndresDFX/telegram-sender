@@ -3333,6 +3333,9 @@ async function waStatus(showQr){ $('wa_state').textContent='consultando...';
   try{ const s=await api('/api/whatsapp/status');
     let txt = s.connected ? ('conectado ✓ ('+(s.contacts||0)+' contactos)') : 'no conectado';
     if(!s.connected && s.lastClose) txt += ' · último cierre: '+s.lastClose;
+    // Sello del build del servicio Node: deja ver de un vistazo si el host (Render) ya desplegó
+    // la última versión o sigue con una vieja (antes no había forma de saberlo desde el panel).
+    const b=s.build||{}; if(b.commit||b.src) txt += ' · build '+(b.commit||b.src);
     $('wa_state').textContent = txt;
     if(showQr && s.qr){ $('wa_qr').src=s.qr; $('wa_qr').style.display='block'; $('wa_qr_hint').style.display='block'; }
     else if(!showQr){ $('wa_qr').style.display='none'; $('wa_qr_hint').style.display='none'; }

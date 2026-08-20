@@ -1,6 +1,6 @@
 # Plan de pruebas — Replica (Telegram/WhatsApp broadcasting)
 
-`Actualizado: 2026-08-20 · Suite: 358 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
+`Actualizado: 2026-08-20 · Suite: 360 tests · Estado del stack: telegram-sync-dev (us-east-1), CI auto-deploy activo`
 
 Este plan cubre **qué probar, cómo y con qué criterio de aceptación** en los tres niveles que tiene el
 proyecto: (1) suite automatizada, (2) smoke post-deploy y (3) pruebas E2E manuales por flujo. Incluye
@@ -13,11 +13,12 @@ cambio futuro no los reintroduzca sin que nadie lo note.
 
 | Nivel | Qué valida | Cuándo corre | Herramienta |
 |-------|------------|--------------|-------------|
-| **Unitaria** (358 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints, PWA, CRUD y nomenclatura | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
+| **Unitaria** (360 tests) | Dominio, casos de uso, adapters (mockeados), entrypoints, PWA, CRUD y nomenclatura | En cada push (CI) y localmente | `python -m pytest tests/ -q` |
 | **Sintaxis del servicio Node** | `index.js` y `dynamoAuth.js` parsean | Local, antes de commit | `node --check whatsapp-service/src/*.js` |
 | **Sintaxis del JS del panel** | El JS embebido en `_PAGE` y el `sw.js` parsean (un paréntesis suelto = panel en blanco) | Local, antes de commit | `python scripts/revisar_js_panel.py` |
 | **Smoke visual de la UI** | El panel pinta en claro/oscuro y escritorio/móvil sin errores JS | Tras tocar el panel | `python scripts/capturas_ui.py` → `.build/ui/` |
 | **PWA desplegada** | Service worker activo, precaché, apertura sin red, aviso de sin conexión | Tras cada deploy del panel | `PANEL_URL=<AdminUrl> python scripts/verificar_pwa_desplegada.py` |
+| **Deploy del servicio WhatsApp** | Render corre el mismo código que el repo (valida que el auto-deploy sigue vivo) | Tras tocar `whatsapp-service/` | `python scripts/verificar_deploy_render.py [--esperar 900]` |
 | **Smoke post-deploy** | El stack desplegado responde y está cableado | Tras cada deploy relevante | Checklist §3 (manual/CLI) |
 | **E2E manual** | Flujos completos de negocio con cuentas de prueba | Antes de activar envío real / tras cambios grandes | Checklist §4 (panel + Telegram/WhatsApp reales) |
 | **Integración local** (futuro) | DynamoDB/SQS reales en Docker | Propuesto — ver [specs/20-tests-integracion.md](../specs/20-tests-integracion.md) | dynamodb-local + ElasticMQ |
@@ -43,7 +44,7 @@ CI (`.github/workflows/deploy.yml`): en cada push a `main` corre los tests y, si
 | Dominio | `test_domain_*` (message, markup, scheduling, schedules, recipients, auth, models) | Limpieza de texto/teléfonos (M3), markup y monedas (B3), ventanas horarias (M1), próximos runs (M2), exclusión por patrón (B2), códigos de reseteo (B1) |
 | Casos de uso | `test_application_*` (broadcasting, dispatch, deliver_batch, materialize_schedules, poll_channel, onboarding) | Captura vs envío (A12/M25), plan fraccionado, claim de lotes (A4/A13/M5/B17/M29), idempotencia por destinatario (A3), avance de horarios (A2), preview (B15/B16), id determinista (M18) |
 | Adapters | `test_adapters_*` (dynamodb, whatsapp, broadcast_store, telegram…) | Dedup fail-open/estricto + métrica EMF (A8/M10/M30), `/count` dedicado (M16), estados de broadcast (M8), `registrar_error` ordenado (B18), TTL/lotes (M7/M9) |
-| Entrypoints | `test_entrypoint_*` (receiver, worker, admin, dispatcher, poller) | Auth webhook fail-closed, dedup del receiver (A8), pausa/manual del worker (A9/B7), guardia de config (A12), lockout del panel (M26), vinculación WhatsApp por código (`WhatsappPairTests`: número normalizado, auditoría **enmascarada**, códigos de error propagados) |
+| Entrypoints | `test_entrypoint_*` (receiver, worker, admin, dispatcher, poller) | Auth webhook fail-closed, dedup del receiver (A8), pausa/manual del worker (A9/B7), guardia de config (A12), lockout del panel (M26), vinculación WhatsApp por código (`WhatsappPairTests`: número normalizado, auditoría **enmascarada**, códigos de error propagados, y el **sello de build** del servicio Node llegando al panel) |
 | PWA | `test_entrypoint_admin.PwaTests` | Manifest/`sw.js`/iconos **públicos** (sin auth) y con las rutas del stage resueltas, ámbito ampliado (`Service-Worker-Allowed`), el SW **nunca** cachea `/api/`, versión del shell que cambia con el HTML |
 | CRUD | `test_entrypoint_admin.SchedulesCrudTests`, `UsersUpdateTests`, `PanelCrudTests` | Editar programados (hereda lo no enviado, valida igual que crear, no pisa el historial de ejecuciones), editar usuario/restablecer contraseña (solo admin, sin filtrar la clave a la auditoría), y que **cada operación tenga su botón en el panel** (un endpoint sin botón no existe para el usuario) |
 | Nomenclatura | `test_entrypoint_admin.NomenclaturaTests` | Recorre el AST buscando las llamadas a `_audit` y exige `entidad:accion` con la entidad **igual al segmento de la ruta HTTP**, que la entidad exista como ruta y que el panel tenga etiqueta para cada entidad y verbo (`ACC_ENT`/`ACC_VRB`) |
@@ -115,8 +116,10 @@ Correr tras cada deploy que toque Lambdas o template. Credenciales: `.env.aws` (
    mala 5 veces → **429** (lockout, no 401).
 5. **Guardia A12 (backend):** `POST /api/config {"sending_enabled":true}` sin `auto_telegram_list`
    → **400** con mensaje de lista.
-6. **Servicio WhatsApp:** `curl https://telegram-sender-dm43.onrender.com/health` → `{ok:true}`;
-   `/status` (con token) reporta `connected` y nº de contactos.
+6. **Servicio WhatsApp:** `curl https://telegram-sender-dm43.onrender.com/health` → `{ok:true, commit, src, …}`;
+   `/status` (con token) reporta `connected` y nº de contactos. Si el deploy tocó `whatsapp-service/`:
+   `python scripts/verificar_deploy_render.py` → **`AL DÍA`** (Render despliega solo en ~5 min; si sale
+   `DESFASADO` pasados ~10 min, el auto-deploy está apagado — ver HANDOFF §Despliegue del servicio WhatsApp).
 7. **`/count` desplegado (M16):** `POST /count` (con token) devuelve `{count, mode}` — si da 404, el
    servicio Node de Render está desactualizado (el adapter caerá al fallback `count_only`).
 8. **Alarmas:** `aws cloudwatch describe-alarms --alarm-name-prefix telegram-sync-dev` → incluye
@@ -286,8 +289,11 @@ teléfono donde está WhatsApp: **Ajustes → 🔌 Conexiones → Vincular Whats
 4. **Auto-excluido de WhatsApp: reincluir a UNO.** Ajustes → 🔌 Conexiones (WhatsApp) → «Auto-excluidos
    por fallos».
    - ✅ Cada contacto trae su botón **Reincluir**: vuelve a recibir envíos y los demás siguen excluidos.
-   - ✅ «Reincluir a todos» sigue disponible. ⚠️ Requiere el servicio Node redesplegado; con la versión
-     anterior el botón por contacto limpia **todos** los contadores (superconjunto inocuo, no un error).
+   - ✅ «Reincluir a todos» sigue disponible. El servicio Node ya está desplegado (Render auto-deploy);
+     confirma con `python scripts/verificar_deploy_render.py` → `AL DÍA` antes de dar por bueno el fallo,
+     porque con una versión anterior el botón por contacto limpiaría **todos** los contadores.
+   - ✅ El estado de WhatsApp en 🔌 Conexiones muestra `· build <sha>`: así se ve si el servicio quedó
+     desfasado sin salir del panel.
 5. **Auditoría legible.** Ajustes → 🛠️ Auditoría: ✅ las acciones se leen en español («Programados · editar»)
    y el buscador encuentra tanto por la etiqueta como por la clave cruda; los registros antiguos (anteriores
    a normalizar los nombres) siguen mostrándose tal cual, sin huecos.
@@ -317,6 +323,7 @@ teléfono donde está WhatsApp: **Ajustes → 🔌 Conexiones → Vincular Whats
 | Renombrar lista | Renombrar deja `auto_<canal>_list` y los programados apuntando al nombre viejo → el envío automático deja de difundir (variante de M25) | `PanelCrudTests.test_renombrar_una_lista` | F12.3 / F3.4 |
 | Restablecer contraseña | Un usuario sin rol admin restablece la clave de otro; o la clave acaba escrita en la auditoría | `UsersUpdateTests` (`…un_usuario_normal_no_puede…`, `…no_registra_la_contrasena…`) | F12.1 |
 | Nomenclatura | Una acción nueva se audita con un nombre distinto al de su ruta o sin etiqueta → la auditoría muestra jerga o queda ilegible | `NomenclaturaTests` (AST de `_audit` + `ACC_ENT`/`ACC_VRB`) | F12.5 |
+| Sello de build | El panel deja de mostrar qué versión corre el servicio Node (o el proxy filtra `build`) → un Render desfasado parece «al día» y se depuran bugs ya arreglados | `WhatsappPairTests` (`…deja_pasar_el_sello_de_build…`, `…el_panel_muestra_el_build…`) + `scripts/verificar_deploy_render.py` | F12.4 |
 
 ---
 

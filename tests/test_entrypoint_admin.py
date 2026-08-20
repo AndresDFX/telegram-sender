@@ -694,6 +694,19 @@ class WhatsappPairTests(unittest.TestCase):
         self.assertTrue(cuerpo["connected"])
         self.assertEqual(cuerpo["contacts"], 42)
 
+    def test_status_deja_pasar_el_sello_de_build_del_servicio(self):
+        # Sin este dato no hay forma de saber desde el panel si el host (Render) ya desplego la
+        # ultima version del servicio Node: /status es un proxy, asi que no debe filtrar campos.
+        self._fake_proxy({"connected": True, "contacts": 7,
+                          "build": {"commit": "329008b", "src": "99be42076190"}})
+        resp = admin.lambda_handler(_event("GET", "/admin/api/whatsapp/status"), None)
+        self.assertEqual(json.loads(resp["body"])["build"]["commit"], "329008b")
+
+    def test_el_panel_muestra_el_build_del_servicio(self):
+        html = admin.lambda_handler(_event("GET", "/admin", auth=False), None)["body"]
+        self.assertIn("s.build", html)
+        self.assertIn("' · build '", html)
+
     def test_panel_trae_el_flujo_guiado_con_el_qr_como_secundario(self):
         html = admin.lambda_handler(_event("GET", "/admin", auth=False), None)["body"]
         for pieza in ('id="wa_modo"', 'id="wa_pair_num"', 'id="wa_pair_btn"', 'id="wa_pair_box"',

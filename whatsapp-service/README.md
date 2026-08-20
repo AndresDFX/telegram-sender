@@ -11,8 +11,9 @@ efímero como Render).
 
 ## Endpoints (todos con `Authorization: Bearer <WHATSAPP_TOKEN>`, salvo `/` y `/health`)
 - `GET /` — página informativa (estado del servicio).
-- `GET /health` — para el healthcheck del host (sin token).
-- `GET /status` — `{connected, me, qr (dataURL), pairingCode, lastClose, contacts}`.
+- `GET /health` — para el healthcheck del host (sin token). Devuelve además el **sello del build**
+  (`commit`, `src`, `started_at`, `uptime_s`) para poder validar el despliegue — ver más abajo.
+- `GET /status` — `{connected, me, qr (dataURL), pairingCode, lastClose, contacts, build}`.
 - `GET /qr?token=...` — **página de QR en vivo** (se auto-renueva; el token va por query para abrirla en el navegador).
 - `POST /pair` — `{number}` (con código de país, solo dígitos) → `{pairingCode}` para vincular **por código de 8 dígitos** (alternativa al QR). Empieza limpio; si falla devuelve `{error, detalle}` con la causa real.
 - `POST /reset` — borra la sesión guardada y regenera QR (re-vincular desde cero, self-service).
@@ -41,6 +42,36 @@ efímero como Render).
 > Alternativas equivalentes (mismo contenedor): **Fly.io** o **Koyeb** (socket más estable, también
 > free), u **Oracle Always Free** (VM gratis siempre). Como la sesión vive en DynamoDB, puedes mover
 > el contenedor de host sin re-vincular.
+
+### Despliegue automático (y cómo comprobarlo)
+
+Render trae **Auto-Deploy** activado: cada `git push` a `main` que toque `whatsapp-service/` dispara
+build + publicación, sin pasos manuales. Verificado el 2026-08-20: **~5 min** de push a producción.
+
+Para saber qué código corre de verdad, el servicio sella su build y lo publica en `/health` (sin token):
+
+```jsonc
+{ "ok": true,
+  "commit": "329008b",       // RENDER_GIT_COMMIT (7 chars); null en hosts que no lo inyectan
+  "src": "99be42076190",     // sha256 de src/*.js + package.json, calculado al arrancar
+  "started_at": "2026-08-20T21:52:41.012Z", "uptime_s": 312 }
+```
+
+`src` es la señal fiable (no depende del host y normaliza CRLF, porque el checkout de Windows los
+tiene y el de Linux no). Desde la raíz del repo:
+
+```bash
+python scripts/verificar_deploy_render.py                 # ¿corre el código del repo? -> AL DÍA / DESFASADO
+python scripts/verificar_deploy_render.py --esperar 900    # espera al despliegue tras hacer push
+```
+
+Si sale `DESFASADO` pasados ~10 min del push, el auto-deploy se apagó: Render → el servicio →
+**Settings → Build & Deploy → Auto-Deploy = On** (rama `main`), o dispara el **Deploy Hook** de esa
+misma pantalla (`curl -X POST "<deploy-hook-url>"`). El panel también muestra el sello: Ajustes →
+🔌 Conexiones → estado de WhatsApp (`· build <sha>`).
+
+> Cada despliegue **reinicia el socket** (contenedor nuevo): la sesión se retoma desde DynamoDB, pero
+> un envío en vuelo puede cortarse. Evita desplegar en medio de una difusión grande.
 
 ## Vinculación MANUAL (recomendado: desde tu IP, no la de Render)
 

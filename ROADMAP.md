@@ -31,7 +31,7 @@ el mismo teléfono** (QR como alternativa) · **PWA instalable** (manifest + ser
 iconos, atajos, aviso de versión nueva y de sin conexión), **tema claro/oscuro** y **navegación inferior
 en móvil** · **CRUD completo por entidad** (editar programados, editar usuario/restablecer contraseña,
 renombrar listas arrastrando referencias, reincluir un auto-excluido de WhatsApp) con **nomenclatura
-normalizada** `entidad:accion`. 358 tests.
+normalizada** `entidad:accion`. 360 tests.
 
 ---
 
