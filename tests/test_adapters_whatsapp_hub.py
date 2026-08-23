@@ -226,50 +226,92 @@ class TestPresupuestoDeTiempo(unittest.TestCase):
         self.assertEqual(r["enviados"] + r["pendientes"] + len(r["fallos"]), r["en_este_lote"])
 
 
-class TestFirmaContraElClienteRealDelHub(unittest.TestCase):
+# =========================================================================== #
+# EL VECTOR DE INTEROPERABILIDAD
+#
+# Cada línea es `(método, ruta, ts, cuerpo, hexadecimal)`, y el hexadecimal lo produjo el
+# cliente REAL del hub (`wa-hub/clientes/python/hub.py`) con el secreto de abajo. Se
+# guarda acá A PROPÓSITO, y no se lee del hub en tiempo de prueba:
+#
+#   La primera versión importaba el fichero del hub por su ruta absoluta y FALLABA si no
+#   estaba. En un portátil con los dos repos al lado funcionaba; en CI el repo del hub no
+#   existe, así que la prueba se puso roja sin que nada estuviera mal. Y la alternativa
+#   —saltarse la prueba cuando no encuentra el hub— es peor: una prueba de
+#   interoperabilidad que se salta sola no prueba nada y deja creer que sí.
+#
+# Con el vector guardado no hay que elegir: corre SIEMPRE, en cualquier máquina, y sigue
+# cazando lo único que puede pasar de verdad —que la cadena canónica de ESTE archivo se
+# desvíe—. Lo que el vector no ve es un cambio del lado del HUB, y para eso está la prueba
+# de más abajo (que sí compara contra el cliente real cuando está a mano) y el propio
+# `check-firma` del hub, que lo compara contra el Python de la plataforma HV.
+#
+# Los cuatro casos no son decorativos: cuerpo normal, cuerpo VACÍO (el `sha256` de la
+# cadena vacía es un sitio clásico donde una implementación pone otra cosa), acentos +
+# emoji (si un lado codificara en latin-1, se ve acá) y otra RUTA (que tiene que dar otra
+# firma, o una petición capturada se reenvía a otro endpoint).
+# =========================================================================== #
+SECRETO_VECTOR = "s" * 64
+VECTOR = [
+    ("POST", "/v1/enviar", 1787000000, b'{"sesion":"replica","a":"57300111","texto":"hola"}',
+     "817522ccb09af2a9773a38032147d9dd2ee6894c04feff9be150f5376d6e14ae"),
+    ("POST", "/v1/enviar", 1787000001, b"",
+     "09c3d73a6f1cd0d99503b4f6d620b5b65475962bb45897db338138e790d8d3b8"),
+    ("POST", "/v1/enviar", 1787000002,
+     b'{"t": "oferta \xc3\xb1 \xf0\x9f\x92\xbc \xc2\xabcita\xc2\xbb"}',
+     "a4dd37408acdcb70991ed8a5842a4521d4e98d775658b787890bfa6c39d522b9"),
+    ("POST", "/v1/ping", 1787000003, b"{}",
+     "1681790e9385f25697a0c2e32f649639773ad8e3279ab96c6485315000f9a02b"),
+]
+
+
+class TestFirmaContraElHub(unittest.TestCase):
     """⚠️ LA PRUEBA QUE MÁS VALE.
 
     Si la cadena canónica de acá se desvía un solo byte de la del hub, el único síntoma es
     un **401 en el lado del hub**, sin más pista, con Réplica convencida de haber hecho lo
-    correcto. Se descarta firmando con el cliente REAL del hub y comparando.
-
-    Si el hub no está a mano, esto **FALLA** en vez de saltarse: una prueba de
-    interoperabilidad que se salta sola no prueba nada y deja creer que sí.
+    correcto. Es el fallo más caro que puede tener un webhook.
     """
 
     HUB_CLIENTE = r"C:/Projects/Personal/wa-hub/clientes/python/hub.py"
 
-    def test_misma_firma_que_el_hub(self):
-        self.assertTrue(
-            os.path.exists(self.HUB_CLIENTE),
-            "no encuentro el cliente del hub en %s: sin él esta prueba no prueba nada"
-            % self.HUB_CLIENTE,
-        )
+    def test_el_hexadecimal_es_el_del_hub(self):
+        """Corre SIEMPRE: el vector va guardado. Ver el comentario de arriba."""
+        for metodo, ruta, ts, cuerpo, esperado in VECTOR:
+            with self.subTest(ruta=ruta, bytes=len(cuerpo)):
+                self.assertEqual(firmar(SECRETO_VECTOR, metodo, ruta, ts, cuerpo), esperado)
+
+    def test_y_contra_el_cliente_real_cuando_esta_a_mano(self):
+        """Lo que el vector no puede ver: que el HUB haya cambiado su cadena.
+
+        Acá sí se salta si el hub no está, y se puede: lo que esta prueba añade sobre el
+        vector es detectar un cambio del otro lado, y sin el otro lado no hay nada que
+        comparar. La firma de Réplica ya quedó comprobada arriba, sin condiciones.
+        """
+        if not os.path.exists(self.HUB_CLIENTE):
+            self.skipTest(
+                "el repo del hub no está en %s (normal en CI). El vector guardado ya "
+                "comprobó la firma; esto solo detectaría un cambio DEL HUB." % self.HUB_CLIENTE
+            )
         import importlib.util
 
         spec = importlib.util.spec_from_file_location("hub_real", self.HUB_CLIENTE)
         hub_real = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(hub_real)
 
-        secreto = "s" * 64
-        casos = [
-            ("POST", "/v1/enviar", 1787000000, b'{"sesion":"replica","a":"57300111","texto":"hola"}'),
-            ("POST", "/v1/enviar", 1787000001, b""),
-            # Con acentos y emoji: si un lado codificara en latin-1, acá se ve.
-            ("POST", "/v1/enviar", 1787000002,
-             json.dumps({"t": "oferta ñ 💼 «cita»"}, ensure_ascii=False).encode("utf-8")),
-            ("POST", "/v1/ping", 1787000003, b"{}"),
-        ]
-        for metodo, ruta, ts, cuerpo in casos:
+        for metodo, ruta, ts, cuerpo, esperado in VECTOR:
             with self.subTest(ruta=ruta, bytes=len(cuerpo)):
+                # ⚠️ Contra el VECTOR también: si el hub cambiara su cadena, esto avisa de
+                # que el vector guardado quedó viejo — que es el único modo en que el
+                # vector podría mentir.
+                self.assertEqual(
+                    hub_real.firmar(SECRETO_VECTOR, metodo, ruta, ts, cuerpo),
+                    esperado,
+                    "el hub cambió su cadena canónica: hay que regenerar VECTOR",
+                )
                 self.assertEqual(
                     hub_real.cadena_canonica(metodo, ruta, ts, cuerpo),
                     cadena_canonica(metodo, ruta, ts, cuerpo),
                     "la cadena canónica no coincide con la del hub",
-                )
-                self.assertEqual(
-                    hub_real.firmar(secreto, metodo, ruta, ts, cuerpo),
-                    firmar(secreto, metodo, ruta, ts, cuerpo),
                 )
 
     def test_el_metodo_en_minusculas_no_produce_una_firma_distinta(self):
