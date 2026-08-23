@@ -157,7 +157,17 @@ def _entrada_hub(event: dict[str, Any]) -> dict[str, Any]:
     """
     cuerpo_bytes = _cuerpo_crudo(event)
     token = wiring.build_config_store().get().get("hub_token", "")
-    ok, motivo = hub_firma.verificar(event.get("headers"), cuerpo_bytes, token, RUTA_HUB)
+    # ⚠️ SE VERIFICA CONTRA LA RUTA QUE LLEGÓ, no contra `RUTA_HUB`.
+    #
+    # `RUTA_HUB` sirve para ENRUTAR; para la FIRMA hay que usar el path de la petición. El
+    # API de este proyecto tiene etapa `dev` (no `$default`), así que la URL pública es
+    # `.../dev/hub/entrada` y eso es lo que el hub mete en la cadena canónica —firma el
+    # `pathname` de la URL que se le configuró—. Verificar contra la constante `/hub/entrada`
+    # daría un 403 SIEMPRE, y el único síntoma al otro lado sería un `fallido` sin motivo.
+    #
+    # Usar el path recibido es además lo que hace Doble (`req.url.split("?")[0]`), así que
+    # los tres lados coinciden: se firma y se verifica lo mismo, sea cual sea el prefijo.
+    ok, motivo = hub_firma.verificar(event.get("headers"), cuerpo_bytes, token, _ruta(event))
     if not ok:
         if motivo == "apagado":
             # 503 y no 403: fail-closed, pero DICIENDO que es una variable sin poner y no

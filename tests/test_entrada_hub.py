@@ -334,6 +334,56 @@ class TestLaPuertaDelEntrypoint(unittest.TestCase):
         self.assertEqual(json.loads(r["body"])["capturadas"], 1)
         self.assertTrue(b.llamadas[0]["solo_capturar"])
 
+    def test_con_la_ETAPA_delante_la_firma_sigue_cuadrando(self):
+        """⚠️ El API de este proyecto tiene etapa `dev`, no `$default`.
+
+        O sea que la URL pública es `.../dev/hub/entrada` y eso es lo que el hub mete en la
+        cadena canónica: firma el `pathname` de la URL que se le configuró. Si acá se
+        verificara contra la constante `/hub/entrada`, el resultado seria un 403 SIEMPRE y el
+        único síntoma al otro lado un `fallido` sin motivo.
+        """
+        from entrypoints import receiver
+
+        c = json.dumps(cuerpo(msj())).encode()
+        ts = str(int(time.time()))
+        con_etapa = "/dev" + RUTA
+        # El hub firma la ruta CON la etapa, porque es la que está en la URL del proyecto.
+        cab = {CAB_KID: "kf8905e", CAB_TS: ts, CAB_SIG: firmar(SECRETO, "POST", con_etapa, ts, c)}
+        d, b = DedupFalso(), BroadcastFalso()
+        receiver.dedup, receiver.broadcast, receiver.handle_command = d, b, lambda *a: None
+
+        class Store:
+            def get(self):
+                return {"hub_token": TOKEN}
+
+        with patch.object(receiver.wiring, "build_config_store", return_value=Store()):
+            r = receiver.lambda_handler(
+                self._evento(ruta=con_etapa, cuerpo_bytes=c, cabeceras=cab), None
+            )
+        self.assertEqual(r["statusCode"], 200, r["body"])
+        self.assertEqual(json.loads(r["body"])["capturadas"], 1)
+
+    def test_y_una_firma_de_OTRA_ruta_no_vale(self):
+        # La contraprueba de la de arriba: aceptar cualquier ruta seria aceptar una firma
+        # capturada contra otro endpoint del mismo API (`/admin`, por ejemplo).
+        from entrypoints import receiver
+
+        c = b"{}"
+        ts = str(int(time.time()))
+        cab = {CAB_KID: "kf8905e", CAB_TS: ts,
+               CAB_SIG: firmar(SECRETO, "POST", "/dev/admin", ts, c)}
+        receiver.dedup, receiver.broadcast, receiver.handle_command = DedupFalso(), BroadcastFalso(), (lambda *a: None)
+
+        class Store:
+            def get(self):
+                return {"hub_token": TOKEN}
+
+        with patch.object(receiver.wiring, "build_config_store", return_value=Store()):
+            r = receiver.lambda_handler(
+                self._evento(ruta="/dev" + RUTA, cuerpo_bytes=c, cabeceras=cab), None
+            )
+        self.assertEqual(r["statusCode"], 403)
+
     def test_sin_token_configurado_contesta_503_no_403(self):
         from entrypoints import receiver
 
