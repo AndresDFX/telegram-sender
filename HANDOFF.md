@@ -483,3 +483,36 @@ Pasos concretos para que el receptor quede operativo:
 8. **Prueba de extremo a extremo controlada:** con las cuentas de prueba (Telegram chat_id `6053071541`, WhatsApp `573188468892@s.whatsapp.net`), hacer un envío manual (que sale aun en pausa) y seguir el progreso en la tabla de Envíos.
 9. **Tareas pendientes del receptor:** confirmar la suscripción SNS de AlertEmail; pegar la API key de Resend en el panel; **NO reactivar `sending_enabled`** hasta revisar/cancelar el backlog de planes en espera.
 10. **Rotación recomendada tras el traspaso:** rotar al menos `ADMIN_PASSWORD`, `WHATSAPP_TOKEN` y las access keys de AWS si el emisor anterior ya no debe tener acceso (ver sección "Rotación").
+
+## Entrada y salida por wa-hub (2026-08-23)
+
+Réplica habla con `wa-hub` en las dos direcciones, y las dos están **apagadas por defecto**.
+
+**RECIBE** en `POST /hub/entrada` (etapa `dev` → la URL pública es `.../dev/hub/entrada`): un
+grupo de WhatsApp como SEGUNDA fuente, además del canal de Telegram. Alimenta el mismo
+`BroadcastList` que `PollChannel`, así que pasa por el mismo markup, footer y quita-ubicación.
+
+- ⚠️⚠️ **Lo que entra se CAPTURA, nunca se difunde** (`solo_capturar=True` siempre, sin
+  interruptor para lo contrario). `BroadcastList` difunde cuando `sending_enabled` está en
+  `true`; si lo del grupo cayera por ahí, **cada mensaje se reenviaría a los contactos** —
+  contenido de terceros, con la identidad del dueño, sin que nadie lo haya leído. Un grupo es
+  una FUENTE, no una orden de enviar.
+- ⚠️ Los mensajes `de_mi` se saltan: si Réplica difunde a un grupo y además lo lee, capturaría
+  su propia salida y difundir la captura vuelve a pasar por el grupo. Bucle.
+- ⚠️ La rama de captura ahora usa el id DETERMINISTA cuando hay `dedup_key`. Con `_nuevo_id()`
+  cada reentrega del hub dejaba una captura repetida en el panel.
+- ⚠️ La firma se verifica contra la ruta QUE LLEGÓ (con la etapa dentro), no contra
+  `RUTA_HUB`. Verificar contra la constante da 403 eterno con un `fallido` sin motivo al otro
+  lado.
+
+**ENVÍA** por `POST /v1/enviar` solo si se pone `hub_base` — y hoy está **vacío a propósito**,
+porque el hub NO sustituye al `whatsapp-service` en todo: los contactos salen de la
+sincronización del socket propio y el hub no expone agenda. Por el hub solo sale `mode="only"`
+(donde `list_ids` ya trae los ids explícitos); `all`/`except`, `exclude_patterns` e `image_url`
+se **rechazan con su motivo** en vez de mandar la difusión a menos gente. Y el hub aplica su
+cadencia antiban por mensaje (~5-15 s), así que 100 destinatarios son ~8 min: de ahí
+`presupuesto_s`, que devuelve cuántos quedaron pendientes en vez de cortar en silencio.
+
+La firma vive en `src/lambda/domain/hub_firma.py`, una sola vez para las dos direcciones.
+Prueba: `tests/test_entrada_hub.py` (30) y `tests/test_adapters_whatsapp_hub.py` (23), con un
+VECTOR guardado de los hexadecimales que produce el cliente real del hub.
