@@ -1130,6 +1130,25 @@ Resources:
       RouteKey: "POST /webhook/telegram"
       Target: !Sub "integrations/${WebhookIntegration}"
 
+  # La entrada desde wa-hub: un GRUPO de WhatsApp como segunda fuente, además del canal de
+  # Telegram. Va a la MISMA Lambda receptora (misma integración) porque es el mismo trabajo
+  # —recibir algo de fuera y capturarlo— y una Lambda más serían otro rol, otro log y otro
+  # arranque en frío para cuatro líneas de enrutado.
+  #
+  # ⚠️ La ruta va DENTRO de la firma HMAC (`domain/hub_firma.py`), así que este string tiene
+  # que coincidir EXACTAMENTE con `RUTA_HUB` de `entrypoints/receiver.py` y con el final de
+  # la URL que se le ponga al proyecto en el panel del hub. Si no coinciden, el único síntoma
+  # es un 403 acá y un `fallido` allá, sin nada que diga que el problema es la ruta.
+  #
+  # ⚠️ Y NO lleva el `secret_token` de Telegram: el hub autentica con firma. Por eso el
+  # receptor atiende esta ruta ANTES de esa comprobación.
+  HubRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /hub/entrada"
+      Target: !Sub "integrations/${WebhookIntegration}"
+
   AdminIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:

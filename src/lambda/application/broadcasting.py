@@ -286,7 +286,13 @@ class BroadcastList:
 
     # --- difusión desde el canal (con markup/footer) ---------------------------
 
-    def __call__(self, text: str, dedup_key: str | None = None, tiene_imagen: bool = False) -> dict[str, int]:
+    def __call__(
+        self,
+        text: str,
+        dedup_key: str | None = None,
+        tiene_imagen: bool = False,
+        solo_capturar: bool = False,
+    ) -> dict[str, int]:
         cfg = self._config.get()
         # Comparador de precios (anterior→nuevo por producto): se calcula sobre el mismo texto limpio
         # que se marca, así el panel puede mostrar el desglose de cada difusión del canal.
@@ -312,13 +318,26 @@ class BroadcastList:
         # RECOPILA: se registra la lista (visible en el panel como "capturado") y se previsualiza en
         # tus Mensajes Guardados. NO se difunde, NO se crea plan, NO se reenvía a WhatsApp. Activar el
         # envío NO vacía ninguna cola: las listas capturadas no se reenvían retroactivamente.
-        if not bool(cfg.get("sending_enabled", True)):
-            bid = self._nuevo_id()
+        # ⚠️ `solo_capturar` NO consulta `sending_enabled`: obliga a capturar pase lo que
+        # pase. Lo usa la entrada desde wa-hub (`application/hub_entrada.py`), y no es una
+        # comodidad: lo que entra por ahí son mensajes de un GRUPO de WhatsApp, y si
+        # cayeran por la rama de envío se reenviarían automáticamente a los contactos —
+        # contenido de terceros, con la identidad del dueño y sin que nadie lo haya leído.
+        # Un grupo es una FUENTE, no una orden de enviar.
+        if solo_capturar or not bool(cfg.get("sending_enabled", True)):
+            # El id DETERMINISTA cuando hay `dedup_key`, y hace falta justo acá: la entrega
+            # del hub es at-least-once, así que una reentrega tiene que SOBRESCRIBIR la
+            # captura en vez de crear otra. Con `_nuevo_id()` cada reintento dejaba una
+            # captura repetida en el panel. (El camino del canal de Telegram no lo notaba:
+            # su high-water mark impide releer un post.)
+            bid = self._bid(dedup_key) if dedup_key else self._nuevo_id()
             self._registrar(bid, mensaje_cap, "capture", [], 0, price_diff=desglose, original_text=text)
             enviado = self._preview_capture(bid, mensaje_cap)
             logger.info(
-                "Lista capturada %s (envío apagado): registrada%s, NO difundida",
-                bid, " + preview a Mensajes Guardados OK" if enviado else " (preview NO enviado)",
+                "Lista capturada %s (%s): registrada%s, NO difundida",
+                bid,
+                "solo captura" if solo_capturar else "envío apagado",
+                " + preview a Mensajes Guardados OK" if enviado else " (preview NO enviado)",
             )
             return {"captured": True, "broadcast_id": bid, "preview_sent": bool(enviado)}
 

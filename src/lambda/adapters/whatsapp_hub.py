@@ -45,8 +45,6 @@ SIN DEPENDENCIAS: solo stdlib, como el resto de las Lambdas de este proyecto.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import logging
 import time
@@ -55,15 +53,27 @@ import urllib.request
 
 from application.ports import WhatsAppForwarder
 
+# ⚠️ La firma y las cabeceras viven en `domain/hub_firma.py`, no acá. Es puro y lo usan los
+# DOS lados de Réplica: éste para FIRMAR lo que sale hacia `POST /v1/enviar`, y
+# `application/hub_entrada.py` para VERIFICAR lo que entra por el webhook. Tenerlo dos veces
+# sería tener dos cadenas canónicas que se pueden separar sin que nada falle, hasta que
+# aparece un 401 que no se puede depurar desde el otro lado.
+#
+# Se re-exportan los nombres para no romper a quien ya los importaba de acá — entre otros la
+# prueba del vector de interoperabilidad.
+from domain.hub_firma import (  # noqa: F401  (re-export deliberado)
+    CAB_KID,
+    CAB_SIG,
+    CAB_TS,
+    MIN_SECRETO,
+    cadena_canonica,
+    firmar,
+    partir_token,
+)
+
 logger = logging.getLogger(__name__)
 
-# Las tres cabeceras y la cadena canónica del hub. NO se estrenan nombres: son las mismas
-# que ya valida la plataforma HV en `_puente_auth()` y las que firma `dominio/entrega.ts`.
-CAB_KID = "x-hv-puente-key"
-CAB_TS = "x-hv-puente-ts"
-CAB_SIG = "x-hv-puente-sig"
 RUTA_ENVIAR = "/v1/enviar"  # la ruta va DENTRO de la firma: cambiarla cambia el HMAC
-MIN_SECRETO = 32            # por debajo es un HMAC de juguete
 
 # Lo que tarda el hub por mensaje en el peor caso (2–8 s de espera + hasta 5 s de
 # «escribiendo…» + la red). Se usa para no empezar un envío que no va a caber en el
@@ -73,44 +83,6 @@ COSTE_MSJ_S = 16.0
 # Presupuesto por defecto. Una Lambda de este proyecto tiene 15 min; 240 s deja sitio de
 # sobra para lo que va después y para que el troceado siguiente arranque.
 PRESUPUESTO_DEF_S = 240.0
-
-
-def cadena_canonica(metodo: str, ruta: str, ts, cuerpo: bytes) -> str:
-    """`v1\\n<MÉTODO>\\n<RUTA>\\n<TS>\\n<sha256hex(cuerpo)>`, la de toda la casa.
-
-    Devuelve `str` y no `bytes` a propósito: es exactamente la forma del cliente de
-    referencia (`wa-hub/clientes/python/hub.py`), y hay una prueba que compara las dos
-    funciones. Si difirieran en el tipo, esa comparación habría que convertirla — y
-    entonces deja de ser una igualdad, que es justo lo que la hace valer.
-
-    El método y la ruta van DENTRO porque, sin ellos, una firma capturada contra un
-    endpoint se reenvía contra otro.
-
-    ⚠️ `.upper()` es un extra sobre la referencia. Para el uso real no cambia nada (siempre
-    se llama con "POST"), pero un llamador que pasara "post" produciría una firma que el
-    hub rechaza con un 401 sin más pista. Normalizar no puede estropear una firma correcta
-    y sí evita ésa.
-    """
-    h = hashlib.sha256(cuerpo).hexdigest()
-    return "v1\n%s\n%s\n%s\n%s" % (metodo.upper(), ruta, ts, h)
-
-
-def firmar(secreto: str, metodo: str, ruta: str, ts, cuerpo: bytes) -> str:
-    return hmac.new(
-        secreto.encode("utf-8"),
-        cadena_canonica(metodo, ruta, ts, cuerpo).encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-
-
-def partir_token(token: str) -> tuple[str, str]:
-    """`kid:secreto`. Sin dos puntos NO se adivina un kid: se devuelve vacío y quien llama
-    lo rechaza — un kid inventado da un 401 que se depura mirando el token equivocado."""
-    crudo = (token or "").strip()
-    if ":" not in crudo:
-        return "", ""
-    kid, _, secreto = crudo.partition(":")
-    return kid.strip()[:16], secreto.strip()
 
 
 class HubWhatsAppForwarder(WhatsAppForwarder):
