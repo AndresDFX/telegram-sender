@@ -8,7 +8,7 @@
 # Luego:  ./scripts/set-github-secrets.ps1
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-$Repo = "AndresDFX/telegram-sender"
+$Repo = "AndresDFX/replica"
 
 function Load-EnvFile($path) {
   $h = @{}

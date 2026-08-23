@@ -20,7 +20,7 @@ def val(key):
 def main():
     target = sys.argv[1] if len(sys.argv) > 1 else "+573188468892"
     msg = (
-        "✅ Prueba TelegramSender\n\n"
+        "✅ Prueba Replica\n\n"
         "Así llegarán las listas del canal: con el +15% aplicado, sin la ubicación, "
         "y con tu footer/imagen si los configuras."
     )

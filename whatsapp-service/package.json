@@ -1,5 +1,5 @@
 {
-  "name": "telegram-sender-whatsapp",
+  "name": "replica-whatsapp",
   "version": "1.0.0",
   "description": "Servicio portable que reenvía por WhatsApp (Baileys) las listas de Telegram. Sesión persistida en DynamoDB.",
   "type": "module",

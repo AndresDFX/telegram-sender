@@ -38,6 +38,8 @@ except Exception:
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 SERVICIO = RAIZ / "whatsapp-service"
+# El subdominio conserva el nombre viejo del repo (la plataforma se llama Replica): renombrar el
+# servicio en Render cambiaria esta URL y habria que actualizarla tambien en el panel.
 URL_DEFECTO = "https://telegram-sender-dm43.onrender.com"
 
 

@@ -48,7 +48,7 @@ push main ─► job "deploy" (needs: test)
 - El empaquetado en el runner Linux puede llamar directamente a `pip install -r requirements.txt -t`
   + `zip` (el runner ya es Linux), reutilizando el espíritu de `scripts/_build_lambda_pkg.py`.
 - **Bootstrap (una vez, fuera del pipeline):** crear el proveedor OIDC de GitHub en IAM y un rol
-  `telegram-sync-ci` con confianza al repo `AndresDFX/telegram-sender` y permisos: `s3:PutObject` en
+  `telegram-sync-ci` con confianza al repo `AndresDFX/replica` y permisos: `s3:PutObject` en
   el bucket de artefactos, `cloudformation:*` sobre el stack, `iam:PassRole` sobre los roles del
   stack, y los permisos de creación de recursos del template. Documentar este bootstrap.
 

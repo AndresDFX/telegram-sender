@@ -78,20 +78,51 @@ Es además una **PWA instalable**: el mismo Lambda sirve `GET /admin/manifest.we
 
 ### Archivos clave
 
-- `D:\Projects\Personal\TelegramSender\src\lambda\wiring.py` — composition root
-- `D:\Projects\Personal\TelegramSender\src\lambda\application\ports.py` — puertos/interfaces
-- `D:\Projects\Personal\TelegramSender\src\lambda\application\broadcasting.py` — difusión y envío manual
-- `D:\Projects\Personal\TelegramSender\src\lambda\application\dispatch.py` — despacho fraccionado/secuencial
-- `D:\Projects\Personal\TelegramSender\src\lambda\entrypoints\{receiver,poller,worker,dispatcher,admin}.py` — los cinco Lambdas
-- `D:\Projects\Personal\TelegramSender\whatsapp-service\src\index.js` — servicio Node WhatsApp
+- `src/lambda/wiring.py` — composition root
+- `src/lambda/application/ports.py` — puertos/interfaces
+- `src/lambda/application/broadcasting.py` — difusión y envío manual
+- `src/lambda/application/dispatch.py` — despacho fraccionado/secuencial
+- `src/lambda/entrypoints/{receiver,poller,worker,dispatcher,admin}.py` — los cinco Lambdas
+- `whatsapp-service/src/index.js` — servicio Node WhatsApp
 
 ---
 
 ## Repositorios y servicios
 
-- **Repositorio GitHub (personal):** `git@github-personal:AndresDFX/telegram-sender.git`. El push usa el **alias SSH `github-personal`** (configurado en `~/.ssh/config` → `id_rsa_personal`) para forzar la clave personal. Ojo: la identidad git global quedó como la de trabajo (`julian.castano@siesa.com`).
+- **Repositorio GitHub (personal):** `git@github-personal:AndresDFX/replica.git`. El push usa el **alias SSH `github-personal`** (configurado en `~/.ssh/config` → `id_rsa_personal`) para forzar la clave personal. Ojo: la identidad git global quedó como la de trabajo (`julian.castano@siesa.com`).
 - **AWS:** stack CloudFormation `telegram-sync-dev`, región `us-east-1`, cuenta `438095550710`. Aloja los 5 Lambdas, 9 tablas DynamoDB, SQS + DLQ, API Gateway HTTP v2, EventBridge (poller + dispatcher), SNS + CloudWatch Alarms. El bucket S3 de código/imágenes (`telegram-sync-lambda-438095550710-us-east-1`) **NO lo crea el stack**.
-- **Servicio WhatsApp en Render** (plan Free): `https://telegram-sender-dm43.onrender.com`. Runtime Docker, **Root Directory `whatsapp-service`**, **auto-deploy en cada push** a la rama conectada (verificado 2026-08-20: ~5 min de push a producción; compruébalo con `python scripts/verificar_deploy_render.py`). NO está en CloudFormation ni en el workflow de AWS. Alternativas equivalentes (mismo contenedor): Fly.io, Koyeb, Oracle Always Free.
+- **Servicio WhatsApp en Render** (plan Free): `https://telegram-sender-dm43.onrender.com` (el subdominio conserva el nombre viejo del repo; ver «Nombre de la plataforma»). Runtime Docker, **Root Directory `whatsapp-service`**, **auto-deploy en cada push** a la rama conectada (verificado 2026-08-20: ~5 min de push a producción; compruébalo con `python scripts/verificar_deploy_render.py`). NO está en CloudFormation ni en el workflow de AWS. Alternativas equivalentes (mismo contenedor): Fly.io, Koyeb, Oracle Always Free.
+
+### Nombre de la plataforma: **Replica**
+
+`telegram-sender` fue el nombre provisional del repositorio. El producto —panel, PWA, correos,
+métricas, documentación— se llama **Replica** desde el rebrand, y desde 2026-08-23 el repositorio
+también: `AndresDFX/replica`.
+
+Renombrado: repo GitHub, `whatsapp-service/package.json` (`replica-whatsapp`),
+`scripts/set-github-secrets.ps1`, `specs/12-cicd.md`, las URLs de clone/push de este documento y el
+texto de `scripts/_test_envio.py`.
+
+**No** se renombra (a propósito, no es un olvido):
+
+| Identificador | Por qué se queda |
+|---|---|
+| Stack `telegram-sync-dev` y todo lo que cuelga: 9 tablas, SQS+DLQ, bucket `telegram-sync-lambda-…`, rol `telegram-sync-ci`, parámetro `ProjectName=telegram-sync` y el zip `telegram-broadcaster*.zip` | Renombrar el stack **recrea** los recursos: se perderían la sesión de WhatsApp (~2180 contactos), la config, el histórico de difusiones y la auditoría. Sería una migración con export/import, no un rename. |
+| `https://telegram-sender-dm43.onrender.com` | Es la URL viva del servicio. Cambiar el nombre en Render cambia el subdominio y hay que actualizar la URL en el panel (Ajustes → 🔌 Conexiones) o WhatsApp deja de enviar. |
+| Clase `TelegramSender` (`adapters/telegram.py`) | No es la marca: es «el que envía por Telegram», hermana de `TelethonUserSender` y del adapter de WhatsApp. |
+
+Pendiente **manual** (necesita los dashboards; en esta máquina no hay `gh` ni token de GitHub):
+
+1. **GitHub → Settings → Rename → `replica`** (o `./scripts/renombrar-repo-github.ps1`, que lo hace por API y deja `origin` apuntando al nombre nuevo; necesita `gh` autenticado como la dueña). GitHub deja redirección del nombre viejo, así que los
+   clones existentes siguen funcionando; si lo renombras a mano, actualiza el remoto:
+   `git remote set-url origin git@github-personal:AndresDFX/replica.git`.
+   Secrets, Variables e historial de Actions viajan con el repo, y el deploy usa **claves estáticas**
+   (no OIDC atado al nombre): el CI **no** se rompe. Render sigue conectado por id de repo; para
+   confirmarlo, un push y `python scripts/verificar_deploy_render.py`.
+2. *(Opcional)* **Render → Settings → Name.** Cambia la URL: hay que ponerla en el panel y en
+   `URL_DEFECTO` de `scripts/verificar_deploy_render.py` (o exportar `WHATSAPP_URL`).
+3. *(Opcional)* Carpeta local `C:/Projects/telegram-sender` → `C:/Projects/replica` (cerrar el editor
+   antes; nada del repo depende de la ruta).
 
 ---
 
@@ -178,7 +209,7 @@ Compara la huella `src` de `/health` con la del working tree. **Si dice DESFASAD
 - **`.env.deploy` (GITIGNORED):** `STACK_NAME`, `LAMBDA_CODE_S3_BUCKET`, `WEBHOOK_SECRET_TOKEN` (secreto del webhook de Telegram), `TELEGRAM_BOT_TOKEN` (bot `@ipro_listas_bot`), `ADMIN_PASSWORD` (Basic Auth del panel `/admin`), `TELETHON_API_ID`, `TELETHON_API_HASH`, `TELETHON_SESSION` (⚠️ acceso TOTAL a la cuenta de Telegram userbot — máxima sensibilidad), `WHATSAPP_TOKEN` (bearer del servicio WhatsApp en Render), `WHATSAPP_AUTH_TABLE`, `SEND_DELAY_MS`, `AWS_REGION`.
 - **`.env.example` (SÍ versionado):** plantilla SIN secretos; documenta las variables.
 - **Acceso al panel:** usuario `admin` (`ADMIN_USER`, default `admin`) + `ADMIN_PASSWORD` (en `.env.deploy`); URL = `AdminUrl` del stack.
-- **GitHub:** push por alias SSH `github-personal` (clave `~/.ssh/config` → `id_rsa_personal`); URL `git@github-personal:AndresDFX/telegram-sender.git`.
+- **GitHub:** push por alias SSH `github-personal` (clave `~/.ssh/config` → `id_rsa_personal`); URL `git@github-personal:AndresDFX/replica.git`.
 - **Servicio WhatsApp en Render:** la sesión de Baileys persiste en DynamoDB (tabla `whatsapp-auth`); se vincula escaneando QR desde IP residencial. `TELETHON_SESSION` y la sesión de WhatsApp = control de las cuentas; entregar con extremo cuidado.
 
 > NOTA: la sesión userbot **"viva"** está en la tabla `config` de DynamoDB (`telethon_session`, ~353 chars), no necesariamente en `.env.deploy` (ese valor pudo quedar REVOCADO). Los `api_id`/`api_hash` vienen del entorno del Lambda (= `.env.deploy`).
@@ -441,7 +472,7 @@ Siguen como **trade-offs conscientes** (no bugs): M10/M30/B4 (doble-conteo posib
 
 Pasos concretos para que el receptor quede operativo:
 
-1. **Clonar el repo** por SSH personal: configurar el alias `github-personal` en `~/.ssh/config` (apuntando a `id_rsa_personal`) y `git clone git@github-personal:AndresDFX/telegram-sender.git`.
+1. **Clonar el repo** por SSH personal: configurar el alias `github-personal` en `~/.ssh/config` (apuntando a `id_rsa_personal`) y `git clone git@github-personal:AndresDFX/replica.git`.
 2. **Pedir los secretos por canal seguro:** solicitar `.env.aws` y `.env.deploy` completos por gestor de contraseñas / canal cifrado (nunca por chat/PR/correo plano). Colocarlos en la raíz del repo (están gitignored). Confirmar que `.gitignore` los cubre antes de cualquier commit.
 3. **Instalar herramientas:** AWS CLI (configurado con la cuenta `438095550710`, `us-east-1`) y Docker (necesario para empaquetar la Lambda en Linux).
 4. **Verificar acceso AWS:** `aws sts get-caller-identity` con las credenciales de `.env.aws` debe devolver la cuenta `438095550710`.
