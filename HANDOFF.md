@@ -97,11 +97,12 @@ Es además una **PWA instalable**: el mismo Lambda sirve `GET /admin/manifest.we
 
 `telegram-sender` fue el nombre provisional del repositorio. El producto —panel, PWA, correos,
 métricas, documentación— se llama **Replica** desde el rebrand, y desde 2026-08-23 el repositorio
-también: `AndresDFX/replica`.
+pasa a llamarse igual: `AndresDFX/replica`.
 
-Renombrado: repo GitHub, `whatsapp-service/package.json` (`replica-whatsapp`),
+Ya renombrado en el código: `whatsapp-service/package.json` (`replica-whatsapp`),
 `scripts/set-github-secrets.ps1`, `specs/12-cicd.md`, las URLs de clone/push de este documento y el
-texto de `scripts/_test_envio.py`.
+texto de `scripts/_test_envio.py`. **Falta el rename en GitHub** (paso 1 de aquí abajo): hasta que se
+haga, el remoto real sigue siendo `…/telegram-sender.git` y estas URLs son las de después.
 
 **No** se renombra (a propósito, no es un olvido):
 
