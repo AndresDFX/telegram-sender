@@ -222,6 +222,11 @@ class DynamoDbConfigStore(ConfigStore):
         "whatsapp_service_url",
         "whatsapp_token",
         "whatsapp_excluded",
+        # wa-hub: enviar por el HUB en vez de por el servicio propio (adapters/whatsapp_hub.py).
+        # Vacio = el servicio propio, exactamente como hasta ahora.
+        "hub_base",
+        "hub_token",
+        "hub_sesion",
         "telegram_lists",
         "telegram_target",
         "whatsapp_lists",
@@ -291,6 +296,11 @@ class DynamoDbConfigStore(ConfigStore):
             "whatsapp_service_url": os.environ.get("WHATSAPP_SERVICE_URL", ""),
             "whatsapp_token": os.environ.get("WHATSAPP_TOKEN", ""),
             "whatsapp_excluded": [],  # ids de WhatsApp a excluir
+            # wa-hub. Con `hub_base` vacio NO cambia nada: se sigue usando el servicio
+            # propio. El interruptor es esta clave, no un despliegue.
+            "hub_base": os.environ.get("HUB_BASE", ""),
+            "hub_token": os.environ.get("HUB_TOKEN", ""),
+            "hub_sesion": os.environ.get("HUB_SESION", "replica"),
             # Listas de distribución con nombre + modo de targeting por canal.
             # lists: [{"name": str, "ids": [str]}]; target: {"mode": all|only|except, "lists": [name]}
             "telegram_lists": [],

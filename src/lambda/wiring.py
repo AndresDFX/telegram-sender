@@ -31,6 +31,7 @@ from adapters.telethon_user import (
 )
 from adapters.tme import FallbackChannelReader, TmePreviewChannelReader
 from adapters.whatsapp import HttpWhatsAppForwarder
+from adapters.whatsapp_hub import HubWhatsAppForwarder
 from application.broadcasting import BroadcastList
 from application.deliver_batch import DeliverBatch
 from application.dispatch import DispatchCampaigns
@@ -70,6 +71,27 @@ def _sender(cfg: dict):
     return TelegramSender(bot_token=_bot_token(cfg))
 
 
+def _whatsapp(cfg: dict):
+    """El reenviador de WhatsApp: el HUB si esta configurado, y si no el servicio propio.
+
+    ⚠️ ADITIVO Y APAGADO POR DEFECTO. Con `hub_base` vacio devuelve exactamente el
+    `HttpWhatsAppForwarder` de siempre, asi que integrar esto NO cambia el comportamiento
+    de Replica hasta que alguien ponga la clave. El interruptor es una fila en la
+    configuracion, no un despliegue.
+
+    ⚠️ Y EL HUB NO SUSTITUYE AL SERVICIO PROPIO EN TODO. El servicio propio resuelve los
+    destinatarios de la AGENDA DE WHATSAPP (se suscribe a `contacts.upsert` de su propio
+    socket); el hub no expone contactos a proposito. Asi que por el hub solo salen las
+    difusiones con `mode="only"` -donde `list_ids` ya trae los ids explicitos- y las demas
+    se RECHAZAN con su motivo, nunca se mandan a menos gente. Esta escrito con detalle en
+    `adapters/whatsapp_hub.py`.
+    """
+    base = (cfg.get("hub_base") or "").strip()
+    if not base:
+        return HttpWhatsAppForwarder(cfg.get("whatsapp_service_url", ""), cfg.get("whatsapp_token", ""))
+    return HubWhatsAppForwarder(base, cfg.get("hub_token", ""), cfg.get("hub_sesion", "replica"))
+
+
 def _recipients(cfg: dict):
     return ContactRecipients(_telethon_contacts(cfg)) if _es_userbot(cfg) else DynamoDbSubscriberRepository()
 
@@ -91,7 +113,7 @@ def _broadcast_list() -> BroadcastList:
     else:
         deliver = DeliverBatch(_sender(cfg), recipients, delay=config.send_delay_seconds())
         queue = InlineBroadcastQueue(lambda text, ids, image_url=None: deliver(text, ids, image_url))
-    whatsapp = HttpWhatsAppForwarder(cfg.get("whatsapp_service_url", ""), cfg.get("whatsapp_token", ""))
+    whatsapp = _whatsapp(cfg)
     # El scheduler (planes en DynamoDB) solo aplica con SQS real (AWS); en inline (dev) se
     # envía de inmediato. Así el envío fraccionado/secuencial no depende de tablas en local.
     plans = build_plan_store() if config.broadcast_queue_url() else None
@@ -192,7 +214,7 @@ def build_broadcast_list() -> BroadcastList:
 def build_dispatch_campaigns() -> DispatchCampaigns:
     store = build_config_store()
     cfg = store.get()
-    whatsapp = HttpWhatsAppForwarder(cfg.get("whatsapp_service_url", ""), cfg.get("whatsapp_token", ""))
+    whatsapp = _whatsapp(cfg)
     return DispatchCampaigns(
         plans=build_plan_store(),
         broadcasts=build_broadcast_store(),
