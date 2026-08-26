@@ -54,25 +54,44 @@ for dirpath, dirnames, filenames in os.walk(SRC):
 
 print(f"{len(locales)} .py locales")
 
+# Contra qué commit se espera que coincida el artefacto DESPLEGADO.
+#
+# Por defecto HEAD, que es el caso del flujo de arriba: se reempaqueta con el cambio SIN
+# commitear, así que el zip de S3 coincide con HEAD y el árbol de trabajo trae lo nuevo.
+#
+# Con el cambio YA COMMITEADO -que es lo normal cuando se despliega algo que se quiere
+# dejar registrado- el artefacto es el commit ANTERIOR, y comparar contra HEAD aborta por
+# una diferencia que está perfectamente explicada. Para eso: `--base HEAD~1`.
+#
+# NO es un `--force`: se sigue exigiendo coincidencia EXACTA con la referencia, o sea que
+# se sigue negando a reemplazar código de origen desconocido. Lo único que cambia es contra
+# qué se compara, y se imprime para que quede dicho.
+BASE_REF = "HEAD"
+if "--base" in sys.argv:
+    BASE_REF = sys.argv[sys.argv.index("--base") + 1]
+
 zin = zipfile.ZipFile(BASE)
 en_zip = set(zin.namelist())
 
-# 1) Coherencia: lo desplegado debe ser el HEAD actual (salvo lo que se está cambiando ahora).
-head = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD", "src/lambda"],
+# 1) Coherencia: lo desplegado debe ser BASE_REF exactamente (ver arriba).
+head = subprocess.run(["git", "ls-tree", "-r", "--name-only", BASE_REF, "src/lambda"],
                       capture_output=True, text=True, check=True, cwd=ROOT).stdout.split()
 head_py = [p for p in head if p.endswith(".py")]
 distintos, faltan = [], []
 for p in head_py:
     rel = p[len("src/lambda/"):]
-    blob = subprocess.run(["git", "show", f"HEAD:{p}"], capture_output=True, check=True, cwd=ROOT).stdout
+    blob = subprocess.run(["git", "show", f"{BASE_REF}:{p}"], capture_output=True, check=True, cwd=ROOT).stdout
     if rel not in en_zip:
         faltan.append(rel)
     elif zin.read(rel) != blob:
         distintos.append(rel)
-print("en HEAD:", len(head_py), "| no están en el zip:", faltan or "ninguno",
+print(f"en {BASE_REF}:", len(head_py), "| no están en el zip:", faltan or "ninguno",
       "| difieren del zip:", distintos or "ninguno")
 if faltan or distintos:
-    print("ABORTA: el artefacto desplegado no coincide con git HEAD")
+    print(f"ABORTA: el artefacto desplegado no coincide con {BASE_REF}")
+    if BASE_REF == "HEAD":
+        print("       (¿el cambio ya está commiteado? entonces el artefacto es el commit"
+              " anterior: prueba --base HEAD~1)")
     sys.exit(1)
 
 # 2) Reescribe el zip: todo igual salvo los .py del proyecto (reemplazados y/o nuevos).
