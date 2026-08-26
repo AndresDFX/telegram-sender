@@ -99,10 +99,11 @@ Es además una **PWA instalable**: el mismo Lambda sirve `GET /admin/manifest.we
 métricas, documentación— se llama **Replica** desde el rebrand, y desde 2026-08-23 el repositorio
 pasa a llamarse igual: `AndresDFX/replica`.
 
-Ya renombrado en el código: `whatsapp-service/package.json` (`replica-whatsapp`),
+Renombrado en el código: `whatsapp-service/package.json` (`replica-whatsapp`),
 `scripts/set-github-secrets.ps1`, `specs/12-cicd.md`, las URLs de clone/push de este documento y el
-texto de `scripts/_test_envio.py`. **Falta el rename en GitHub** (paso 1 de aquí abajo): hasta que se
-haga, el remoto real sigue siendo `…/telegram-sender.git` y estas URLs son las de después.
+texto de `scripts/_test_envio.py`. **El rename en GitHub ya está hecho** (comprobado 2026-08-25:
+`replica` y `telegram-sender` resuelven al mismo HEAD, o sea que el viejo es ya la redirección) y el
+remoto local apunta a `…/replica.git`.
 
 **No** se renombra (a propósito, no es un olvido):
 
@@ -112,14 +113,17 @@ haga, el remoto real sigue siendo `…/telegram-sender.git` y estas URLs son las
 | `https://telegram-sender-dm43.onrender.com` | Es la URL viva del servicio. Cambiar el nombre en Render cambia el subdominio y hay que actualizar la URL en el panel (Ajustes → 🔌 Conexiones) o WhatsApp deja de enviar. |
 | Clase `TelegramSender` (`adapters/telegram.py`) | No es la marca: es «el que envía por Telegram», hermana de `TelethonUserSender` y del adapter de WhatsApp. |
 
-Pendiente **manual** (necesita los dashboards; en esta máquina no hay `gh` ni token de GitHub):
+Hecho:
 
-1. **GitHub → Settings → Rename → `replica`** (o `./scripts/renombrar-repo-github.ps1`, que lo hace por API y deja `origin` apuntando al nombre nuevo; necesita `gh` autenticado como la dueña). GitHub deja redirección del nombre viejo, así que los
-   clones existentes siguen funcionando; si lo renombras a mano, actualiza el remoto:
-   `git remote set-url origin git@github-personal:AndresDFX/replica.git`.
-   Secrets, Variables e historial de Actions viajan con el repo, y el deploy usa **claves estáticas**
-   (no OIDC atado al nombre): el CI **no** se rompe. Render sigue conectado por id de repo; para
-   confirmarlo, un push y `python scripts/verificar_deploy_render.py`.
+1. ✅ **Rename en GitHub** (`AndresDFX/replica`). GitHub dejó la redirección del nombre viejo, así que
+   los clones existentes siguen funcionando; conviene igualarlos:
+   `git remote set-url origin git@github-personal:AndresDFX/replica.git`. Secrets, Variables e
+   historial de Actions viajaron con el repo y el deploy usa **claves estáticas** (no OIDC atado al
+   nombre): el CI no se rompió. Render sigue conectado por id de repo. Para repetirlo en otro repo de
+   la familia: `./scripts/renombrar-repo-github.ps1` (necesita `gh` con ADMIN).
+
+Pendiente (opcional, necesita dashboards):
+
 2. *(Opcional)* **Render → Settings → Name.** Cambia la URL: hay que ponerla en el panel y en
    `URL_DEFECTO` de `scripts/verificar_deploy_render.py` (o exportar `WHATSAPP_URL`).
 3. *(Opcional)* Carpeta local `C:/Projects/telegram-sender` → `C:/Projects/replica` (cerrar el editor
