@@ -6,9 +6,13 @@ import json
 import logging
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import unittest
+from html.parser import HTMLParser
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "lambda"))
 
@@ -624,6 +628,45 @@ class PwaTests(unittest.TestCase):
             admin._PAGE, admin._PWA_VER = original, memo
         self.assertEqual(admin._pwa_version(), v)
 
+    # --- Instalar: un solo botón, y está DENTRO del panel ------------------------------------
+    # El de la pantalla de acceso se quitó. El del header se queda: quitar los dos dejaría la PWA
+    # sin ninguna forma propia de ofrecerse (y en iOS, sin sitio donde explicar el gesto).
+
+    def test_el_acceso_ya_no_ofrece_instalar(self):
+        html = admin.lambda_handler(_event("GET", "/admin", auth=False), None)["body"]
+        acceso = html[html.index('<div id="login">'):html.index('<div id="app">')]
+        self.assertIn("doLogin()", acceso)          # vector: el trozo medido es el del acceso
+        self.assertNotIn("install", acceso)         # ni el div, ni el botón, ni un resto
+        self.assertNotIn("pwaInstalar", acceso)
+        self.assertNotIn("Instalar", acceso)
+
+    def test_el_boton_de_instalar_del_panel_sigue_ahi(self):
+        # Se quitó SOLO el del acceso. Y su maquinaria no se toca: beforeinstallprompt suele llegar
+        # ANTES de entrar y lo que importa es que guarde PROMPT; sin eso el primer clic al botón del
+        # header caería en el modal de instrucciones aunque el navegador supiera instalar.
+        html = admin.lambda_handler(_event("GET", "/admin", auth=False), None)["body"]
+        # El trozo es el header YA dentro de #app: ahí es donde tiene que estar (en el acceso #app
+        # está en display:none, así que un botón suelto en el <script> no valdría de nada).
+        header = html[html.index('<div id="app">'):html.index("</header>")]
+        boton = re.search(r'<button[^>]*id="install_btn"[^>]*>', header)
+        self.assertIsNotNone(boton)
+        self.assertIn("hidden", boton.group(0))          # arranca oculto: lo destapa verInstalar
+        self.assertIn('onclick="pwaInstalar()"', boton.group(0))
+        self.assertIn('aria-label="Instalar Replica como app"', boton.group(0))
+        for pieza in ("beforeinstallprompt", "appinstalled", "window.pwaInstalar", "PROMPT"):
+            self.assertIn(pieza, html, pieza)
+        self.assertGreaterEqual(html.count("verInstalar("), 4)   # sigue teniendo dueño
+
+    def test_no_queda_ninguna_referencia_huerfana_al_boton_del_acceso(self):
+        # Ni en el HTML, ni en el CSS, ni en el JS: los tres viajan en la misma respuesta, así que
+        # una sola búsqueda los cubre. Una regla de CSS o una rama de JS sin dueño la lee el
+        # siguiente y la cree viva.
+        html = admin.lambda_handler(_event("GET", "/admin", auth=False), None)["body"]
+        self.assertNotIn("install_login", html)
+        # La regla de "ya instalada" nombra solo al que queda (con los dos ids seguiría escondiendo
+        # un id que no existe).
+        self.assertIn("html.pwa #install_btn{display:none!important}", html)
+
 
 class WhatsappPairTests(unittest.TestCase):
     """Vinculacion de WhatsApp «desde este telefono» (numero → codigo de 8 digitos → conectado).
@@ -1040,6 +1083,570 @@ class PanelCrudTests(unittest.TestCase):
     def test_enter_en_un_textarea_no_envia_el_modal(self):
         self.assertIn("TEXTAREA", self.html)
 
+
+# --- Ver la contraseña: el ojo de cada campo secreto -----------------------------------------
+# El ojo NO viene en el HTML: lo engancha el JS del final de la página sobre cada
+# input[type=password] que ya esté cargado. Por eso estas pruebas van en dos niveles:
+#   · PasswordRevealTests — mide la PÁGINA SERVIDA: cuántos campos de contraseña hay y que el
+#     enganche sea uno solo y sin filtro (así alcanza a los diez). Python puro, corre siempre.
+#   · PasswordRevealDomTests — EJECUTA ese mismo bloque, recortado de la página que sirve la
+#     Lambda y sin retocarlo, contra un DOM mínimo en node. Es el único nivel que puede afirmar
+#     «el aria-label cambia con el estado»: en el HTML servido todavía no hay ningún aria-label
+#     que mirar, ni ningún botón que contar.
+
+_SELECTOR = "querySelectorAll('input[type=password]')"
+
+# Elementos sin cierre: si se apilaran, el árbol se quedaría colgando dentro del primer <input>.
+_VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+         "source", "track", "wbr"}
+
+
+class _Nodo:
+    __slots__ = ("tag", "attrs", "hijos")
+
+    def __init__(self, tag, attrs=()):
+        self.tag, self.attrs, self.hijos = tag, dict(attrs), []
+
+
+class _Arbol(HTMLParser):
+    """Árbol mínimo de la página. Hace falta el árbol y no un regex porque lo que se comprueba
+    es la VECINDAD: qué elemento va justo antes de cada campo (de ahí saca el JS la <label> que
+    tiene que emparejar antes de envolver el input)."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.raiz = _Nodo("#raiz")
+        self.pila = [self.raiz]
+
+    def handle_starttag(self, tag, attrs):
+        nodo = _Nodo(tag, attrs)
+        self.pila[-1].hijos.append(nodo)
+        if tag not in _VOID:
+            self.pila.append(nodo)
+
+    def handle_startendtag(self, tag, attrs):
+        self.pila[-1].hijos.append(_Nodo(tag, attrs))
+
+    def handle_endtag(self, tag):
+        # Se cierra hasta la ÚLTIMA que coincida, no a ciegas contra el tope: un cierre suelto en
+        # una página de miles de líneas no debe descolgar el árbol y dejar campos sin vecino.
+        for i in range(len(self.pila) - 1, 0, -1):
+            if self.pila[i].tag == tag:
+                del self.pila[i:]
+                break
+
+
+def _panel_html():
+    """La página tal como la pide el navegador: el shell es público (se sirve sin credenciales)."""
+    return admin.lambda_handler(_event("GET", "/admin", auth=False), None)["body"]
+
+
+def _campos_password(pagina):
+    """[{id, prev}] de cada input[type=password] que la página YA trae (no los que crea el JS)."""
+    arbol = _Arbol()
+    arbol.feed(pagina)
+    campos = []
+
+    def recorrer(nodo):
+        previo = None
+        for hijo in nodo.hijos:
+            if hijo.tag == "input" and (hijo.attrs.get("type") or "").lower() == "password":
+                campos.append({"id": hijo.attrs.get("id"),
+                               "prev": None if previo is None
+                               else {"tag": previo.tag, "for": previo.attrs.get("for")}})
+            recorrer(hijo)
+            previo = hijo
+
+    recorrer(arbol.raiz)
+    return campos
+
+
+def _cuerpo_js(pagina, nombre):
+    """Una función JS de primer nivel de la página, recortada hasta la siguiente.
+
+    Se mide el TROZO y no la página entera porque lo que importa es DÓNDE está la llamada: un
+    pwTapar() en cualquier otro sitio no salva a fpSend.
+    """
+    i = pagina.index("function " + nombre + "(")
+    sigue = [p for p in (pagina.find("\nfunction ", i + 1),
+                         pagina.find("\nasync function ", i + 1)) if p > 0]
+    return pagina[i:min(sigue) if sigue else len(pagina)]
+
+
+def _sin_comentarios_js(cuerpo):
+    """Un trozo de JS sin sus comentarios.
+
+    Existe porque la comprobacion de al lado busca una LLAMADA, y un comentario que la
+    mencione la satisface sola: es el fallo que este proyecto repite. No tokeniza (eso
+    seria una cuarta copia de un tokenizador), pero tampoco recorta a ciegas: solo trata
+    un // como comentario si lo que va delante en la linea tiene las comillas cerradas,
+    asi que un // dentro de una cadena no se lleva media linea de codigo.
+
+    Y su correccion no se supone: cada prueba que lo usa exige que un centinela del
+    comentario haya DESAPARECIDO. Si esto dejara de quitar, se pone rojo."""
+    cuerpo = re.sub(r"/\*.*?\*/", " ", cuerpo, flags=re.S)
+    fuera = []
+    for linea in cuerpo.split(chr(10)):
+        i = linea.find("//")
+        while i >= 0:
+            antes = linea[:i]
+            if antes.count("'") % 2 == 0 and antes.count('\"') % 2 == 0:
+                linea = antes
+                break
+            i = linea.find("//", i + 2)
+        fuera.append(linea)
+    return chr(10).join(fuera)
+
+
+def _bloque_del_ojo(pagina):
+    """El IIFE que engancha los ojos, recortado del <script> que sirve la Lambda."""
+    script = re.findall(r"<script>(.*?)</script>", pagina, re.S)[-1]
+    return script[script.rindex("(function(){", 0, script.index(_SELECTOR)):]
+
+
+class PasswordRevealTests(unittest.TestCase):
+    """Los campos secretos del panel llevan un ojo para ver lo que se escribe. Aquí se mide la
+    página: cuántos campos hay y que el enganche sea único y sin filtro. El comportamiento del
+    ojo (el botón, su type y el aria-label al alternar) lo prueba PasswordRevealDomTests."""
+
+    # Los diez de la página, en orden de aparición. La lista es EXACTA a propósito: un campo
+    # nuevo rompe la prueba y obliga a decidir si lleva ojo, en vez de colarse sin él.
+    IDS = ["lp", "fp_new", "bot_token", "tl_password", "telethon_session", "whatsapp_token",
+           "usr_new_pw", "resend_api_key", "cp_cur", "cp_new"]
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ["ADMIN_USER"] = "admin"
+        os.environ["ADMIN_PASSWORD"] = "secret123"
+        admin.config = FakeConfig()
+        admin.subscribers = FakeSubs()
+        cls.html = _panel_html()
+        cls.campos = _campos_password(cls.html)
+
+    @classmethod
+    def tearDownClass(cls):
+        admin.config = admin.subscribers = None
+        os.environ.pop("ADMIN_USER", None)
+        os.environ.pop("ADMIN_PASSWORD", None)
+
+    def test_la_prueba_mide_la_pagina_de_verdad(self):
+        # Vector: si esto dejara de medir la página (una ruta que no es, un 401, la plantilla sin
+        # sustituir), lo demás pasaría en verde sobre la nada. Falla aquí primero.
+        self.assertGreater(len(self.html), 50000)
+        self.assertIn('<div id="login">', self.html)
+        self.assertIn('id="lp"', self.html)
+        self.assertIn('onclick="doLogin()"', self.html)
+        self.assertNotIn("__RAIZ__", self.html)      # está SERVIDA, no es el literal sin sustituir
+        self.assertTrue(self.campos)                 # y el parser encontró campos, no cero
+
+    def test_los_diez_campos_de_contrasena_siguen_siendo_diez(self):
+        self.assertEqual([c["id"] for c in self.campos], self.IDS)
+        self.assertEqual(len(self.campos), 10)
+
+    def test_un_solo_enganche_sin_filtro_los_alcanza_a_todos(self):
+        bloque = _bloque_del_ojo(self.html)
+        # Un único punto de enganche: con el patrón copiado a mano en algún campo habría dos
+        # sitios que mantener, y el segundo se quedaría atrás (empezando por el volver a tapar).
+        self.assertEqual(self.html.count(_SELECTOR), 1)
+        self.assertEqual(self.html.count("'pw-ojo'"), 1)
+        # Y recorre TODO lo que devuelve el selector: sin recortes y sin buscar ids uno a uno
+        # (con una lista de ids, un campo nuevo se quedaría sin ojo en silencio).
+        self.assertIn(_SELECTOR + ".forEach", bloque)
+        self.assertNotIn("getElementById", bloque)
+        self.assertNotIn(".slice(", bloque)
+
+    def test_el_acceso_no_hereda_la_contrasena_de_quien_acaba_de_salir(self):
+        # Tapar el campo esconde el estado, no el secreto: el valor sobrevivía a logout(), así que
+        # con el ojo el siguiente en sentarse LEÍA la contraseña de quien acababa de salir.
+        cuerpo = _cuerpo_js(self.html, "logout")
+        self.assertIn("$('lp').value=''", cuerpo)
+        self.assertIn("$('lu').value=''", cuerpo)   # y sin usuario no se vuelve a entrar con Enter
+
+    def test_los_bloques_de_secretos_se_tapan_antes_de_volver_a_mostrarse(self):
+        # Estos tres no cambian de pantalla: ocultan y vuelven a mostrar un bloque con display, y
+        # reaparece tal como quedó. Ninguna de las cinco funciones envueltas pasa por ahí.
+        send = _cuerpo_js(self.html, "fpSend")
+        self.assertLess(send.index("pwTapar()"), send.index("$('fp_step2').style.display='block'"))
+        signin = _cuerpo_js(self.html, "tlSignIn")
+        self.assertLess(signin.index("pwTapar()"),
+                        signin.index("$('tl_pwd_wrap').style.display='block'"))
+        reset = _cuerpo_js(self.html, "fpReset")
+        self.assertIn("pwTapar()", reset)
+        # Al acabar bien se vacía el paso 2: si no, pedir otro código (lo normal cuando el primero
+        # no llega) lo vuelve a mostrar con la contraseña nueva dentro, y el ojo la lee.
+        self.assertIn("$('fp_new').value=''", reset)
+        self.assertIn("$('fp_code').value=''", reset)
+        # Solo en la rama de éxito: en la de error eso es lo que la persona está escribiendo.
+        self.assertLess(reset.index("$('fp_new').value=''"), reset.index("}catch(e){"))
+
+    def test_los_dos_sitios_que_crean_un_modal_llaman_al_enganche(self):
+        # LO QUE FALTABA. El arnés de node llama a `pwEnganchar` él mismo, así que prueba
+        # que el ayudante funciona y NO que alguien lo use: quitar la llamada de `dsModal`
+        # dejaba la suite en verde y #eu_pw sin ojo, o sea el hueco original intacto.
+        # Son los dos únicos sitios del panel que meten un modal en el documento; el
+        # segundo no tiene campos secretos hoy, y por eso mismo se fija: quien añada uno
+        # no va a leer una nota que pida acordarse.
+        for nombre in ("dsModal", "listMembers"):
+            cuerpo = _sin_comentarios_js(_cuerpo_js(self.html, nombre))
+            # El vector del quitador: el comentario de esa misma función tiene que haberse
+            # ido. Si no, lo que sigue lo podría estar cumpliendo la prosa.
+            self.assertNotIn("pwEnganchar` con su", cuerpo, nombre)
+            self.assertNotIn("el enganche va aquí", cuerpo, nombre)
+            self.assertIn("document.body.appendChild(ov)", cuerpo, nombre)   # sigue siendo el trozo bueno
+            # Y la llamada, con SU nodo: con `document` se re-envolverían los diez campos
+            # de la página y cada uno acabaría con dos ojos.
+            self.assertIn("pwEnganchar(d)", cuerpo, nombre)
+            self.assertNotIn("pwEnganchar(document)", cuerpo, nombre)
+
+    def test_el_enganche_se_llama_antes_de_poner_el_foco(self):
+        # Envolver mueve el input dentro de un <span>. Si el modal ya había enfocado el
+        # campo, moverlo le quita el foco y quien abre «Editar usuario» se encuentra
+        # escribiendo en ninguna parte.
+        cuerpo = _sin_comentarios_js(_cuerpo_js(self.html, "dsModal"))
+        self.assertLess(cuerpo.index("pwEnganchar(d)"), cuerpo.index(".focus()"))
+
+    def test_el_details_de_la_stringsession_vuelve_a_tapar_al_abrir_y_cerrar(self):
+        # Cerrarlo creyendo que así se guarda no tapaba nada: al volver a abrirlo la StringSession
+        # seguía entera a la vista, y su valor solo lo borra saveAccount(). Da acceso TOTAL a la
+        # cuenta de Telegram, así que es el peor de los diez para dejarlo destapado.
+        det = self.html[self.html.index('<details style="margin-top:14px"'):]
+        det = det[:det.index("</details>")]
+        self.assertIn('id="telethon_session"', det)          # vector: es ESE details, no otro
+        self.assertRegex(det, r'<details[^>]*ontoggle="[^"]*pwTapar\(\)')
+
+    def test_el_patron_esta_escrito_una_vez(self):
+        # Suelo mínimo por si falta node y PasswordRevealDomTests se salta entera: el botón se crea
+        # en un solo sitio, con type explícito, y su etiqueta accesible se CALCULA (no es un literal).
+        bloque = _bloque_del_ojo(self.html)
+        self.assertEqual(bloque.count("createElement('button')"), 1)
+        self.assertRegex(bloque, r"\.type\s*=\s*'button'")
+        self.assertIn("'aria-label'", bloque)
+        self.assertIn("Mostrar ", bloque)
+        self.assertIn("Ocultar ", bloque)
+        # El <span> que lo envuelve tiene su CSS: sin él el ojo no queda DENTRO del campo.
+        self.assertIn(".pw{position:relative", self.html)
+        self.assertIn(".pw>.pw-ojo{position:absolute", self.html)
+
+
+# Arnés de PasswordRevealDomTests. Va aquí, en el fichero de la prueba, por lo mismo que el panel
+# lleva su JS dentro del .py: un fichero suelto al lado se queda sin dueño. Las afirmaciones NO
+# están aquí (se hacen en Python, sobre el JSON que esto imprime); esto solo mueve el DOM.
+_ARNES_OJO = r"""/* DOM mínimo + el bloque del ojo TAL COMO LO SIRVE la Lambda. Entrada: la ruta de un JSON
+   {campos, bloque} en argv[2]. Salida: una línea de JSON con el estado del DOM en cada momento.
+   El DOM es de mentira a propósito: jsdom no está instalado y no se va a colgar una dependencia
+   de npm de la suite de Python (lo de node ya vive en scripts/revisar_js_panel.py). Implementa
+   solo lo que el bloque usa, y el selector está acotado a mano: si el bloque pasara a buscar otra
+   cosa, esto REVIENTA en vez de devolver una lista vacía y dejar la prueba verde sobre cero. */
+const fs = require('fs');
+
+class El {
+  constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null; this._at = {}; }
+  appendChild(n) { if (n.parentNode) n.parentNode._quitar(n); n.parentNode = this; this.children.push(n); return n; }
+  insertBefore(n, ref) {
+    if (n.parentNode) n.parentNode._quitar(n);
+    n.parentNode = this;
+    const i = this.children.indexOf(ref);
+    this.children.splice(i < 0 ? this.children.length : i, 0, n);
+    return n;
+  }
+  _quitar(n) { const i = this.children.indexOf(n); if (i >= 0) this.children.splice(i, 1); }
+  setAttribute(k, v) { this._at[k] = String(v); }
+  getAttribute(k) { return k in this._at ? this._at[k] : null; }
+  get previousElementSibling() {
+    if (!this.parentNode) return null;
+    const i = this.parentNode.children.indexOf(this);
+    return i > 0 ? this.parentNode.children[i - 1] : null;
+  }
+  // La definición del navegador, no una bandera: sube por parentNode y mira si llega a la
+  // raíz. Hace falta porque `tapar()` poda por aquí los campos de un modal ya cerrado, y sin
+  // esto `!undefined` es true y la poda se llevaba los DIEZ pares — pasó, y estas dos líneas
+  // son lo que separa «la poda funciona» de «la maqueta no sabe contestar».
+  get isConnected() { let n = this; while (n.parentNode) n = n.parentNode; return n === raiz; }
+  // El enganche de un modal se llama con el nodo del modal como raíz, así que baja por los
+  // descendientes: tras envolver, el input ya no es hijo directo de nadie conocido.
+  querySelectorAll(sel) {
+    if (sel.replace(/\s+/g, '') !== 'input[type=password]') throw new Error('selector inesperado: ' + sel);
+    const out = [];
+    (function bajar(n) { for (const h of n.children) {
+      if (h.tagName === 'INPUT' && h.type === 'password') out.push(h); bajar(h);
+    } })(this);
+    return out;
+  }
+}
+
+const entrada = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const raiz = new El('div');
+const inputs = [], vecinos = {};
+for (const c of entrada.campos) {
+  // Los campos son los REALES: el id y el elemento de delante salen de parsear la página servida.
+  if (c.prev) {
+    const p = new El(c.prev.tag);
+    if (c.prev.for) p.htmlFor = c.prev.for;
+    raiz.appendChild(p);
+    vecinos[c.id] = p;
+  }
+  const inp = new El('input');
+  inp.id = c.id; inp.type = 'password'; inp.value = 'valor-' + c.id;
+  raiz.appendChild(inp); inputs.push(inp);
+}
+
+const document = {
+  createElement: t => new El(t),
+  querySelectorAll: sel => {
+    if (sel.replace(/\s+/g, '') !== 'input[type=password]') throw new Error('selector inesperado: ' + sel);
+    return raiz.children.filter(e => e.tagName === 'INPUT' && e.type === 'password');
+  },
+};
+// Las cinco funciones que el bloque envuelve para volver a tapar. doLogin es async y se traga su
+// error, igual que la de verdad, y apunta lo que VE cuando la llaman: ahí está la diferencia entre
+// tapar antes de llamarla y taparlo cuando la promesa se asienta — segundos de contraseña en
+// pantalla que un tipo final 'password' no distingue. El valor también, para ver que enmascarar no
+// le quita la credencial (la de verdad lee $('lp').value en su primera línea).
+const llamadas = [];
+let visto = null;
+const window = {
+  doLogin: async function () {
+    llamadas.push('doLogin');
+    visto = { tipos: inputs.map(i => i.type), valor: inputs[0].value };
+    await null; return 'ok';
+  },
+  logout: function () { llamadas.push('logout'); },
+  showTab: function () { llamadas.push('showTab'); },
+  showSub: function () { llamadas.push('showSub'); },
+  fpToggle: function () { llamadas.push('fpToggle'); },
+};
+new Function('window', 'document', entrada.bloque)(window, document);
+
+const ojo = inp => inp.parentNode.children.filter(e => e.tagName === 'BUTTON')[0] || null;
+const foto = () => inputs.map(i => {
+  const b = ojo(i);
+  return {
+    id: i.id, valor: i.value, tipo: i.type,
+    envuelto: i.parentNode !== raiz && i.parentNode.className === 'pw',
+    boton: !b ? null : {
+      tag: b.tagName, type: b.type, clase: b.className, aria: b.getAttribute('aria-label'),
+      title: b.title, svg: /<svg/.test(b.innerHTML || ''), tachado: /M1 1l22 22/.test(b.innerHTML || ''),
+    },
+  };
+});
+const clic = () => inputs.forEach(i => {
+  // Si a un campo le faltara el ojo, el arnés no revienta: sigue y deja que la foto llegue a
+  // Python, donde la prueba que cuenta los diez dice CUÁL se quedó sin él.
+  const b = ojo(i);
+  if (b) b.onclick();
+});
+
+const out = { inicial: foto(), etiquetas: {}, tapa: {} };
+for (const id in vecinos) {
+  const inp = inputs.filter(i => i.id === id)[0];
+  out.etiquetas[id] = { tag: vecinos[id].tagName, for: vecinos[id].htmlFor || null,
+                        aun_hermano: inp.previousElementSibling === vecinos[id] };
+}
+clic(); out.tras_un_clic = foto();
+clic(); out.tras_dos_clics = foto();
+for (const salida of ['logout', 'showTab', 'showSub', 'fpToggle']) {
+  clic();                          // los diez a la vista
+  window[salida]('x');
+  out.tapa[salida] = inputs.map(i => i.type);
+}
+// pwTapar: el mismo tapar, con nombre, para los bloques que se vuelven a mostrar sin cambiar de
+// pantalla (#fp_step2, #tl_pwd_wrap, el <details> de la StringSession).
+clic();                            // los diez a la vista
+out.expuesta = typeof window.pwTapar === 'function';
+if (out.expuesta) window.pwTapar();
+out.tras_pwtapar = inputs.map(i => i.type);
+// EL MODAL. #eu_pw nace cuando se abre «Editar usuario», o sea después de la carga: el
+// recorrido inicial no lo ve. Aquí se engancha un nodo con un campo secreto dentro, se
+// destapa, y se QUITA del documento — que es lo que hace `ov.remove()` al cerrar el modal.
+out.modal = { engancha: typeof window.pwEnganchar === 'function' };
+if (out.modal.engancha) {
+  const ov = new El('div');
+  const mp = new El('input'); mp.id = 'eu_pw'; mp.type = 'password'; mp.value = 'clave-nueva';
+  ov.appendChild(mp); raiz.appendChild(ov);
+  window.pwEnganchar(ov);
+  const mb = ojo(mp);
+  out.modal.tiene_ojo = !!mb;
+  out.modal.aria = mb ? mb.getAttribute('aria-label') : null;
+  out.modal.no_re_envuelve = inputs.every(i => i.parentNode.children
+                                                  .filter(e => e.tagName === 'BUTTON').length === 1);
+  if (mb) mb.onclick();
+  out.modal.destapado = mp.type;
+  clic();                          // y los diez de la página también a la vista
+  raiz._quitar(ov); ov.parentNode = null;   // se cierra el modal
+  window.pwTapar();
+  // EL VECTOR: los diez siguen tapándose. Es exactamente lo que la poda rompió la primera
+  // vez, y sin esta línea el arnes no habría notado nada.
+  out.modal.los_diez = inputs.map(i => i.type);
+  // Y el del modal ya no está en la lista: nadie toca un nodo que no está en el documento.
+  out.modal.el_del_modal = mp.type;
+}
+clic(); window.pwTapar();          // se deja el DOM tapado para lo que sigue
+const antes = llamadas.length;
+ojo(inputs[0]).onclick();
+out.clic_no_envia = llamadas.length === antes;
+ojo(inputs[0]).onclick();          // y se queda tapado otra vez
+clic();                            // los diez destapados justo antes de entrar
+const r = window.doLogin();
+out.login = { dentro: visto, al_lanzar: inputs.map(i => i.type) };
+Promise.resolve(r).then(() => {
+  out.login.al_terminar = inputs.map(i => i.type);
+  out.llamadas = llamadas;
+  process.stdout.write(JSON.stringify(out) + '\n');
+});
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "sin node no se puede ejecutar el JS del panel")
+class PasswordRevealDomTests(unittest.TestCase):
+    """Ejecuta el bloque del ojo (el que sirve la Lambda, recortado sin tocarlo) contra un DOM
+    mínimo en node y comprueba el COMPORTAMIENTO: el botón que aparece en cada campo, su type y
+    el aria-label al alternar. Nada de eso se puede leer en el HTML: ahí solo está el JS.
+    Los campos no son inventados: ids y vecinos salen de parsear la página servida.
+    Si falta node la clase se salta entera; el suelo lo cubre PasswordRevealTests (Python puro)."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ["ADMIN_USER"] = "admin"
+        os.environ["ADMIN_PASSWORD"] = "secret123"
+        admin.config = FakeConfig()
+        admin.subscribers = FakeSubs()
+        pagina = _panel_html()
+        campos = _campos_password(pagina)
+        cls.ids = [c["id"] for c in campos]
+        entrada = json.dumps({"campos": campos, "bloque": _bloque_del_ojo(pagina)})
+        with tempfile.TemporaryDirectory() as tmp:
+            # .cjs: el bloque es un script de navegador, no un módulo ES (con .js, un package.json
+            # con "type":"module" en cualquier carpeta de arriba lo rompería).
+            arnes = os.path.join(tmp, "arnes.cjs")
+            datos = os.path.join(tmp, "entrada.json")
+            with open(arnes, "w", encoding="utf-8") as fh:
+                fh.write(_ARNES_OJO)
+            with open(datos, "w", encoding="utf-8") as fh:
+                fh.write(entrada)
+            proc = subprocess.run(["node", arnes, datos], capture_output=True, text=True,
+                                  encoding="utf-8", timeout=60)
+        # Si el arnés no llega a ejecutar, la clase FALLA: saltarla sería dejar de medir sin avisar.
+        if proc.returncode != 0 or not proc.stdout.strip():
+            raise AssertionError("el arnés no ejecutó el bloque: " + (proc.stderr or "sin salida")[:800])
+        cls.dom = json.loads(proc.stdout.strip().splitlines()[-1])
+
+    @classmethod
+    def tearDownClass(cls):
+        admin.config = admin.subscribers = None
+        os.environ.pop("ADMIN_USER", None)
+        os.environ.pop("ADMIN_PASSWORD", None)
+
+    def test_los_diez_campos_acaban_con_su_ojo_dentro(self):
+        campos = self.dom["inicial"]
+        self.assertEqual([c["id"] for c in campos], self.ids)
+        self.assertEqual(len(campos), 10)
+        # Diez, contados: «al menos uno» dejaría pasar justo el fallo que importa (un campo suelto
+        # que se quedó sin ojo).
+        self.assertEqual(sum(1 for c in campos if c["boton"]), 10)
+        for c in campos:
+            self.assertTrue(c["envuelto"], c["id"])           # el input queda DENTRO del <span class="pw">
+            self.assertEqual(c["boton"]["clase"], "pw-ojo", c["id"])
+            self.assertTrue(c["boton"]["svg"], c["id"])        # icono, no un emoji que cambia de tamaño
+            self.assertEqual(c["tipo"], "password", c["id"])   # y arranca tapado
+
+    def test_cada_ojo_es_un_boton_type_button(self):
+        # Un <button> sin type es un submit: el día que el acceso vaya dentro de un <form> (lo
+        # normal para que los gestores de contraseñas lo reconozcan), el ojo haría de «Entrar».
+        for c in self.dom["inicial"]:
+            self.assertIsNotNone(c["boton"], c["id"])
+            self.assertEqual(c["boton"]["tag"], "BUTTON", c["id"])
+            self.assertEqual(c["boton"]["type"], "button", c["id"])
+
+    def test_el_aria_label_y_el_icono_cambian_con_el_estado(self):
+        # Un botón que no dice en qué estado está no sirve con lector de pantalla: se oiría
+        # «mostrar la contraseña» con la contraseña ya a la vista.
+        for antes, uno, dos in zip(self.dom["inicial"], self.dom["tras_un_clic"],
+                                   self.dom["tras_dos_clics"]):
+            self.assertTrue(antes["boton"]["aria"].startswith("Mostrar "), antes["id"])
+            self.assertEqual(antes["boton"]["title"], antes["boton"]["aria"], antes["id"])
+            self.assertFalse(antes["boton"]["tachado"], antes["id"])
+            self.assertEqual(uno["tipo"], "text", uno["id"])
+            self.assertTrue(uno["boton"]["aria"].startswith("Ocultar "), uno["id"])
+            self.assertEqual(uno["boton"]["title"], uno["boton"]["aria"], uno["id"])
+            self.assertTrue(uno["boton"]["tachado"], uno["id"])       # el icono cambia con la etiqueta
+            self.assertEqual(dos["tipo"], "password", dos["id"])      # y vuelve a tapar
+            self.assertEqual(dos["boton"]["aria"], antes["boton"]["aria"], dos["id"])
+            self.assertEqual(dos["valor"], antes["valor"], dos["id"])   # alternar no pierde lo escrito
+
+    def test_a_un_token_no_se_le_llama_contrasena(self):
+        # Cuatro de los diez no guardan la contraseña de la persona, sino un secreto que se PEGA.
+        # Decirle «la contraseña» a un token, al lector de pantalla, es mentirle.
+        nombres = {"bot_token": "el token", "whatsapp_token": "el token",
+                   "resend_api_key": "la clave", "telethon_session": "la sesión"}
+        for c in self.dom["inicial"]:
+            self.assertEqual(c["boton"]["aria"],
+                             "Mostrar " + nombres.get(c["id"], "la contraseña"), c["id"])
+        # tl_password sí es la contraseña de la persona (verificación en 2 pasos de Telegram).
+        self.assertNotIn("tl_password", nombres)
+
+    def test_ningun_cambio_de_pantalla_hereda_una_contrasena_a_la_vista(self):
+        # Una contraseña destapada que sobrevive a una navegación se queda a la vista de quien pase
+        # por detrás — y en el acceso, sin que nadie haya entrado siquiera.
+        self.assertEqual(sorted(self.dom["tapa"]), ["fpToggle", "logout", "showSub", "showTab"])
+        for salida, tipos in self.dom["tapa"].items():
+            self.assertEqual(tipos, ["password"] * len(self.ids), salida)
+
+    def test_el_acceso_tapa_ANTES_de_llamar_no_al_asentarse_la_promesa(self):
+        # Con el ojo abierto y Enter pulsado, doLogin espera a /api/me: uno a tres segundos, más con
+        # la Lambda fría y más aún si cae en el bloqueo por intentos. Taparlo en el .finally() dejaba
+        # la contraseña EN CLARO toda esa espera; se mide DENTRO de doLogin, no al volver.
+        self.assertEqual(self.dom["login"]["dentro"]["tipos"], ["password"] * len(self.ids))
+        # Y enmascarar no le quita la credencial: sigue leyendo el valor (cambiar el type no borra).
+        self.assertEqual(self.dom["login"]["dentro"]["valor"], "valor-lp")
+        self.assertEqual(self.dom["login"]["al_lanzar"], ["password"] * len(self.ids))
+        self.assertEqual(self.dom["login"]["al_terminar"], ["password"] * len(self.ids))
+        self.assertIn("doLogin", self.dom["llamadas"])   # y la original se sigue llamando
+
+    def test_el_mismo_tapar_se_puede_llamar_por_nombre_desde_fuera(self):
+        # Los bloques de secretos que se ocultan y se vuelven a mostrar sin cambiar de pantalla no
+        # los cubre ninguna de las cinco envueltas: necesitan llamarlo, no otra copia del recorrido.
+        self.assertTrue(self.dom["expuesta"])
+        self.assertEqual(self.dom["tras_pwtapar"], ["password"] * len(self.ids))
+
+    def test_un_campo_que_nace_en_un_modal_tambien_lleva_ojo(self):
+        # #eu_pw («Editar usuario») nace al abrir el modal, o sea después de la carga: el
+        # recorrido inicial no lo ve. Sin el enganche, un admin veía el ojo en «Crear
+        # usuario» y no lo veía al editar, en el mismo panel y a dos clics.
+        m = self.dom["modal"]
+        self.assertTrue(m["engancha"], "pwEnganchar no está expuesta")
+        self.assertTrue(m["tiene_ojo"])
+        # Es la contraseña de una persona, no un token: el nombre tiene que decir eso.
+        self.assertEqual(m["aria"], "Mostrar la contraseña")
+        self.assertEqual(m["destapado"], "text")
+        # Y el vector: se engancha con la raíz ACOTADA al modal. Con `document` se
+        # re-envolverían los diez de la página y quedarían dos ojos en cada campo.
+        self.assertTrue(m["no_re_envuelve"], "hay un campo con dos ojos")
+
+    def test_cerrar_un_modal_no_deja_tuerto_al_resto_del_panel(self):
+        # Los campos de un modal se DESTRUYEN al cerrarlo, así que `tapar()` los poda por
+        # `isConnected`. Si esa poda se pasa de larga se lleva la lista entera y el panel
+        # deja de taparse del todo — pasó al escribirla, y esto es lo que lo cazó.
+        m = self.dom["modal"]
+        self.assertEqual(m["los_diez"], ["password"] * len(self.ids))
+        # Y el del modal ya no está en la lista: nadie toca un nodo fuera del documento.
+        self.assertEqual(m["el_del_modal"], "text")
+
+    def test_pulsar_el_ojo_del_acceso_no_intenta_entrar(self):
+        self.assertTrue(self.dom["clic_no_envia"])
+
+    def test_la_etiqueta_no_se_queda_sin_su_campo(self):
+        # a11yEnhance (M28) empareja <label> y campo por nextElementSibling: al envolver el input
+        # en el <span> la etiqueta deja de ser su hermana, así que el for se pone ANTES de mover.
+        etiquetas = self.dom["etiquetas"]
+        for id_ in self.ids:
+            if id_ == "telethon_session":
+                continue
+            self.assertEqual(etiquetas[id_]["tag"], "LABEL", id_)
+            self.assertEqual(etiquetas[id_]["for"], id_, id_)
+            self.assertFalse(etiquetas[id_]["aun_hermano"], id_)   # ya no lo es: de ahí el for
+        # A este el vecino es el <summary> del <details>: no se le inventa una etiqueta.
+        self.assertEqual(etiquetas["telethon_session"]["tag"], "SUMMARY")
+        self.assertIsNone(etiquetas["telethon_session"]["for"])
 
 if __name__ == "__main__":
     unittest.main()

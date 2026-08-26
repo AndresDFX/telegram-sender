@@ -238,7 +238,8 @@ teléfono donde está WhatsApp: **Ajustes → 🔌 Conexiones → Vincular Whats
    `Service-Worker-Allowed` y `cache-control: no-cache`) y para `/icon-192.png`, `/icon-512.png`,
    `/icon-maskable-512.png`, `/apple-touch-icon.png` (**200 `image/png`**).
    ✅ `<AdminUrl>/api/config` sin auth sigue dando **401** (la PWA no abrió ningún hueco).
-2. **Instalar**: en Chrome/Edge (Android o escritorio) aparece **⬇ Instalar app** → instala y abre en
+2. **Instalar**: en Chrome/Edge (Android o escritorio), **ya dentro del panel** (el botón vive en el
+   header; la pantalla de acceso no lo tiene), aparece el **📲** (rótulo «Instalar Replica como app») → instala y abre en
    ventana propia sin barra del navegador; ✅ una vez instalada el botón **desaparece**. En iOS/Safari el
    botón muestra las instrucciones de *Compartir → Añadir a pantalla de inicio* (iOS no expone el
    evento de instalación).

@@ -2251,7 +2251,7 @@ header,.nav{-webkit-backdrop-filter:blur(16px) saturate(150%)}
 .upd-bar[hidden]{display:none}
 .upd-bar button{padding:7px 14px;font-size:12.5px}
 /* Ya instalada: no tiene sentido ofrecer "instalar" dentro de la propia app. */
-html.pwa #install_btn,html.pwa #install_login{display:none!important}
+html.pwa #install_btn{display:none!important}
 /* Sin conexión los indicadores "en vivo" dejan de latir: si no hay red, no están en vivo. */
 html.offline .live.on .ping,html.offline .sqs-strip.hot .ping{animation:none;opacity:.45;box-shadow:none}
 /* Enlace de salto: solo visible al tabular (accesibilidad de teclado). */
@@ -2373,6 +2373,37 @@ html[data-theme="light"] .wa-code{color:var(--ok-tint)}
 .blk-row{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--bd)}
 .blk-row:last-child{border-bottom:none}
 .blk-who{flex:1;min-width:0;overflow-wrap:anywhere}
+/* ── Ver la contraseña: el ojo va DENTRO del campo (lo engancha el JS del final) ────────── */
+/* .pw envuelve al input sin moverlo ni cambiar su ancho: el input pasa a display:block y su caja
+   sigue midiendo y ocupando lo mismo (la línea en la que estaba ya medía justo su altura, porque
+   su base de texto cae muy por debajo del interlineado del contenedor). */
+.pw{position:relative;display:block}
+/* El padding derecho reserva el hueco del ojo: sin él, un valor largo (un StringSession) pasa POR
+   DEBAJO del icono y no se puede leer su final — que es justo lo que se quiere comprobar al pegarlo. */
+.pw>input{display:block;padding-right:44px}
+/* Edge añade su PROPIO ojo nativo en los campos de contraseña: sin esto salen los dos, el nativo
+   pegado al nuestro, y además el nativo no se entera de que este botón ya cambió el type. */
+.pw>input::-ms-reveal{display:none}
+/* Sin relleno ni borde: dentro del campo, el botón naranja de serie —o un .ghost, que trae borde—
+   parecería otro campo anidado. Toma el gris apagado del texto y solo se aclara al pasar por encima. */
+.pw>.pw-ojo{position:absolute;top:1px;right:1px;bottom:1px;width:42px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  background:none;border:0;border-radius:0 var(--r-sm) var(--r-sm) 0;
+  color:var(--mut);cursor:pointer;transition:color .15s,background .15s}
+.pw>.pw-ojo:hover{color:var(--tx2);background:var(--ov2);filter:none;box-shadow:none}
+.pw>.pw-ojo:active{transform:none}   /* el translateY(1px) de los botones haría saltar el icono dentro del campo */
+/* Mismo anillo de foco naranja del sistema, pero hacia DENTRO: con el outline-offset:2px de
+   button:focus-visible se saldría del campo y el borde redondeado lo recortaría. */
+.pw>.pw-ojo:focus-visible{outline:2px solid var(--ac);outline-offset:-3px}
+.pw>.pw-ojo svg{width:18px;height:18px;display:block;pointer-events:none}
+@media (max-width:620px){
+  /* En pantalla estrecha el ojo se ensancha a 46px. El ALTO no lo pone esto: lo manda el campo,
+     que con la fuente de 16px que evita el zoom de iOS mide ~43-44 — así que el objetivo táctil
+     acaba siendo 46x43, no 46x46. Se dice porque 44x44 es el suelo que piden las guías y esto
+     lo roza por abajo: si alguien sube ese suelo, hay que crecer el CAMPO, no el botón. */
+  .pw>input{padding-right:50px}
+  .pw>.pw-ojo{width:46px}
+}
 </style></head><body>
 <!-- Iconos de marca reutilizables (Telegram / WhatsApp) para mostrar junto a la info de cada canal. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -2403,10 +2434,6 @@ html[data-theme="light"] .wa-code{color:var(--ok-tint)}
       <button style="width:100%;margin-top:8px" onclick="fpReset()">Restablecer contraseña</button>
     </div>
     <div class="hint" id="fp_status" style="margin-top:8px"></div>
-  </div>
-  <div id="install_login" hidden style="margin-top:14px;border-top:1px solid var(--bd);padding-top:13px">
-    <button class="sec" style="width:100%" onclick="pwaInstalar()">📲 Instalar Replica en este dispositivo</button>
-    <div class="hint" style="margin-top:7px;text-align:center">Se abre como app: pantalla completa, icono propio y arranque instantáneo.</div>
   </div>
 </div></div>
 
@@ -2513,7 +2540,11 @@ html[data-theme="light"] .wa-code{color:var(--ok-tint)}
      <button id="tl_confirm" onclick="tlSignIn()" style="margin-top:8px">Confirmar y conectar</button>
      <span id="tl_status" class="hint" style="margin-left:10px"></span>
    </div>
-   <details style="margin-top:14px">
+   <!-- ontoggle: cerrar el <details> creyendo que así se guarda no tapa nada; al volver a abrirlo
+        la StringSession destapada seguía entera a la vista, y su valor solo se borra en
+        saveAccount(). Es el secreto que da acceso TOTAL a la cuenta, así que al abrir o cerrar se
+        vuelve a tapar. -->
+   <details style="margin-top:14px" ontoggle="if(window.pwTapar)pwTapar()">
      <summary class="hint" style="cursor:pointer;font-weight:700">Avanzado: pegar StringSession</summary>
      <input id="telethon_session" type="password" placeholder="(pega para unir/cambiar la cuenta)" style="margin-top:8px">
      <div class="hint">Alternativa manual: genérala con <code>scripts/generar_sesion.py</code>. Da acceso total a esa cuenta: trátala como secreto.</div>
@@ -2974,6 +3005,12 @@ function dsModal(o){ o=o||{}; return new Promise(resolve=>{
     '<button class="'+(o.danger?'danger':'')+'" data-a="k">'+bcEsc(o.okText||'Aceptar')+'</button></div>';
   d.setAttribute('aria-labelledby','ds_modal_title');
   ov.appendChild(d); document.body.appendChild(ov);
+  // El ojo de los campos secretos que nazcan aquí (#eu_pw en «Editar usuario»): el bloque
+  // del final del script solo ve el DOM de la carga, y este nodo no existía entonces. Se
+  // pasa `d` como raíz para no re-envolver los diez de la página. Y va ANTES del foco de
+  // abajo: envolver mueve el input dentro de un <span>, y hacerlo con el foco puesto lo
+  // perdería.
+  if(window.pwEnganchar) pwEnganchar(d);
   // UX-fix: al abrir, enfocar el input o (si no hay) el botón primario — accesible por teclado.
   const inp=d.querySelector('#ds_modal_input'); setTimeout(()=>{ (inp||d.querySelector('[data-a="k"]')).focus(); },40);
   const no=o.input?null:(o.noCancel?true:false);
@@ -3030,6 +3067,10 @@ async function doLogin(){ const u=$('lu').value, p=$('lp').value; CRED=btoa(u+':
 function logout(){ sessionStorage.removeItem('cred'); CRED='';
   // M39: detener TODOS los polls (si no, CONN_TIMER y otros siguen vivos tras salir).
   try{ [BC_TIMER,Q_TIMER,PL_TIMER,CONN_TIMER].forEach(t=>{ if(t) clearInterval(t); }); BC_TIMER=Q_TIMER=PL_TIMER=CONN_TIMER=null; }catch(e){}
+  // Vaciar el acceso: volver a tapar el campo esconde el estado, no quita el secreto. El valor
+  // sobrevivía a la salida, así que con el ojo el siguiente en sentarse podía LEER la contraseña
+  // de quien acababa de salir; y con el usuario también puesto, entrar otra vez pulsando Enter.
+  try{ $('lu').value=''; $('lp').value=''; }catch(e){}
   $('app').style.display='none'; $('login').style.display='flex'; }
 // --- recuperación de contraseña (público, sin sesión) ---
 function fpToggle(){ const b=$('fp_box'); b.style.display = b.style.display==='none'?'block':'none'; }
@@ -3037,6 +3078,10 @@ async function fpSend(){
   const u=$('fp_user').value.trim(); if(!u){ $('fp_status').textContent='Indica tu usuario o correo.'; return; }
   $('fp_status').textContent='Enviando…';
   try{ await fetch(BASE+'/api/auth/forgot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u})}); }catch(e){}
+  // El paso 2 vuelve a aparecer con lo que quedara dentro: si la vez anterior se dejó #fp_new
+  // destapado, la contraseña nueva se vería EN CLARO sin que nadie toque el ojo (y pedir otro
+  // código es lo normal cuando el primero no llega). Tapar antes de mostrar, no después.
+  if(window.pwTapar) pwTapar();
   $('fp_step2').style.display='block';
   $('fp_status').textContent='Si el usuario existe, enviamos un código al correo registrado. Revisa tu bandeja.';
 }
@@ -3046,7 +3091,11 @@ async function fpReset(){
   try{
     const r=await fetch(BASE+'/api/auth/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,code:code,new:nw})});
     const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status));
+    // Se vacía y se tapa aquí, en el único punto donde la contraseña nueva ya no hace falta (en la
+    // rama de error NO: ahí sigue siendo lo que la persona está escribiendo). Si se queda dentro,
+    // pedir otro código la vuelve a mostrar: fpSend solo hace display:block, no limpia nada.
     $('fp_status').textContent='✅ Contraseña actualizada. Ya puedes iniciar sesión.'; $('fp_step2').style.display='none';
+    $('fp_new').value=''; $('fp_code').value=''; if(window.pwTapar) pwTapar();
   }catch(e){ $('fp_status').textContent=e.message||'No se pudo restablecer.'; }
 }
 // --- usuarios del panel (solo administradores) ---
@@ -3451,7 +3500,10 @@ async function tlSignIn(){
   try{
     const r=await fetch(BASE+'/api/telethon/sign-in',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify(body)});
     const j=await r.json().catch(()=>({})); if(!r.ok) throw new Error(j.error||('error '+r.status));
-    if(j.needs_password){ $('tl_pwd_wrap').style.display='block'; $('tl_status').textContent='Esta cuenta tiene verificación en dos pasos: ingresa tu contraseña y confirma de nuevo.'; toast('Ingresa tu contraseña 2FA','warn'); return; }
+    // Mismo caso que #fp_step2: el wrap se vuelve a mostrar tal como quedó, y si la vez anterior
+    // se destapó la contraseña de la 2FA reaparece en claro sola (su valor solo lo borra la rama
+    // de conectado, en la línea siguiente).
+    if(j.needs_password){ if(window.pwTapar) pwTapar(); $('tl_pwd_wrap').style.display='block'; $('tl_status').textContent='Esta cuenta tiene verificación en dos pasos: ingresa tu contraseña y confirma de nuevo.'; toast('Ingresa tu contraseña 2FA','warn'); return; }
     if(j.connected){ $('tl_status').textContent='✅ Conectado'+(j.me&&j.me.username?(' como @'+j.me.username):''); toast('✓ Cuenta conectada'); $('tl_code').value=''; $('tl_password').value=''; $('tl_step2').style.display='none'; loadCfg(); loadSubs(); }
   }catch(e){ toast(e.message||'No se pudo iniciar sesión',true); $('tl_status').textContent=e.message||''; }
   finally{ $('tl_confirm').disabled=false; }
@@ -3827,6 +3879,10 @@ function listMembers(ch,i){
     '<div class="ds-modal-body" id="lm_body">'+rows()+'</div>'+
     '<div class="ds-modal-actions"><button class="ghost" data-a="orphan">Limpiar huérfanos</button><button data-a="close">Cerrar</button></div>';
   ov.appendChild(d); document.body.appendChild(ov);
+  // Igual que en `dsModal`: este modal se arma a mano y hoy no tiene ningún campo secreto,
+  // pero el enganche va aquí y no en una nota que pida acordarse. Son los DOS únicos sitios
+  // del panel que meten un modal en el documento.
+  if(window.pwEnganchar) pwEnganchar(d);
   const refresh=()=>{ const b=$('lm_body'); if(b) b.innerHTML=rows(); const h=$('lm_h'); if(h) h.textContent=head(); renderLists(ch); };
   const close=()=>{ document.removeEventListener('keydown',onKey); ov.remove(); };
   function onKey(e){ if(e.key==='Escape') close(); }
@@ -4786,13 +4842,18 @@ function plStartPolling(){
       if(b.dataset.tab===t) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); }); };
 
   /* --- Instalación. Chrome/Edge/Android disparan beforeinstallprompt; Safari/iOS no lo implementa
-         y allí lo único posible es explicar el gesto (Compartir → Añadir a pantalla de inicio). --- */
+         y allí lo único posible es explicar el gesto (Compartir → Añadir a pantalla de inicio).
+         El único botón de instalar es el 📲 del header (#install_btn), ya dentro del panel: el de
+         la pantalla de acceso se quitó por petición del usuario. Ojo: beforeinstallprompt suele
+         llegar ANTES de entrar, con #app aún en display:none — verInstalar(true) no destapa nada
+         visible ahí, pero guarda PROMPT; sin eso el primer clic al 📲 caería en el modal de
+         instrucciones aunque el navegador sí supiera instalar. --- */
   const instalada = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone===true;
   if(instalada()) H.classList.add('pwa');
   const iOS = /iP(hone|od|ad)/.test(navigator.platform||'') || /iPhone|iPad|iPod/.test(navigator.userAgent)
               || (/Mac/.test(navigator.platform||'') && navigator.maxTouchPoints>1);   // iPad se anuncia como Mac
   let PROMPT = null;
-  const verInstalar = v => ['install_btn','install_login'].forEach(id => { const e=$(id); if(e) e.hidden = !v; });
+  const verInstalar = v => { const e = $('install_btn'); if(e) e.hidden = !v; };
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); PROMPT = e; verInstalar(true); });
   window.addEventListener('appinstalled', () => { PROMPT = null; verInstalar(false); toast('✓ Replica instalada'); });
   window.pwaInstalar = async function(){
@@ -4864,6 +4925,101 @@ function plStartPolling(){
   // comprueba al instante en vez de esperar hasta 3 s al siguiente tick.
   document.addEventListener('visibilitychange', () => {
     if(!document.hidden && typeof WA_POLL!=='undefined' && WA_POLL) waSondear();
+  });
+})();
+/* --- Ver la contraseña: un ojo DENTRO de cada campo secreto. --------------------------------
+   Se engancha desde aquí en vez de escribir el mismo HTML campo por campo: el patrón (icono,
+   aria-label y, sobre todo, el volver a tapar) vive UNA sola vez, así que no hay copias que se
+   desincronicen ni un campo nuevo que se quede sin ojo. Va al final del script, tras la capa
+   PWA, para envolver la versión de showTab que ella ya había reemplazado.
+
+   ALCANCE: los input[type=password] de la página al cargar, MÁS los que nazcan dentro de un
+   modal. A los segundos no los ve `querySelectorAll`, porque el modal se crea después: los
+   enganchan los DOS sitios que meten un modal en el documento, llamando a `pwEnganchar(d)`.
+   El caso real es #eu_pw («Editar usuario»): sin ese enganche un admin veía el ojo en
+   «Crear usuario» y no lo veía al editar, a dos clics. ---------------------------------- */
+(function(){
+  const OJO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const OJO_NO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>';
+  /* Cuatro de estos campos NO guardan la contraseña de la persona, sino un secreto que se PEGA
+     (token del bot, token del servicio, clave de Resend, StringSession). El ojo hace ahí más
+     falta todavía — es la única forma de ver si el pegado entró entero, sin recortes ni un
+     espacio delante, porque el panel devuelve estos valores enmascarados y el fallo aparece
+     luego como un error del proveedor que no se entiende. Lo que cambia es el nombre: decirle
+     «la contraseña» a un token, al lector de pantalla, es mentirle. */
+  const QUE = {bot_token:'el token', whatsapp_token:'el token', resend_api_key:'la clave', telethon_session:'la sesión'};
+  const PARES = [];
+  function pintar(inp, b, ver){
+    inp.type = ver ? 'text' : 'password';
+    b.innerHTML = ver ? OJO_NO : OJO;
+    // El icono y el nombre cambian juntos: un botón que no dice en qué estado está no sirve con
+    // lector de pantalla (se oye «mostrar» con la contraseña ya a la vista).
+    const tx = (ver ? 'Ocultar ' : 'Mostrar ') + (QUE[inp.id] || 'la contraseña');
+    b.setAttribute('aria-label', tx); b.title = tx;
+  }
+  function enganchar(raiz){
+  (raiz || document).querySelectorAll('input[type=password]').forEach(inp => {
+    // M28 (a11yEnhance) empareja <label> y campo por nextElementSibling: al meter el <span> en
+    // medio dejaría de encontrarlo y el campo se quedaría SIN etiqueta. Se empareja aquí antes
+    // de envolverlo, que es el último momento en que la etiqueta sigue siendo hermana del input.
+    const lb = inp.previousElementSibling;
+    if(lb && lb.tagName === 'LABEL' && !lb.htmlFor && inp.id) lb.htmlFor = inp.id;
+    // El <span> envuelve al input sin cambiar su id ni su valor: todo el panel los busca por id
+    // ($('lp').value y compañía) y eso sigue funcionando igual.
+    const w = document.createElement('span'); w.className = 'pw';
+    inp.parentNode.insertBefore(w, inp); w.appendChild(inp);
+    // type="button" explícito: hoy el panel no tiene ningún <form>, pero un <button> sin type es
+    // un submit, y el día que alguien envuelva el acceso en un <form> (lo habitual para que los
+    // gestores de contraseñas lo reconozcan) el ojo haría de «Entrar».
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'pw-ojo';
+    b.onclick = () => pintar(inp, b, inp.type === 'password');
+    pintar(inp, b, false);
+    w.appendChild(b); PARES.push([inp, b]);
+  });
+  }
+  enganchar(document);
+  /* Volver a tapar. Una contraseña destapada que sobrevive a un cambio de pantalla se queda a la
+     vista de cualquiera que pase por detrás — y en la de acceso, sin que nadie haya entrado. Se
+     envuelven las funciones que cambian de pantalla, en vez de repetir la llamada dentro de cada
+     una y olvidarla en la siguiente. */
+  // La poda no es aseo: los campos de un modal se DESTRUYEN al cerrarlo (`ov.remove()`), y
+  // «Editar usuario» se abre una vez por usuario. Sin esto PARES solo crecería, con pares
+  // apuntando a nodos que ya no existen — el navegador no podría liberarlos y `tapar()`
+  // recorrería una lista cada vez más larga para no hacer nada.
+  function tapar(){
+    for(let i = PARES.length - 1; i >= 0; i--){
+      const p = PARES[i];
+      if(!p[0].isConnected){ PARES.splice(i, 1); continue; }
+      if(p[0].type !== 'password') pintar(p[0], p[1], false);
+    }
+  }
+  /* Expuesta con nombre porque el «volver a tapar» no cabe solo en las funciones de navegación:
+     hay bloques de secretos que se ocultan y se vuelven a mostrar con display (#fp_step2,
+     #tl_pwd_wrap) o con un <details> (la StringSession) SIN cambiar de pantalla, y reaparecen tal
+     como quedaron. Esos sitios la llaman por nombre en vez de repetir el recorrido. */
+  window.pwTapar = tapar;
+  /* Y el enganche, para el HTML que nace después de la carga. Los dos sitios que crean un
+     modal lo llaman con su propio nodo como raíz: con la raíz acotada no se vuelven a
+     envolver los diez de la página, y envolver dos veces dejaría dos ojos en un campo. */
+  window.pwEnganchar = enganchar;
+  ['doLogin','logout','showTab','showSub','fpToggle'].forEach(n => {
+    const f = window[n]; if(typeof f !== 'function') return;
+    window[n] = function(){
+      // Se tapa ANTES de llamar. doLogin es async y espera a /api/me: uno a tres segundos, más con
+      // la Lambda fría y más aún si cae en el bloqueo por intentos (429) — y durante toda esa
+      // espera la contraseña se quedaba EN CLARO en pantalla, que es justo cuando la persona
+      // levanta la vista al mensaje. Enmascarar no le quita la credencial: doLogin lee
+      // $('lp').value en su primera línea, que corre después de esto, y cambiar el type no borra
+      // el valor. Y si algún día el acceso va dentro de un <form>, enviarlo en type=text hace que
+      // el navegador lo trate como campo de texto normal (historial de formularios, no gestor).
+      tapar();
+      const r = f.apply(this, arguments);
+      // Cinturón al terminar: hoy ninguna de las cinco vuelve a destapar nada al acabar, así que
+      // esto no cambia lo que se ve; se queda para el día en que se envuelva una que sí repinte,
+      // porque el tapar() de arriba no la cubriría.
+      if(r && typeof r.finally === 'function') return r.finally(tapar);
+      tapar(); return r;
+    };
   });
 })();
 </script></body></html>"""

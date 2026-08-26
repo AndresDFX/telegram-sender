@@ -15,15 +15,16 @@ enviarlas a sus contactos y programar envíos — sin tocar nada de la configura
 El panel es una **app instalable**: queda con su ícono en tu teléfono o escritorio y abre a pantalla
 completa, sin la barra del navegador.
 
-- **Android / Chrome / Edge:** entra al panel y toca **⬇ Instalar app** (arriba a la derecha, o en la
-  pantalla de ingreso). Si no aparece, usa el menú **⋮ → Instalar aplicación / Añadir a pantalla de inicio**.
+- **Android / Chrome / Edge:** entra al panel y toca el **📲** de arriba a la derecha (dentro del
+  panel: no está en la pantalla de ingreso). Si no aparece —o si aún no has entrado— usa el menú
+  **⋮ → Instalar aplicación / Añadir a pantalla de inicio**.
 - **iPhone / iPad (Safari):** toca **Compartir** (el cuadrito con la flecha ↑) → **Añadir a pantalla de
-  inicio**. El botón ⬇ del panel te muestra estos mismos pasos, porque iOS no permite instalar solo.
-- **Computador (Chrome/Edge):** el mismo botón ⬇, o el icono de instalar en la barra de direcciones.
+  inicio**. El **📲** del panel te muestra estos mismos pasos, porque iOS no permite instalar solo.
+- **Computador (Chrome/Edge):** el mismo **📲**, o el icono de instalar en la barra de direcciones.
 
 Otras dos cosas útiles:
 
-- **☀️/🌙 Tema claro u oscuro:** el botón junto a ⬇ alterna **automático → claro → oscuro** y recuerda
+- **☀️/🌙 Tema claro u oscuro:** el botón junto al **📲** alterna **automático → claro → oscuro** y recuerda
   tu elección. En *automático* sigue lo que tenga configurado tu teléfono.
 - **Aviso de versión nueva:** cuando se publica una mejora del panel aparece abajo «✨ Versión nueva».
   Actualiza cuando puedas: **recarga y te pedirá tu usuario y contraseña otra vez** (por seguridad la
@@ -220,7 +221,7 @@ estado EN PAUSA se ve en **ámbar**; el rojo se reserva solo para fallos):
 | "Sale 'EN PAUSA' (en ámbar) en 🏠 Inicio" | Es el estado del envío AUTOMÁTICO. Tus envíos manuales salen igual. |
 | "Sale 📴 Sin conexión" | No hay red (o el servidor no responde). Ves lo último cargado; espera y reintenta — los envíos no se pierden. |
 | "Me pide la contraseña otra vez" | Pasa al recargar o al actualizar a la versión nueva: la sesión vive solo mientras la app está abierta. |
-| "No veo el botón ⬇ Instalar app" | Ya la tienes instalada (ahí se oculta), o tu navegador no lo soporta: usa **⋮ → Instalar aplicación**, y en iPhone **Compartir → Añadir a pantalla de inicio**. |
+| "No veo el botón 📲 de instalar" | Ya la tienes instalada (ahí se oculta), o tu navegador no lo soporta: usa **⋮ → Instalar aplicación**, y en iPhone **Compartir → Añadir a pantalla de inicio**. |
 
 ## 12. Buenas prácticas
 
